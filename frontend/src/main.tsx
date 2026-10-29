@@ -16,6 +16,13 @@ if (SENTRY_DSN && SENTRY_DSN !== "SUA_DSN_DO_SENTRY_AQUI") {
   });
 }
 
+// Contra clickjacking: o portal não funciona dentro de iframe de outro site (a CSP por meta tag não cobre isso;
+// em produção, configure também o cabeçalho "Content-Security-Policy: frame-ancestors 'none'" no servidor web)
+if (window.top && window.top !== window.self) {
+  document.documentElement.innerHTML = '';
+  throw new Error('Esta aplicação não pode ser aberta dentro de outro site.');
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

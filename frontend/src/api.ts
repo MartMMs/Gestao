@@ -101,6 +101,7 @@ interface BackendAppointment {
   guests?: number;
   specialNeeds?: string[];
   observation?: string;
+  observacoesSaude?: string | null;
   assignedEmployeeId?: string;
   colaboradorId?: string;
   status?: 'scheduled' | 'completed' | 'no_show' | 'cancelled';
@@ -122,6 +123,7 @@ interface BackendEmployee {
   cargo?: string;
   tipoEscala?: string;
   cargaHorariaSemanal?: number;
+  folgasDomingoNoMes?: number;
   habilidades?: string[];
   bloqueios?: Employee['bloqueios'];
 }
@@ -195,7 +197,8 @@ const normalizeAppointment = (appointment: BackendAppointment): Appointment => {
     time: appointment.time || brazilTime,
     guests: appointment.guests ?? 1,
     specialNeeds: appointment.specialNeeds ?? [],
-    observation: appointment.observation ?? '',
+    // O backend guarda as observações em observacoesSaude (protegidas pela regra da ficha de saúde)
+    observation: appointment.observation ?? appointment.observacoesSaude ?? '',
     assignedEmployeeId: appointment.assignedEmployeeId || appointment.colaboradorId || '',
     status: appointment.status || 'scheduled',
     version: appointment.atualizadoEm,
@@ -219,7 +222,7 @@ const normalizeEmployee = (employee: BackendEmployee): Employee => {
     diasTrabalho: employee.diasTrabalho || '1,2,3,4,5,6',
     cargo: employee.cargo || undefined,
     tipoEscala: (employee.tipoEscala as Employee['tipoEscala']) || undefined,
-    folgasDomingoNoMes: typeof (employee as any).folgasDomingoNoMes === 'number' ? (employee as any).folgasDomingoNoMes : undefined,
+    folgasDomingoNoMes: typeof employee.folgasDomingoNoMes === 'number' ? employee.folgasDomingoNoMes : undefined,
     cargaHorariaSemanal: typeof employee.cargaHorariaSemanal === 'number' ? employee.cargaHorariaSemanal : undefined,
     habilidades: Array.isArray(employee.habilidades) ? employee.habilidades : [],
     bloqueios: Array.isArray(employee.bloqueios) ? employee.bloqueios : [],

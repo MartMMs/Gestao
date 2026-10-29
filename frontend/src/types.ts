@@ -173,6 +173,8 @@ export interface AutoatendimentoConfig {
   instrucoesCheckin?: string;
   mensagemBoasVindas?: string;
   atualizadoEm?: string;
+  /** Há gateway de pagamento conectado no servidor. Sem ele, exigirPagamento fica guardado mas não cobra online. */
+  pagamentoOnlineDisponivel?: boolean;
 }
 
 export interface AutoatendimentoReservaSession {
@@ -197,6 +199,10 @@ export interface AutoatendimentoReservaSession {
   instrucoesCheckin?: string;
   tempoLockMinutos?: number;
   lockExpiresAt: number;
+  /** Código Pix "copia e cola" emitido pelo gateway do banco (ausente enquanto não houver integração) */
+  pixCopiaECola?: string;
+  /** O gateway aceita cartão (os dados vão direto para ele, nunca para este servidor) */
+  cartaoOnlineDisponivel?: boolean;
 }
 
 export interface Voucher {

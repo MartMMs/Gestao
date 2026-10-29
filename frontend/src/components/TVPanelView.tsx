@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Appointment, Employee } from '../types';
 import { getLocalTodayString } from '../features/appointments/utils/appointmentCore';
+import { readEnv } from '../config/env';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface TVPanelViewProps {
@@ -55,12 +56,15 @@ export function TVPanelView({ appointments, employees, onExit, companyName, comp
 
   // Busca o Clima automaticamente pela rede (Open-Meteo + IP-API)
   useEffect(() => {
+    // Coordenadas da clínica vêm da configuração do build. Antes a cidade era descoberta pelo IP (ipapi.co), o que
+    // mandava o IP público da clínica para um terceiro; sem coordenadas, o painel simplesmente não mostra o clima.
+    const latitude = Number(readEnv().VITE_TV_LATITUDE);
+    const longitude = Number(readEnv().VITE_TV_LONGITUDE);
+    if (!readEnv().VITE_TV_LATITUDE || !readEnv().VITE_TV_LONGITUDE || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
     const fetchWeather = async () => {
       try {
-        const geoRes = await fetch('https://ipapi.co/json/');
-        const geoData = await geoRes.json();
-        
-        const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${geoData.latitude}&longitude=${geoData.longitude}&current_weather=true`);
+        const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`);
         const weatherData = await weatherRes.json();
         
         const temp = Math.round(weatherData.current_weather.temperature);

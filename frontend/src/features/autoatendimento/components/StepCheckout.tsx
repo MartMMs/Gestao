@@ -36,7 +36,7 @@ export function StepCheckout({
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Cartão (Simulação)
+  // Cartão: só aparece quando o gateway aceita cartão (cartaoOnlineDisponivel)
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
   const [cardCvv, setCardCvv] = useState('');
@@ -65,10 +65,12 @@ export function StepCheckout({
   const timeFormatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   const progressPercent = Math.max(0, Math.min(100, (remainingSeconds / totalSeconds) * 100));
 
-  // Código Pix Copia e Cola dinâmico
-  const pixCode = `00020126580014br.gov.bcb.pix0136${reservation.sessionToken}520400005303986540${valorCobrado.toFixed(2)}5802BR5925SERENIDADE SPA RESORT6009SAO PAULO62070503***6304${reservation.sessionToken.slice(0, 4).toUpperCase()}`;
+  // O código Pix vem do gateway do banco; nunca é montado aqui (um código inventado é recusado pelo app do banco)
+  const pixCode = reservation.pixCopiaECola ?? null;
+  const cartaoDisponivel = reservation.cartaoOnlineDisponivel === true;
 
   const handleCopyPix = () => {
+    if (!pixCode) return;
     navigator.clipboard.writeText(pixCode);
     setCopiedPix(true);
     setTimeout(() => setCopiedPix(false), 3000);
@@ -92,6 +94,10 @@ export function StepCheckout({
 
   const handleProcessPayment = async () => {
     if (isProcessing) return;
+    if (reservation.exigirPagamento !== false && metodoPagamento === 'pix' && !pixCode) {
+      setError('O pagamento por Pix ainda não está disponível. Procure a recepção para concluir sua reserva.');
+      return;
+    }
     if (metodoPagamento === 'cartao' && !cartaoValido) {
       setError('Confira os dados do cartão: número, validade (MM/AA), CVV e nome impresso.');
       return;
@@ -314,6 +320,7 @@ export function StepCheckout({
                   <span>PIX Instantâneo</span>
                 </button>
 
+                {cartaoDisponivel && (
                 <button
                   type="button"
                   onClick={() => setMetodoPagamento('cartao')}
@@ -326,6 +333,7 @@ export function StepCheckout({
                   <span className="material-symbols-outlined text-[18px]">credit_card</span>
                   <span>Cartão</span>
                 </button>
+                )}
               </div>
             </div>
 
@@ -358,12 +366,13 @@ export function StepCheckout({
                 <input
                   type="text"
                   readOnly
-                  value={pixCode}
+                  value={pixCode ?? 'Código Pix indisponível no momento'}
                   className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 text-[11px] font-mono text-on-surface-variant truncate select-all"
                 />
                 <button
                   type="button"
                   onClick={handleCopyPix}
+                  disabled={!pixCode}
                   className="px-4 py-2.5 bg-primary/10 text-primary border border-primary/30 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary hover:text-on-primary transition-all shrink-0 flex items-center gap-1.5"
                 >
                   <span className="material-symbols-outlined text-[16px]">
@@ -376,7 +385,7 @@ export function StepCheckout({
               <div className="pt-2">
                 <button
                   type="button"
-                  disabled={isProcessing}
+                  disabled={isProcessing || !pixCode}
                   onClick={handleProcessPayment}
                   className="w-full py-3 rounded-xl font-bold text-xs uppercase tracking-[0.15em] bg-emerald-600 text-white hover:bg-emerald-700 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
@@ -403,7 +412,7 @@ export function StepCheckout({
         )}
 
         {/* Cartão de Crédito */}
-        {metodoPagamento === 'cartao' && (
+        {cartaoDisponivel && metodoPagamento === 'cartao' && (
           <div className="space-y-4 max-w-md">
             <div>
               <label className="block text-xs font-bold text-on-surface-variant mb-1">

@@ -5,7 +5,7 @@ import { config as ambiente } from '../env';
 import { usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { redisService } from '../services/redisService';
 import { communicationService } from '../services/communicationService';
-import { getAutoatendimentoConfig, getEmpresaConfig } from '../services/configService';
+import { comDisponibilidadePagamento, getAutoatendimentoConfig, getEmpresaConfig, pagamentoOnlineDisponivel } from '../services/configService';
 import {
   agendamentosDoDia,
   blocosDoIntervalo,
@@ -97,8 +97,10 @@ type ResultadoConfirmacao = {
 export function createAutoatendimentoRouter(eventos: Eventos) {
   const router = Router();
 
-  // Rate limit por IP para as rotas públicas
+  // Rate limit por IP para as rotas públicas. O webhook fica fora: o gateway chama de poucos IPs fixos e um 429
+  // faria confirmações de pagamento se perderem (ele é protegido pela assinatura HMAC com timestamp).
   router.use(async (req, res, next) => {
+    if (req.path === '/webhook-pagamento') return next();
     try {
       const ip = ipDoCliente(req);
       const check = await redisService.rateLimit(`ratelimit:autoatendimento:${ip}`, MAX_REQUISICOES_POR_MINUTO, 60);
@@ -121,7 +123,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
 
   router.get('/config', async (_req, res) => {
     try {
-      res.json(await getAutoatendimentoConfig());
+      res.json(comDisponibilidadePagamento(await getAutoatendimentoConfig()));
     } catch (error) {
       responderErro(res, error, 'Falha ao buscar configurações de autoatendimento.');
     }
@@ -132,9 +134,9 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       const dados = validarConfigAutoatendimento(req.body ?? {});
       await getAutoatendimentoConfig();
       const config = await prisma.configuracaoAutoatendimento.update({ where: { id: 'default' }, data: dados });
-      eventos.emitirConfigAutoatendimento(config);
+      eventos.emitirConfigAutoatendimento(comDisponibilidadePagamento(config));
       eventos.notificarMudanca();
-      res.json(config);
+      res.json(comDisponibilidadePagamento(config));
     } catch (error) {
       responderErro(res, error, 'Falha ao salvar configurações de autoatendimento.');
     }
@@ -302,7 +304,9 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         return res.status(409).json({ erro: 'Este horário acabou de ser selecionado por outro cliente. Por favor, escolha outro.' });
       }
 
-      const valorSinal = config.exigirPagamento
+      // Sem gateway conectado, nada é cobrado online (ver pagamentoOnlineDisponivel)
+      const cobraOnline = config.exigirPagamento && pagamentoOnlineDisponivel();
+      const valorSinal = cobraOnline
         ? Math.round(resumo.valorTotal * (config.percentualSinal / 100) * 100) / 100
         : 0;
       const lockExpiresAt = Date.now() + ttlSegundos * 1000;
@@ -323,7 +327,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         duracaoTotalSlot: resumo.duracaoTotalSlot,
         valorTotal: resumo.valorTotal,
         valorSinal,
-        exigirPagamento: config.exigirPagamento,
+        exigirPagamento: cobraOnline,
         percentualSinal: config.percentualSinal,
         instrucoesCheckin: config.instrucoesCheckin,
         tempoLockMinutos: Math.round(ttlSegundos / 60),
@@ -497,8 +501,23 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         where: { id: agendamentoId, statusPagamento: 'aguardando_pagamento' },
         data: { statusPagamento: tipo === 'integral' ? 'integral_pago' : 'sinal_pago' },
       });
-      if (atualizado.count > 0) eventos.notificarMudanca(ESCOPOS.reservaTotem);
-      res.json({ received: true, atualizado: atualizado.count > 0 });
+      if (atualizado.count > 0) {
+        eventos.notificarMudanca(ESCOPOS.reservaTotem);
+        return res.json({ received: true, atualizado: true });
+      }
+
+      // Pagamento depois que a reserva expirou (ou foi cancelada): o cliente pagou e ficou sem horário. Marca o
+      // agendamento para a recepção ver e devolver/remarcar, em vez de responder 200 sem deixar rastro.
+      const tardio = await prisma.agendamento.updateMany({
+        where: { id: agendamentoId, statusPagamento: 'expirado' },
+        data: { statusPagamento: 'pago_apos_expirar' },
+      });
+      if (tardio.count > 0) {
+        console.warn(`[PAGAMENTO] Pagamento recebido após a reserva expirar (agendamento ${agendamentoId}). Requer devolução ou remarcação.`);
+        eventos.notificarMudanca(ESCOPOS.reservaTotem);
+        eventos.avisarEquipe('pagamento_apos_expirar', { agendamentoId });
+      }
+      res.json({ received: true, atualizado: false, pagamentoTardio: tardio.count > 0 });
     } catch (error) {
       responderErro(res, error, 'Erro ao processar webhook.');
     }

@@ -32,6 +32,15 @@ export const horarioParaMinutos = (horario: string) => {
   return h * 60 + m;
 };
 
+// Bloqueio que cobre todo o expediente (da abertura ao fechamento): o profissional fica indisponível no dia
+export const bloqueioDiaInteiro = (bloqueio: { horaInicio: string; horaFim: string }) =>
+  horarioParaMinutos(bloqueio.horaInicio) <= HORA_ABERTURA * 60
+  && horarioParaMinutos(bloqueio.horaFim) >= HORA_FECHAMENTO * 60;
+
+// O minuto do dia cai dentro do bloqueio (início incluso, fim excluso)
+export const minutoDentroDoBloqueio = (minuto: number, bloqueio: { horaInicio: string; horaFim: string }) =>
+  minuto >= horarioParaMinutos(bloqueio.horaInicio) && minuto < horarioParaMinutos(bloqueio.horaFim);
+
 export const minutosParaHorario = (total: number) =>
   `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 

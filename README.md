@@ -103,10 +103,16 @@ Use um subdominio, nao um caminho (`app.x.com/autoatendimento`): so outra origem
 
 ## Pagamentos do autoatendimento
 
+O botao "exigir pagamento" do painel do totem so passa a cobrar online quando ha um gateway conectado
+(`PAYMENT_WEBHOOK_SECRET` configurado). Sem gateway, a reserva e confirmada com pagamento na recepcao e o painel avisa.
+O codigo Pix exibido ao cliente vem do gateway (campo `pixCopiaECola` da reserva); o totem nunca monta um codigo
+proprio, e o pagamento por cartao so aparece quando o gateway o oferecer (`cartaoOnlineDisponivel`).
+
 O totem nunca marca um agendamento como pago sozinho. Com pagamento online ativo, o agendamento
 fica `aguardando_pagamento` ate o gateway chamar `POST /api/autoatendimento/webhook-pagamento`
 com os cabecalhos `x-webhook-timestamp` (segundos) e `x-webhook-signature` (HMAC-SHA256 de `timestamp.corpo` com
-`PAYMENT_WEBHOOK_SECRET`). Chamadas com mais de 5 minutos ou com valor menor que o cobrado sao recusadas.
+`PAYMENT_WEBHOOK_SECRET`). Chamadas com mais de 5 minutos ou com valor menor que o cobrado sao recusadas. Um pagamento que chega depois de a
+reserva expirar marca o agendamento como `pago_apos_expirar` e avisa a equipe, para devolucao ou remarcacao.
 
 ## Validacao rapida
 
@@ -160,7 +166,5 @@ Atalhos locais (`Gestao-*.desktop`, tasks do VS Code) podem ser criados por cada
 ## Documentacao relacionada
 
 - `docs/RELEASE_NOTES_1.1.0-beta.1.md` - notas da versao atual
-- `docs/REFACTOR.md` - plano e status de refatoracao
-- `docs/REFACTOR_CODE.md` - referencias de implementacao
-- `docs/IMPLEMENTATION_CHECKLIST.md` - checklist de entrega
-- `docs/ESCALA_FEATURES.md` - escopo funcional de escalas
+- `docs/BACKLOG_ATIVO.md` - pendencias em aberto
+- `docs/arquivo/` - planos e checklists de fases anteriores (historico; nao refletem a estrutura atual)

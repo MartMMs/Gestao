@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Service, AutoatendimentoSlot, AutoatendimentoReservaSession } from '../../../types';
 import {
@@ -88,8 +88,12 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
     loadDisponibilidade(selectedDate);
   }, [selectedDate, activeServices]);
 
+  // Trava síncrona: o estado isLocking só muda no próximo render, e dois toques rápidos criariam duas reservas
+  const reservandoRef = useRef(false);
+
   const handleReserve = async () => {
-    if (!selectedSlot || !selectedSlot.disponivel || activeServices.length === 0) return;
+    if (reservandoRef.current || !selectedSlot || !selectedSlot.disponivel || activeServices.length === 0) return;
+    reservandoRef.current = true;
     setIsLocking(true);
     setError(null);
 
@@ -114,6 +118,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
       // Recarrega os slots para refletir a ocupação atualizada
       loadDisponibilidade(selectedDate);
     } finally {
+      reservandoRef.current = false;
       setIsLocking(false);
     }
   };

@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import { motion } from 'motion/react';
 import { Employee, Role, EmployeeUpdate } from '../../../types';
 import { useAuth } from '../../../AuthContext';
@@ -18,11 +19,8 @@ interface SupervisorEquipeTabProps {
   onViewEmployee?: (emp: Employee) => void;
 }
 
-const getTodayLocalDate = () => {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
-};
+// "Hoje" no fuso do negócio (Brasília), igual ao resto do sistema
+const getTodayLocalDate = getLocalTodayString;
 
 export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee, onEditEmployee, onSaveScaleOverride, setToastMessage, setErrorMessage, onViewEmployee }: SupervisorEquipeTabProps) {
   const WEEK_DAYS = [
@@ -39,8 +37,9 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const [newEmpSpecialty, setNewEmpSpecialty] = useState('');
   const [newEmpCargo, setNewEmpCargo] = useState('');
   const [newEmpTipoEscala, setNewEmpTipoEscala] = useState<Employee['tipoEscala']>('6x1');
-  const [newEmpFolgasDomingoNoMes, setNewEmpFolgasDomingoNoMes] = useState(2);
-  const [newEmpCargaHoraria, setNewEmpCargaHoraria] = useState(40);
+  // number | '' para o campo poder ficar vazio enquanto a pessoa redigita (o valor é validado ao salvar)
+  const [newEmpFolgasDomingoNoMes, setNewEmpFolgasDomingoNoMes] = useState<number | ''>(2);
+  const [newEmpCargaHoraria, setNewEmpCargaHoraria] = useState<number | ''>(40);
   const [newEmpHabilidades, setNewEmpHabilidades] = useState<string[]>([]);
   const [newEmpRole, setNewEmpRole] = useState<Role>('collaborator');
   const { currentUser } = useAuth();
@@ -49,6 +48,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [employeeToDelete, setEmployeeToDelete] = useState<string | null>(null);
+  const [reallocateToId, setReallocateToId] = useState('');
+  const [isDeletingEmployee, setIsDeletingEmployee] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [employeeCurrentPage, setEmployeeCurrentPage] = useState(1);
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
@@ -105,6 +106,14 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
     e.preventDefault();
     if (!newEmpName.trim() || !newEmpSpecialty.trim()) {
       setErrorMessage('Preencha o nome e a especialidade do profissional.');
+      return;
+    }
+    if (newEmpCargaHoraria === '' || !Number.isInteger(newEmpCargaHoraria) || newEmpCargaHoraria < 0 || newEmpCargaHoraria > 44) {
+      setErrorMessage('Carga horária semanal deve ser um número inteiro entre 0 e 44 horas.');
+      return;
+    }
+    if (newEmpFolgasDomingoNoMes === '' || !Number.isInteger(newEmpFolgasDomingoNoMes) || newEmpFolgasDomingoNoMes < 0 || newEmpFolgasDomingoNoMes > 5) {
+      setErrorMessage('Folgas aos domingos no mês deve ser um número inteiro entre 0 e 5.');
       return;
     }
     
@@ -580,8 +589,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                 <option value="rotativo">Rotativo (3 turnos)</option>
                 <option value="personalizado">Personalizado</option>
               </select>
-              <input type="number" min={0} max={5} value={newEmpFolgasDomingoNoMes} onChange={e => setNewEmpFolgasDomingoNoMes(Number(e.target.value) || 0)} placeholder="Folgas de domingo por mês (Ex: 2)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
-              <input type="number" min={1} max={80} value={newEmpCargaHoraria} onChange={e => setNewEmpCargaHoraria(Number(e.target.value) || 40)} placeholder="Carga horária semanal (Ex: 40)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              <input type="number" min={0} max={5} value={newEmpFolgasDomingoNoMes} onChange={e => setNewEmpFolgasDomingoNoMes(e.target.value === '' ? '' : Number(e.target.value))} placeholder="Folgas de domingo por mês (Ex: 2)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              <input type="number" min={0} max={44} value={newEmpCargaHoraria} onChange={e => setNewEmpCargaHoraria(e.target.value === '' ? '' : Number(e.target.value))} placeholder="Carga horária semanal (Ex: 40)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Habilidades</p>
                 <div className="grid grid-cols-2 gap-2">
@@ -695,23 +704,44 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
       <ConfirmDialog
         open={Boolean(employeeToDelete)}
         title="Excluir Colaborador?"
-        description="Atendimentos futuros serão cancelados. Quem já tem histórico é apenas removido da equipe, e os atendimentos passados são preservados."
+        description="Escolha quem assume os atendimentos futuros; sem escolha, eles são cancelados. Quem já tem histórico é apenas removido da equipe, e os atendimentos passados são preservados."
         confirmLabel="Excluir"
+        confirmingLabel="Excluindo..."
         cancelLabel="Cancelar"
         icon="person_remove"
-        onClose={() => setEmployeeToDelete(null)}
+        isSubmitting={isDeletingEmployee}
+        onClose={() => { if (!isDeletingEmployee) { setEmployeeToDelete(null); setReallocateToId(''); } }}
         onConfirm={async () => {
-          if (!employeeToDelete) return;
+          if (!employeeToDelete || isDeletingEmployee) return;
+          setIsDeletingEmployee(true);
           try {
-            const resposta = await onDeleteEmployee(employeeToDelete) as { mensagem?: string } | undefined;
-            setEmployeeToDelete(null);
+            const resposta = await onDeleteEmployee(employeeToDelete, reallocateToId || undefined) as { mensagem?: string } | undefined;
             setToastMessage(resposta?.mensagem || 'Colaborador removido.');
           } catch (error) {
-            setEmployeeToDelete(null);
             setErrorMessage(error instanceof Error ? error.message : 'Não foi possível remover o colaborador.');
+          } finally {
+            setIsDeletingEmployee(false);
+            setEmployeeToDelete(null);
+            setReallocateToId('');
           }
         }}
-      />
+      >
+        <label className="block text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-2" htmlFor="realocar-para">
+          Atendimentos futuros vão para
+        </label>
+        <select
+          id="realocar-para"
+          value={reallocateToId}
+          onChange={(e) => setReallocateToId(e.target.value)}
+          disabled={isDeletingEmployee}
+          className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm mb-6"
+        >
+          <option value="">Ninguém (cancelar os atendimentos futuros)</option>
+          {selectableEmployees.filter((emp) => emp.id !== employeeToDelete).map((emp) => (
+            <option key={emp.id} value={emp.id}>{emp.name}</option>
+          ))}
+        </select>
+      </ConfirmDialog>
 
       {showScheduleModal && selectedEmpForSchedule && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-50 p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) closeScheduleModal(); }}>

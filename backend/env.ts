@@ -39,13 +39,31 @@ export const config = {
   redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
   limpezaAgendamentosDias: Number(process.env.LIMPEZA_AGENDAMENTOS_DIAS ?? 30),
   totemMaxReservasPorIp: Number(process.env.TOTEM_MAX_RESERVAS_POR_IP) || 5,
+  // Reservas futuras ativas feitas pelo totem com o mesmo telefone (freia agenda lotada por clientes fantasmas)
+  totemMaxReservasPorTelefone: Number(process.env.TOTEM_MAX_RESERVAS_POR_TELEFONE) || 2,
   totemMaxRequisicoesPorMinuto: Number(process.env.TOTEM_MAX_REQUISICOES_POR_MINUTO) || 60,
   pagamentoWebhookSecret: process.env.PAYMENT_WEBHOOK_SECRET || '',
 };
 
 // Em produção, falha no boot em vez de rodar com padrões pensados para a rede local de desenvolvimento
+// Banco fora desta máquina sem NODE_ENV definido quase sempre é produção esquecida: o servidor subiria com CORS
+// aberto para a rede local e limites de login em memória (zeram a cada restart). Ambiente de desenvolvimento
+// com banco remoto declara NODE_ENV=development.
+const HOSTS_LOCAIS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const bancoRemoto = () => {
+  try {
+    return !HOSTS_LOCAIS.has(new URL(process.env.DATABASE_URL || '').hostname);
+  } catch {
+    return false;
+  }
+};
+
 export const validarConfigProducao = (): string[] => {
-  if (!producao) return [];
+  if (!producao) {
+    return !process.env.NODE_ENV && bancoRemoto()
+      ? ['NODE_ENV não definido com banco remoto. Use NODE_ENV=production no servidor (ou NODE_ENV=development para desenvolver com banco remoto).']
+      : [];
+  }
   const erros: string[] = [];
   if (config.corsOrigins.length === 0) erros.push('CORS_ORIGINS é obrigatório em produção (ex.: https://app.suaempresa.com).');
   if (!process.env.REDIS_URL) erros.push('REDIS_URL é obrigatório em produção (limites de tentativas e travas do totem).');

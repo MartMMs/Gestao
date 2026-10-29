@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState, useCallback, useMemo } from 'react';
+import { horarioParaMinutos } from '@shared/agenda';
 import { flushSync } from 'react-dom';
 import { Layout } from './components/Layout';
 import { useQueryClient } from '@tanstack/react-query';
@@ -180,9 +181,8 @@ export default function App() {
     const currentMinuteOfDay = getBrazilCurrentMinuteOfDay();
     return appointments.filter((appointment) => {
       if (appointment.status !== 'scheduled' || appointment.date !== today) return false;
-      const [hours, minutes] = appointment.time.split(':').map(Number);
-      if (Number.isNaN(hours) || Number.isNaN(minutes)) return false;
-      return hours * 60 + minutes >= currentMinuteOfDay;
+      const inicio = horarioParaMinutos(appointment.time);
+      return !Number.isNaN(inicio) && inicio >= currentMinuteOfDay;
     }).length;
   }, [appointments]);
 

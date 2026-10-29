@@ -35,16 +35,39 @@ const garantirEmailLivre = async (email: string, ignorarId?: string) => {
 const LIMITE_CARGO = 60;
 const LIMITE_ESPECIALIDADE = 100;
 
-// Campos opcionais de escala/cargo aceitos na criação e na edição
+const TIPOS_ESCALA = ['6x1', '5x2', '5x1', '12x36', 'rotativo'];
+const DIAS_TRABALHO_REGEX = /^[0-6](,[0-6]){0,6}$/;
+// Limites por campo: carga semanal até 44h (CLT) e no máximo 5 domingos num mês
+const LIMITES_NUMERICOS = {
+  folgasDomingoNoMes: { max: 5, rotulo: 'Folgas aos domingos no mês', faixa: 'entre 0 e 5' },
+  cargaHorariaSemanal: { max: 44, rotulo: 'Carga horária semanal', faixa: 'entre 0 e 44 horas' },
+} as const;
+
+// Campos opcionais de escala/cargo aceitos na criação e na edição. Valor inválido é recusado (400) em vez de
+// ignorado: antes o salvamento dizia "sucesso" e o valor digitado se perdia.
 const lerCamposEscala = (body: Record<string, unknown>) => {
   const dados: Record<string, unknown> = {};
-  if (body.diasTrabalho !== undefined) dados.diasTrabalho = String(body.diasTrabalho);
+  if (body.diasTrabalho !== undefined) {
+    const dias = String(body.diasTrabalho).replace(/\s/g, '');
+    if (!DIAS_TRABALHO_REGEX.test(dias)) throw new HttpError(400, 'Dias de trabalho inválidos. Use números de 0 (domingo) a 6 (sábado) separados por vírgula.');
+    dados.diasTrabalho = dias;
+  }
   if (typeof body.cargo === 'string') dados.cargo = body.cargo.trim().slice(0, LIMITE_CARGO);
-  if (typeof body.tipoEscala === 'string') dados.tipoEscala = body.tipoEscala;
+  if (body.tipoEscala !== undefined) {
+    if (typeof body.tipoEscala !== 'string' || !TIPOS_ESCALA.includes(body.tipoEscala)) {
+      throw new HttpError(400, `Tipo de escala inválido. Use: ${TIPOS_ESCALA.join(', ')}.`);
+    }
+    dados.tipoEscala = body.tipoEscala;
+  }
   if (typeof body.especialidade === 'string') dados.especialidade = body.especialidade.trim().slice(0, LIMITE_ESPECIALIDADE);
   for (const campo of ['folgasDomingoNoMes', 'cargaHorariaSemanal'] as const) {
+    if (body[campo] === undefined) continue;
     const numero = Number(body[campo]);
-    if (body[campo] !== undefined && Number.isInteger(numero) && numero >= 0 && numero <= 80) dados[campo] = numero;
+    const limite = LIMITES_NUMERICOS[campo];
+    if (!Number.isInteger(numero) || numero < 0 || numero > limite.max) {
+      throw new HttpError(400, `${limite.rotulo} deve ser um número inteiro ${limite.faixa}.`);
+    }
+    dados[campo] = numero;
   }
   if (body.habilidades !== undefined) {
     dados.habilidades = Array.isArray(body.habilidades)

@@ -6,6 +6,8 @@ import { HttpError, responderErro, type Notificar } from '../lib/http';
 import { transacaoSerializavel, travarChave } from '../lib/transacao';
 import { dataValida, partesNoFuso, TURNO_PADRAO, TURNO_REGEX } from '../../shared/agenda';
 import { agendamentosDoDia } from '../services/agendaService';
+import { gerarEscalaComRegras, type DiaEscala as DiaCalculado, type TipoEscala as TipoContrato } from '../../shared/escala';
+import { analisarConformidadeCLT } from '../../shared/clt';
 
 type TipoEscala = 'trabalho' | 'folga' | 'fds';
 type DiaEscala = { tipo: TipoEscala; turno: string | null; descricao: string | null };
@@ -33,6 +35,51 @@ const gravarDia = (tx: Prisma.TransactionClient, colaboradorId: string, data: st
     create: { key: chaveEscala(colaboradorId, data), colaboradorId, data, ...dia },
     update: dia,
   });
+
+// Mesmas regras da troca de turno aprovada: dias passados não mudam (a escala vira registro do que aconteceu) e
+// um dia com atendimentos marcados não pode virar folga sem que eles sejam realocados antes.
+const gravarDiaValidado = async (tx: Prisma.TransactionClient, colaboradorId: string, data: string, dia: DiaEscala) => {
+  if (data < partesNoFuso(new Date()).data) {
+    throw new HttpError(409, `Não é possível alterar a escala de ${data}: a data já passou.`);
+  }
+  if (dia.tipo !== 'trabalho') {
+    const marcados = await agendamentosDoDia(tx, data, { colaboradorId });
+    if (marcados.length > 0) {
+      throw new HttpError(409, `O profissional tem ${marcados.length} atendimento(s) em ${data}. Realoque-os antes de marcar folga nesse dia.`);
+    }
+  }
+  return gravarDia(tx, colaboradorId, data, dia);
+};
+
+const TIPOS_CONTRATO: TipoContrato[] = ['6x1', '5x2', '5x1', '12x36', 'rotativo'];
+
+// Escala do mês do profissional (contrato + ajustes salvos) analisada com as mesmas regras de CLT da tela.
+// A API não bloqueia (a supervisão decide), mas devolve os alertas: a regra não depende mais só do frontend.
+const alertasCltDoMes = async (tx: Prisma.TransactionClient, colaboradorId: string, data: string): Promise<string[]> => {
+  const colaborador = await tx.colaborador.findUnique({ where: { id: colaboradorId } });
+  if (!colaborador) return [];
+  const mes = data.slice(0, 7);
+  const [ano, numeroMes] = mes.split('-').map(Number);
+  const tipo = TIPOS_CONTRATO.includes(colaborador.tipoEscala as TipoContrato) ? (colaborador.tipoEscala as TipoContrato) : '6x1';
+  const base = gerarEscalaComRegras(
+    { tipo, dataInicio: `${mes}-01` },
+    new Date(Date.UTC(ano, numeroMes, 0)).getUTCDate(),
+    { folgasDomingoNoMes: colaborador.folgasDomingoNoMes ?? 2 },
+  );
+  const ajustes = new Map(
+    (await tx.escalaOverride.findMany({ where: { colaboradorId, data: { startsWith: `${mes}-` } } })).map((o) => [o.data, o]),
+  );
+  const dias: DiaCalculado[] = base.map((dia) => {
+    const ajuste = ajustes.get(dia.data);
+    if (!ajuste) return dia;
+    const tipoDia = normalizarTipo(ajuste.tipo);
+    if (tipoDia !== 'trabalho') return { ...dia, tipo: tipoDia, turno: undefined, horaInicio: undefined, horaFim: undefined, descricao: ajuste.descricao ?? dia.descricao };
+    const [horaInicio, horaFim] = (ajuste.turno ?? '').split('-');
+    return { ...dia, tipo: 'trabalho', turno: ajuste.turno ?? dia.turno, horaInicio: horaInicio || dia.horaInicio, horaFim: horaFim || dia.horaFim };
+  });
+  const analise = analisarConformidadeCLT(dias);
+  return analise.statusGeral ? [] : analise.resumo;
+};
 
 const garantirColaborador = async (colaboradorId: unknown) => {
   if (typeof colaboradorId !== 'string' || !(await prisma.colaborador.findUnique({ where: { id: colaboradorId } }))) {
@@ -69,12 +116,13 @@ export function createEscalaRouter(notificar: Notificar) {
       const tipo = normalizarTipo(req.body.tipo);
       const dia = normalizarDia({ tipo, turno: req.body.turno, descricao: req.body.descricao })!;
 
-      const salvo = await transacaoSerializavel(async (tx) => {
+      const { salvo, alertasClt } = await transacaoSerializavel(async (tx) => {
         await travarChave(tx, `escala:${chaveEscala(colaboradorId, data)}`);
-        return gravarDia(tx, colaboradorId, data, dia);
+        const gravado = await gravarDiaValidado(tx, colaboradorId, data, dia);
+        return { salvo: gravado, alertasClt: await alertasCltDoMes(tx, colaboradorId, data) };
       });
       notificar();
-      res.json(salvo);
+      res.json({ ...salvo, alertasClt });
     } catch (error) {
       responderErro(res, error, 'Erro ao salvar a escala');
     }
@@ -102,10 +150,16 @@ export function createEscalaRouter(notificar: Notificar) {
         const diaOrigem = await lerDia(from);
         const diaDestino = await lerDia(to);
 
-        return {
-          from: await gravarDia(tx, from.colaboradorId, from.data, diaDestino),
-          to: await gravarDia(tx, to.colaboradorId, to.data, diaOrigem),
+        const gravados = {
+          from: await gravarDiaValidado(tx, from.colaboradorId, from.data, diaDestino),
+          to: await gravarDiaValidado(tx, to.colaboradorId, to.data, diaOrigem),
         };
+        const alertasClt = [
+          ...await alertasCltDoMes(tx, from.colaboradorId, from.data),
+          ...(to.colaboradorId !== from.colaboradorId || to.data.slice(0, 7) !== from.data.slice(0, 7)
+            ? await alertasCltDoMes(tx, to.colaboradorId, to.data) : []),
+        ];
+        return { ...gravados, alertasClt };
       });
       notificar();
       res.json(resultado);
@@ -130,11 +184,14 @@ export function createEscalaRouter(notificar: Notificar) {
         if (!origem) throw new HttpError(404, 'Dia de origem não encontrado para replicação.');
 
         const criados = [];
-        for (const alvo of new Set<string>(targetDates)) criados.push(await gravarDia(tx, colaboradorId, alvo, origem));
-        return criados;
+        for (const alvo of new Set<string>(targetDates)) criados.push(await gravarDiaValidado(tx, colaboradorId, alvo, origem));
+        const meses = [...new Set<string>(targetDates.map((alvo: string) => alvo.slice(0, 7)))];
+        const alertasClt: string[] = [];
+        for (const mes of meses) alertasClt.push(...await alertasCltDoMes(tx, colaboradorId, `${mes}-01`));
+        return { criados, alertasClt };
       });
       notificar();
-      res.json({ replicated: replicados });
+      res.json({ replicated: replicados.criados, alertasClt: replicados.alertasClt });
     } catch (error) {
       responderErro(res, error, 'Erro ao replicar escala');
     }

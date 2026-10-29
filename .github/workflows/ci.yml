@@ -44,6 +44,7 @@ jobs:
       # Os testes rodam todos do mesmo IP; limites do totem mais altos só no CI
       TOTEM_MAX_REQUISICOES_POR_MINUTO: '1000'
       TOTEM_MAX_RESERVAS_POR_IP: '100'
+      TOTEM_MAX_RESERVAS_POR_TELEFONE: '100'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

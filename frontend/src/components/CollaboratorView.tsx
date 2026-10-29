@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { horarioParaMinutos, minutoDentroDoBloqueio } from '@shared/agenda';
 import { useToast } from '../hooks/useToast';
 import { Employee, Appointment, Service, Client, Bloqueio } from '../types';
 import { getBrazilCurrentMinuteOfDay, getLocalTodayString, getDuration, matchesAppointmentSearch } from '../features/appointments/utils/appointmentCore';
@@ -146,14 +147,9 @@ export function CollaboratorView({
     if (finalMins === 60) { finalHours += 1; finalMins = 0; }
 
     const clickedMinutes = finalHours * 60 + finalMins;
-    const blockingReason = (currentUser.bloqueios || []).find((bloq) => {
-      if (bloq.data !== receptionDate) return false;
-      const [startH, startM] = bloq.horaInicio.split(':').map(Number);
-      const [endH, endM] = bloq.horaFim.split(':').map(Number);
-      const start = startH * 60 + startM;
-      const end = endH * 60 + endM;
-      return clickedMinutes >= start && clickedMinutes < end;
-    });
+    const blockingReason = (currentUser.bloqueios || []).find(
+      (bloq) => bloq.data === receptionDate && minutoDentroDoBloqueio(clickedMinutes, bloq),
+    );
 
     if (blockingReason) {
       setErrorMessage(`Horário bloqueado: ${blockingReason.motivo}.`);
@@ -297,10 +293,8 @@ export function CollaboratorView({
 
               {/* Bloqueios */}
               {myBlockers.map(bloq => {
-                const [sH, sM] = bloq.horaInicio.split(':').map(Number);
-                const [eH, eM] = bloq.horaFim.split(':').map(Number);
-                const top = ((sH - START_HOUR) * 60 + sM) * MINUTE_HEIGHT;
-                const height = Math.max(((eH - START_HOUR) * 60 + eM) * MINUTE_HEIGHT - top, 20);
+                const top = (horarioParaMinutos(bloq.horaInicio) - START_HOUR * 60) * MINUTE_HEIGHT;
+                const height = Math.max((horarioParaMinutos(bloq.horaFim) - START_HOUR * 60) * MINUTE_HEIGHT - top, 20);
                 return (
                   <div key={bloq.id} className="absolute left-2 right-2 bg-surface-container-high/60 backdrop-blur-sm rounded-lg border border-outline-variant/30 flex items-center justify-center group overflow-hidden" style={{ top, height }}>
                     <div className="absolute inset-0 opacity-10 repeating-linear-gradient-45 from-transparent to-on-surface-variant"></div>
@@ -322,8 +316,7 @@ export function CollaboratorView({
                 const isPastDay = app.date < todayStr;
                 const isNoShow = !isCompleted && isPastDay;
                 
-                const [appH, appM] = app.time.split(':').map(Number);
-                const top = ((appH - START_HOUR) * 60 + appM) * MINUTE_HEIGHT;
+                const top = (horarioParaMinutos(app.time) - START_HOUR * 60) * MINUTE_HEIGHT;
                 
                 const durationMins = getDuration(app.services, services);
                 const height = Math.max(durationMins * MINUTE_HEIGHT, 30);

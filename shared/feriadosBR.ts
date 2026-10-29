@@ -12,7 +12,8 @@ export interface Feriado {
   uf?: string;
 }
 
-const FIXOS: Array<{ mes: number; dia: number; nome: string }> = [
+// desdeAno: feriados nacionais criados por lei recente não valem para anos anteriores
+const FIXOS: Array<{ mes: number; dia: number; nome: string; desdeAno?: number }> = [
   { mes: 1, dia: 1, nome: 'Ano Novo' },
   { mes: 4, dia: 21, nome: 'Tiradentes' },
   { mes: 5, dia: 1, nome: 'Dia do Trabalho' },
@@ -20,7 +21,8 @@ const FIXOS: Array<{ mes: number; dia: number; nome: string }> = [
   { mes: 10, dia: 12, nome: 'Nossa Senhora Aparecida' },
   { mes: 11, dia: 2, nome: 'Finados' },
   { mes: 11, dia: 15, nome: 'Proclamação da República' },
-  { mes: 11, dia: 20, nome: 'Dia Nacional de Zumbi e da Consciência Negra' },
+  // Lei 14.759/2023: feriado nacional a partir de 2024
+  { mes: 11, dia: 20, nome: 'Dia Nacional de Zumbi e da Consciência Negra', desdeAno: 2024 },
   { mes: 12, dia: 25, nome: 'Natal' },
 ];
 
@@ -52,12 +54,13 @@ export function calcularPascoa(ano: number): Date {
 const cache = new Map<number, Feriado[]>();
 
 export function obterFeriadosNacionais(ano: number): Feriado[] {
+  // Cópia a cada chamada: quem altera a lista recebida não corrompe o cache dos outros
   const emCache = cache.get(ano);
-  if (emCache) return emCache;
+  if (emCache) return emCache.map((f) => ({ ...f }));
 
   const pascoa = calcularPascoa(ano);
   const feriados: Feriado[] = [
-    ...FIXOS.map(({ mes, dia, nome }) => ({ data: `${ano}-${pad(mes)}-${pad(dia)}`, nome, tipo: 'nacional' as const })),
+    ...FIXOS.filter(({ desdeAno }) => !desdeAno || ano >= desdeAno).map(({ mes, dia, nome }) => ({ data: `${ano}-${pad(mes)}-${pad(dia)}`, nome, tipo: 'nacional' as const })),
     { data: toIso(addDias(pascoa, -48)), nome: 'Carnaval (segunda-feira)', tipo: 'facultativo' },
     { data: toIso(addDias(pascoa, -47)), nome: 'Carnaval', tipo: 'facultativo' },
     { data: toIso(addDias(pascoa, -2)), nome: 'Sexta-feira Santa', tipo: 'nacional' },
@@ -65,7 +68,7 @@ export function obterFeriadosNacionais(ano: number): Feriado[] {
   ];
   feriados.sort((x, y) => x.data.localeCompare(y.data));
   cache.set(ano, feriados);
-  return feriados;
+  return feriados.map((f) => ({ ...f }));
 }
 
 // Lê o ano direto da string para evitar o deslocamento de fuso de new Date('YYYY-MM-DD')

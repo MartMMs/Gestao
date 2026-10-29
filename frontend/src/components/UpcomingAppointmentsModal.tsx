@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { horarioParaMinutos } from '@shared/agenda';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Service } from '../types';
 import { getBrazilCurrentMinuteOfDay, getLocalTodayString } from '../features/appointments/utils/appointmentCore';
@@ -40,9 +41,8 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
         const appointmentDate = new Date(`${appointment.date}T12:00:00`);
         if (appointmentDate < today) return false;
         if (appointment.date === todayStr) {
-          const [hours, minutes] = appointment.time.split(':').map(Number);
-          if (Number.isNaN(hours) || Number.isNaN(minutes)) return false;
-          if (hours * 60 + minutes < currentMinuteOfDay) return false;
+          const inicio = horarioParaMinutos(appointment.time);
+          if (Number.isNaN(inicio) || inicio < currentMinuteOfDay) return false;
         }
         if (dateFilter === 'today' && appointment.date !== todayStr) return false;
         if (dateFilter === '7days' && appointmentDate > sevenDaysAhead) return false;
@@ -63,9 +63,8 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
     return {
       today: appointments.filter((appointment) => {
         if (appointment.status !== 'scheduled' || appointment.date !== todayStr) return false;
-        const [hours, minutes] = appointment.time.split(':').map(Number);
-        if (Number.isNaN(hours) || Number.isNaN(minutes)) return false;
-        return hours * 60 + minutes >= currentMinuteOfDay;
+        const inicio = horarioParaMinutos(appointment.time);
+        return !Number.isNaN(inicio) && inicio >= currentMinuteOfDay;
       }).length,
       future: appointments.filter((appointment) => appointment.status === 'scheduled' && appointment.date > todayStr).length,
     };

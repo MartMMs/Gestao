@@ -331,15 +331,15 @@ export function StepIdentification({ reservation, onSubmit, onBack }: StepIdenti
               Pressão Desejada na Massagem
             </label>
             <div className="flex gap-2">
-              {[
+              {([
                 { id: 'suave', label: 'Suave' },
                 { id: 'media', label: 'Média' },
                 { id: 'firme', label: 'Firme' },
-              ].map((item) => (
+              ] as const).map((item) => (
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setPressaoMassagem(item.id as any)}
+                  onClick={() => setPressaoMassagem(item.id)}
                   className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
                     pressaoMassagem === item.id
                       ? 'bg-primary text-on-primary shadow-sm'

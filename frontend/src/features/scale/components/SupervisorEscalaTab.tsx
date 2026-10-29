@@ -9,6 +9,8 @@ import { EmployeeScheduleColumn, ScheduleGridProvider, type ScheduleGridActions,
 import { ScheduleRulerGrid } from '../../../components/ScheduleRulerGrid';
 import { isTeamMember } from '../../../utils/formatters';
 import { JANELA_AGENDA_DIAS } from '@shared/agendaJanela';
+import { bloqueioDiaInteiro, minutoDentroDoBloqueio } from '@shared/agenda';
+import type { DiaEscala } from '@shared/escala';
 
 const { START_HOUR, END_HOUR, HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
 // Referências fixas para listas vazias (um [] novo a cada render anularia os memos e o React.memo)
@@ -41,7 +43,7 @@ interface SupervisorEscalaTabProps {
   onDeleteBloqueio?: (id: string) => Promise<boolean | void>;
   setToastMessage: (msg: string | null) => void;
   setErrorMessage: (msg: string | null) => void;
-  buildScaleForEmployee?: (employeeId: string) => any[];
+  buildScaleForEmployee?: (employeeId: string) => DiaEscala[];
 }
 
 type EmployeeDayStatus = {
@@ -120,14 +122,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
         continue;
       }
 
-      const fullDayBlock = (emp.bloqueios || []).find((bloq) => {
-        if (bloq.data !== dateStr) return false;
-        const [startH = 0, startM = 0] = bloq.horaInicio.split(':').map(Number);
-        const [endH = 0, endM = 0] = bloq.horaFim.split(':').map(Number);
-        const startMinutes = startH * 60 + startM;
-        const endMinutes = endH * 60 + endM;
-        return startMinutes <= START_HOUR * 60 && endMinutes >= END_HOUR * 60;
-      });
+      const fullDayBlock = (emp.bloqueios || []).find((bloq) => bloq.data === dateStr && bloqueioDiaInteiro(bloq));
 
       if (fullDayBlock) {
         folgas.push(emp.name.split(' ')[0] || emp.name);
@@ -172,7 +167,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   const getEmployeeDayStatus = useCallback((emp: Employee): EmployeeDayStatus | null => {
     // 1. Verifica se a escala base oficial da equipe diz que é folga neste mês
     if (buildScaleForEmployee) {
-      const scaleDay = buildScaleForEmployee(emp.id).find((d: any) => d.data === receptionDate);
+      const scaleDay = buildScaleForEmployee(emp.id).find((d) => d.data === receptionDate);
       if (scaleDay && scaleDay.tipo !== 'trabalho') {
         const isFerias = isFeriasReason(scaleDay.descricao);
         return {
@@ -213,13 +208,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     const dayBlocks = (emp.bloqueios || []).filter((bloq) => bloq.data === receptionDate);
     if (dayBlocks.length === 0) return null;
 
-    const fullDayBlock = dayBlocks.find((bloq) => {
-      const [startH = 0, startM = 0] = bloq.horaInicio.split(':').map(Number);
-      const [endH = 0, endM = 0] = bloq.horaFim.split(':').map(Number);
-      const startMinutes = startH * 60 + startM;
-      const endMinutes = endH * 60 + endM;
-      return startMinutes <= START_HOUR * 60 && endMinutes >= END_HOUR * 60;
-    });
+    const fullDayBlock = dayBlocks.find(bloqueioDiaInteiro);
 
     if (!fullDayBlock) {
       const reason = dayBlocks.map((bloq) => bloq.motivo).filter(Boolean).join(' | ') || 'Bloqueio parcial';
@@ -280,14 +269,9 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     }
 
     const clickedMinutes = finalHours * 60 + finalMins;
-    const blockingReason = (selectedEmployee?.bloqueios || []).find((bloq) => {
-      if (bloq.data !== receptionDate) return false;
-      const [startH, startM] = bloq.horaInicio.split(':').map(Number);
-      const [endH, endM] = bloq.horaFim.split(':').map(Number);
-      const start = startH * 60 + startM;
-      const end = endH * 60 + endM;
-      return clickedMinutes >= start && clickedMinutes < end;
-    });
+    const blockingReason = (selectedEmployee?.bloqueios || []).find(
+      (bloq) => bloq.data === receptionDate && minutoDentroDoBloqueio(clickedMinutes, bloq),
+    );
 
     if (blockingReason) {
       setErrorMessage(`Horário bloqueado para ${selectedEmployee?.name || 'este profissional'}: ${blockingReason.motivo}.`);

@@ -29,10 +29,19 @@ export const normalizarTelefone = (telefone: unknown): string => {
   return digitos;
 };
 
-// Telefone brasileiro: DDD + 8 dígitos (fixo) ou 9 dígitos começando com 9 (celular)
+// DDDs em uso no Brasil (Anatel). Combinações como 23, 25, 29 ou 52 não existem.
+const DDDS_VALIDOS = new Set([
+  11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 24, 27, 28,
+  31, 32, 33, 34, 35, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+  51, 53, 54, 55, 61, 62, 63, 64, 65, 66, 67, 68, 69,
+  71, 73, 74, 75, 77, 79, 81, 82, 83, 84, 85, 86, 87, 88, 89,
+  91, 92, 93, 94, 95, 96, 97, 98, 99,
+]);
+
+// Telefone brasileiro: DDD existente + 8 dígitos (fixo) ou 9 dígitos começando com 9 (celular)
 export const telefoneValido = (telefone: unknown): boolean => {
   const digitos = normalizarTelefone(telefone);
-  if (!/^[1-9]{2}/.test(digitos)) return false;
+  if (!DDDS_VALIDOS.has(Number(digitos.slice(0, 2)))) return false;
   // Fixo: 8 dígitos começando de 2 a 5. Celular: 9 dígitos começando com 9.
   return (digitos.length === 10 && /[2-5]/.test(digitos[2])) || (digitos.length === 11 && digitos[2] === '9');
 };

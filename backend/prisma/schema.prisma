@@ -36,6 +36,8 @@ model Cliente {
   telefone     String?
   cpf          String?
   observacao   String?
+  // Preenchido quando o cliente é excluído mas tem histórico: os dados pessoais são apagados e os atendimentos ficam
+  removidoEm   DateTime?
   agendamentos Agendamento[]
 }
 

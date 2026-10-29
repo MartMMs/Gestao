@@ -43,6 +43,17 @@ const eventos = criarEventos(io);
 // Atrás de proxy reverso (nginx, etc.), use TRUST_PROXY=1 para o rate limit enxergar o IP real
 if (config.trustProxy !== undefined) app.set('trust proxy', config.trustProxy);
 
+// Cabeçalhos de segurança da API (só JSON: nada aqui deve ser embutido em iframe nem interpretado como página)
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+  if (config.producao) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
+
 app.use(cors(corsOptions));
 // Guarda o corpo bruto para validar a assinatura do webhook de pagamento
 app.use(express.json({

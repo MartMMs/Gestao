@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useMemo } from 'react';
+import { horarioParaMinutos } from '@shared/agenda';
 import { Appointment, Employee, Service } from '../types';
 import { getDuration } from '../features/appointments/utils/appointmentCore';
 
@@ -131,10 +132,8 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
       )}
 
       {empBlockers.map((bloq) => {
-        const [sH, sM] = bloq.horaInicio.split(':').map(Number);
-        const [eH, eM] = bloq.horaFim.split(':').map(Number);
-        const top = ((sH - startHour) * 60 + sM) * minuteHeight;
-        const endTop = ((eH - startHour) * 60 + eM) * minuteHeight;
+        const top = (horarioParaMinutos(bloq.horaInicio) - startHour * 60) * minuteHeight;
+        const endTop = (horarioParaMinutos(bloq.horaFim) - startHour * 60) * minuteHeight;
         const height = Math.max(endTop - top, 20);
 
         return (
@@ -166,11 +165,11 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
         const isPastDay = app.date < todayStr;
         const isNoShow = !isCompleted && isPastDay;
 
-        const [appH, appM] = app.time.split(':').map(Number);
-        const top = ((appH - startHour) * 60 + appM) * minuteHeight;
+        const inicioMin = horarioParaMinutos(app.time);
+        const top = (inicioMin - startHour * 60) * minuteHeight;
         const durationMins = getDuration(app.services, services);
         const height = Math.max(durationMins * minuteHeight, 36);
-        const fimMin = appH * 60 + appM + durationMins;
+        const fimMin = inicioMin + durationMins;
         const horaFim = `${String(Math.floor(fimMin / 60)).padStart(2, '0')}:${String(fimMin % 60).padStart(2, '0')}`;
         const delayMinutes = (!isCompleted && isTodayView && currentMinute > appDateTime)
           ? Math.floor((currentMinute.getTime() - appDateTime.getTime()) / 60000)

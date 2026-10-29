@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
-import { usuarioEhSupervisor, verificarSupervisorToken, verificarToken } from '../auth';
+import { getUsuario, usuarioEhSupervisor, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { responderErro, type Notificar } from '../lib/http';
 import { clientesComAcessoSaude, prepararCliente } from '../lib/privacidade';
 import { LIMITE_OBSERVACAO, MENSAGEM_CPF_INVALIDO, MENSAGEM_TELEFONE_INVALIDO, apenasDigitos, cpfValido, normalizarTelefone, telefoneValido, valorMascarado } from '../../shared/validadores';
@@ -11,7 +11,15 @@ export function createClientesRouter(notificar: Notificar) {
 
   router.get('/clientes', verificarToken, async (req, res) => {
     try {
-      const clientes = await prisma.cliente.findMany({ orderBy: { nome: 'asc' } });
+      // Recepção e supervisão veem a carteira toda (agendam para qualquer cliente); o profissional, só os clientes
+      // que atende ou já atendeu (minimização de dados da LGPD)
+      const clientes = await prisma.cliente.findMany({
+        where: {
+          removidoEm: null,
+          ...(usuarioGerenciaAgenda(req) ? {} : { agendamentos: { some: { colaboradorId: getUsuario(req)?.id ?? '' } } }),
+        },
+        orderBy: { nome: 'asc' },
+      });
       if (usuarioEhSupervisor(req)) return res.json(clientes);
       const meus = await clientesComAcessoSaude(req);
       res.json(clientes.map((c) => prepararCliente(c, req, meus.has(c.id))));
@@ -24,7 +32,7 @@ export function createClientesRouter(notificar: Notificar) {
     try {
       const { id } = req.params;
       const cliente = await prisma.cliente.findUnique({ where: { id } });
-      if (!cliente) return res.status(404).json({ erro: 'Cliente não encontrado.' });
+      if (!cliente || cliente.removidoEm) return res.status(404).json({ erro: 'Cliente não encontrado.' });
 
       const { nome, telefone, cpf, observacao } = req.body ?? {};
       const dados: Prisma.ClienteUpdateInput = {};
@@ -66,17 +74,43 @@ export function createClientesRouter(notificar: Notificar) {
     }
   });
 
-  // Exclui o cliente e o histórico dele de uma vez (tudo ou nada). Apenas supervisores.
+  // Exclui o cliente (apenas supervisores). Atendimentos marcados impedem a exclusão. Com histórico, os dados
+  // pessoais e de saúde são apagados e os atendimentos ficam (financeiro e comissões); sem histórico, apaga tudo.
   router.delete('/clientes/:id', verificarSupervisorToken, async (req, res) => {
     try {
       const { id } = req.params;
-      const removido = await prisma.$transaction(async (tx) => {
-        await tx.agendamento.deleteMany({ where: { clienteId: id } });
-        return tx.cliente.deleteMany({ where: { id } });
+      const resultado = await prisma.$transaction(async (tx) => {
+        const cliente = await tx.cliente.findUnique({ where: { id } });
+        if (!cliente || cliente.removidoEm) return { tipo: 'nao_encontrado' as const };
+
+        const marcados = await tx.agendamento.count({ where: { clienteId: id, status: 'scheduled', data: { gte: new Date() } } });
+        if (marcados > 0) return { tipo: 'com_marcados' as const, marcados };
+
+        const historico = await tx.agendamento.count({ where: { clienteId: id } });
+        if (historico === 0) {
+          await tx.cliente.delete({ where: { id } });
+          return { tipo: 'excluido' as const };
+        }
+        await tx.agendamento.updateMany({ where: { clienteId: id }, data: { observacoesSaude: null } });
+        await tx.cliente.update({
+          where: { id },
+          data: { nome: 'Cliente removido', telefone: null, cpf: null, observacao: null, removidoEm: new Date() },
+        });
+        return { tipo: 'anonimizado' as const, historico };
       });
-      if (removido.count === 0) return res.status(404).json({ erro: 'Cliente não encontrado. Ele pode já ter sido excluído.' });
+
+      if (resultado.tipo === 'nao_encontrado') return res.status(404).json({ erro: 'Cliente não encontrado. Ele pode já ter sido excluído.' });
+      if (resultado.tipo === 'com_marcados') {
+        return res.status(409).json({
+          erro: `Este cliente tem ${resultado.marcados} atendimento(s) marcado(s). Cancele ou conclua antes de excluir o cadastro.`,
+        });
+      }
       notificar();
-      res.json({ mensagem: 'Cliente excluído com sucesso' });
+      res.json({
+        mensagem: resultado.tipo === 'excluido'
+          ? 'Cliente excluído com sucesso.'
+          : `Dados pessoais do cliente apagados. O histórico de ${resultado.historico} atendimento(s) foi mantido sem identificação.`,
+      });
     } catch (error) {
       responderErro(res, error, 'Erro ao excluir cliente');
     }

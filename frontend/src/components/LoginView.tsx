@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 
 // Importando a imagem local novamente
-import bgImage from '../../0768-TA-Alex-nov20.jpg';
+import bgImage from '../assets/login-fundo.jpg';
 
 interface LoginViewProps {
   onLogin: (email: string, pass: string) => Promise<void>;

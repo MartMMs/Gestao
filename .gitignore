@@ -39,3 +39,6 @@ backend/escala_overrides.json
 # Projeto externo (FreeLLMAPI) baixado na pasta; não faz parte do app
 freellmapi/
 install.sh
+
+# Relatórios e snapshots gerados localmente
+generated/

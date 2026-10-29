@@ -131,7 +131,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
     setIsApplyingBatch(true);
     try {
       // Otimista: atualiza a interface instantaneamente
-      setPlanningOverrides((prev: any) => {
+      setPlanningOverrides((prev) => {
         const next = { ...prev };
         batchSelectedIds.forEach((empId) => {
           next[`${empId}:${batchTargetDate}`] = {
@@ -998,12 +998,12 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
 
                 <div className="flex justify-between items-center mb-2">
                   <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Colaboradores ({batchSelectedIds.length})</label>
-                  <button onClick={() => setBatchSelectedIds(batchSelectedIds.length === timelineEmployees.length ? [] : timelineEmployees.map((e: any) => e.id))} className="text-[10px] font-bold uppercase tracking-wider text-primary hover:text-primary-dim transition-colors">
+                  <button onClick={() => setBatchSelectedIds(batchSelectedIds.length === timelineEmployees.length ? [] : timelineEmployees.map((e) => e.id))} className="text-[10px] font-bold uppercase tracking-wider text-primary hover:text-primary-dim transition-colors">
                     {batchSelectedIds.length === timelineEmployees.length ? 'Desmarcar Todos' : 'Marcar Todos'}
                   </button>
                 </div>
                 <div className="max-h-48 overflow-y-auto mb-4 border border-outline-variant/20 bg-surface-container-low rounded-xl p-2 custom-scrollbar">
-                   {timelineEmployees.map((emp: any) => (
+                   {timelineEmployees.map((emp) => (
                      <label key={emp.id} className="flex items-center gap-3 p-2 hover:bg-surface-container rounded-lg cursor-pointer transition-colors">
                        <input type="checkbox" checked={batchSelectedIds.includes(emp.id)} onChange={() => {
                          setBatchSelectedIds(prev => prev.includes(emp.id) ? prev.filter(id => id !== emp.id) : [...prev, emp.id]);
@@ -1016,7 +1016,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Ação</label>
-                    <select value={batchShiftType} onChange={e => setBatchShiftType(e.target.value as any)} className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer">
+                    <select value={batchShiftType} onChange={e => setBatchShiftType(e.target.value as typeof batchShiftType)} className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer">
                       <option value="trabalho">Trabalho</option>
                       <option value="folga">Folga</option>
                       <option value="fds">FDS</option>

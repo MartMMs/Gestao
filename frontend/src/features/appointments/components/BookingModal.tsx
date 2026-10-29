@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { horarioParaMinutos } from '@shared/agenda';
 import { Appointment, Client, Employee, Service, ServiceEligibilityMode } from '../../../types';
 import { getDuration } from '../utils/appointmentCore';
 import { AnamneseForm, AnamneseData, initialAnamnese, formatAnamnese } from '../../../components/AnamneseForm';
@@ -391,8 +392,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       return;
     }
 
-    const [startHour, startMinute] = bookTime.split(':').map(Number);
-    const startMinutes = startHour * 60 + startMinute;
+    const startMinutes = horarioParaMinutos(bookTime);
     const durationMinutes = getDuration(bookService, services);
     const closingMinutes = SCHEDULE_CONFIG.END_HOUR * 60;
 
@@ -405,10 +405,8 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     const overlapBlock = (selectedEmployee?.bloqueios || [])
       .filter((block) => block.data === bookDate)
       .find((block) => {
-        const [blockStartH, blockStartM] = block.horaInicio.split(':').map(Number);
-        const [blockEndH, blockEndM] = block.horaFim.split(':').map(Number);
-        const blockStart = blockStartH * 60 + blockStartM;
-        const blockEnd = blockEndH * 60 + blockEndM;
+        const blockStart = horarioParaMinutos(block.horaInicio);
+        const blockEnd = horarioParaMinutos(block.horaFim);
         return startMinutes < blockEnd && startMinutes + durationMinutes > blockStart;
       });
 

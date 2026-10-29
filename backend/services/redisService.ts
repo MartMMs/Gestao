@@ -135,8 +135,8 @@ class RedisManager {
         if (this.isConnected) console.warn('[REDIS] Conexão encerrada.');
         this.isConnected = false;
       });
-    } catch (err: any) {
-      console.warn('[REDIS] Falha ao instanciar cliente, usando fallback em memória:', err.message);
+    } catch (err: unknown) {
+      console.warn('[REDIS] Falha ao instanciar cliente, usando fallback em memória:', err instanceof Error ? err.message : err);
       this.isConnected = false;
     }
   }

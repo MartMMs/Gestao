@@ -38,17 +38,13 @@ describe('gerarEscala6x1', () => {
 });
 
 describe('gerarEscala12x36', () => {
-  it('alterna 1 dia trabalho e 3 folgas no ciclo de 4', () => {
-    const dias = gerarEscala12x36(BR_NOON('2026-06-01'), 8, {
+  it('12h de trabalho e 36h de descanso: trabalha dia sim, dia não, alternando diurno e noturno', () => {
+    const dias = gerarEscala12x36(BR_NOON('2026-06-01'), 6, {
       diurno: { inicio: '07:00', fim: '19:00' },
       noturno: { inicio: '19:00', fim: '07:00' },
     });
-    const tipos = dias.map((d) => d.tipo);
-    expect(tipos[0]).toBe('trabalho');
-    expect(tipos[1]).toBe('folga');
-    expect(tipos[2]).toBe('folga');
-    expect(tipos[3]).toBe('folga');
-    expect(tipos[4]).toBe('trabalho');
+    expect(dias.map((d) => d.tipo)).toEqual(['trabalho', 'folga', 'trabalho', 'folga', 'trabalho', 'folga']);
+    expect(dias.filter((d) => d.tipo === 'trabalho').map((d) => d.turno)).toEqual(['Diurno', 'Noturno', 'Diurno']);
   });
 });
 

@@ -73,9 +73,10 @@ const ROTULO_STATUS: Record<string, string> = { scheduled: 'agendado', completed
  * Regras de mudança de status:
  * - concluir ou marcar falta só de um agendamento ativo e depois do horário de início;
  * - cancelar só um agendamento ativo;
- * - reativar um cancelado/falta é livre (com checagem de conflito); reabrir um concluído só supervisores.
+ * - reativar um cancelado/falta só quem gerencia a agenda (recepção/supervisão): o profissional reativando o
+ *   próprio atendimento renovaria o acesso à ficha de saúde do cliente; reabrir um concluído só supervisores.
  */
-const erroTransicaoStatus = (atual: string, novo: string, inicio: Date, supervisor: boolean): string | null => {
+const erroTransicaoStatus = (atual: string, novo: string, inicio: Date, supervisor: boolean, gerencia: boolean): string | null => {
   if (atual === novo) return null;
   if (novo === 'completed' || novo === 'no_show') {
     if (atual !== 'scheduled') return `Só é possível marcar como ${ROTULO_STATUS[novo]} um agendamento ativo (este está ${ROTULO_STATUS[atual] ?? atual}).`;
@@ -86,6 +87,9 @@ const erroTransicaoStatus = (atual: string, novo: string, inicio: Date, supervis
     return atual === 'scheduled' ? null : `Só é possível cancelar um agendamento ativo (este está ${ROTULO_STATUS[atual] ?? atual}).`;
   }
   if (atual === 'completed' && !supervisor) return 'Apenas supervisores podem reabrir um atendimento concluído.';
+  if ((atual === 'cancelled' || atual === 'no_show') && !gerencia) {
+    return 'Apenas a recepção ou a supervisão podem reativar um agendamento cancelado ou com falta.';
+  }
   return null;
 };
 
@@ -173,6 +177,13 @@ const resolverCliente = async (
     : cliente;
 };
 
+// Observações do agendamento (podem conter a anamnese): texto aparado e limitado; vazio vira null
+const lerObservacao = (valor: unknown): string | null => {
+  if (typeof valor !== 'string') return null;
+  const texto = valor.trim().slice(0, LIMITE_OBSERVACAO);
+  return texto || null;
+};
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function createAgendamentosRouter(notificar: Notificar) {
@@ -257,6 +268,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
           data: {
             data: inicio,
             reservaOrigem: gerenciaAgenda(req) ? 'interno' : ORIGEM_COLABORADOR,
+            observacoesSaude: lerObservacao(req.body.observation),
             colaborador: { connect: { id: colaboradorId } },
             cliente: { connect: { id: cliente.id } },
             servicos: { connect: servicos.map((s) => ({ id: s.id })) },
@@ -328,6 +340,12 @@ export function createAgendamentosRouter(notificar: Notificar) {
           colaboradorId: novoColaboradorId,
           servicos: { set: servicos.map((s) => ({ id: s.id })) },
         };
+        // Observações ficam sob a regra da ficha de saúde: quem recebe o campo mascarado não pode sobrescrevê-lo
+        if (req.body.observation !== undefined && (usuarioEhSupervisor(req) || acessoSaude.has(antigo.clienteId))) {
+          dados.observacoesSaude = lerObservacao(req.body.observation);
+        }
+        // Remarcado pelo próprio profissional: a nova data não renova o acesso à ficha de saúde
+        if (!gerenciaAgenda(req) && inicio.getTime() !== antigo.data.getTime()) dados.reservaOrigem = ORIGEM_COLABORADOR;
         if (req.body.clientName !== undefined || req.body.clientId !== undefined) {
           const cliente = await resolverCliente(tx, req, req.body, { clienteAtualId: antigo.clienteId, acessoSaude });
           dados.clienteId = cliente.id;
@@ -352,7 +370,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
     if (!agendamento) throw new HttpError(404, 'Agendamento não encontrado.');
     garantirPermissao(req, agendamento.colaboradorId);
 
-    const erroTransicao = erroTransicaoStatus(agendamento.status ?? 'scheduled', status as string, agendamento.data, usuarioEhSupervisor(req));
+    const erroTransicao = erroTransicaoStatus(agendamento.status ?? 'scheduled', status as string, agendamento.data, usuarioEhSupervisor(req), gerenciaAgenda(req));
     if (erroTransicao) throw new HttpError(409, erroTransicao);
     if (agendamento.status === status) return agendamento;
 

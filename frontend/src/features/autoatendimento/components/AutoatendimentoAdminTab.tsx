@@ -313,6 +313,19 @@ export function AutoatendimentoAdminTab() {
             )}
           </div>
 
+          {config.exigirPagamento && !config.pagamentoOnlineDisponivel && (
+            <div className="p-4 rounded-2xl border text-xs leading-relaxed bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300">
+              <p className="font-bold flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[16px]">link_off</span>
+                Nenhum gateway de pagamento conectado
+              </p>
+              <p>
+                A opção fica salva, mas enquanto o banco não estiver conectado o totem confirma a reserva e o pagamento é feito na recepção.
+                Para ativar a cobrança online, conecte o gateway e configure <code>PAYMENT_WEBHOOK_SECRET</code> no servidor.
+              </p>
+            </div>
+          )}
+
           {/* Configuração de Percentual de Sinal (quando exigido) */}
           {config.exigirPagamento && (
             <div className="space-y-3 pt-2 border-t border-outline-variant/15">

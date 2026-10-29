@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from 'react';
+import { shiftDateString } from '../utils/appointmentCore';
+import { bloqueioDiaInteiro, horarioParaMinutos } from '@shared/agenda';
 import { motion } from 'motion/react';
 import { Appointment, Bloqueio, Employee } from '../../../types';
 import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
@@ -20,12 +22,8 @@ export interface BlockModalProps {
 const START_TIME = `${String(SCHEDULE_CONFIG.START_HOUR).padStart(2, '0')}:00`;
 const END_TIME = `${String(SCHEDULE_CONFIG.END_HOUR).padStart(2, '0')}:00`;
 
-const toMinutes = (time: string) => {
-  const [h, m] = time.split(':').map(Number);
-  return h * 60 + m;
-};
-
-const isFullDayBlock = (b: Bloqueio) => toMinutes(b.horaInicio) <= toMinutes(START_TIME) && toMinutes(b.horaFim) >= toMinutes(END_TIME);
+const toMinutes = horarioParaMinutos;
+const isFullDayBlock = (b: Bloqueio) => bloqueioDiaInteiro(b);
 
 export function BlockModal({ receptionDate, initialTime, initialEmpId, employees, appointments = [], onClose, onAddBloqueio, onReassignAppointment, setErrorMessage, setToastMessage }: BlockModalProps) {
   const [blockDate, setBlockDate] = useState(receptionDate);
@@ -74,16 +72,8 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
 
   const buildBlockDateList = () => {
     const totalDays = getPresetDays();
-    const startDate = new Date(`${blockDate}T12:00:00`);
-    const dates: string[] = [];
-
-    for (let index = 0; index < totalDays; index += 1) {
-      const current = new Date(startDate);
-      current.setDate(startDate.getDate() + index);
-      dates.push(current.toISOString().split('T')[0]);
-    }
-
-    return dates;
+    // Aritmética de datas só com strings AAAA-MM-DD (shiftDateString): não depende do fuso do navegador
+    return Array.from({ length: totalDays }, (_, index) => shiftDateString(blockDate, index));
   };
 
   const handleBlockSubmit = async (e: React.FormEvent) => {
@@ -200,9 +190,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
                   <>
                     📅 <span className="font-bold">{blockDate}</span> até{' '}
                     <span className="font-bold">
-                      {new Date(new Date(`${blockDate}T12:00:00`).getTime() + 14 * 24 * 60 * 60 * 1000)
-                        .toISOString()
-                        .split('T')[0]}
+                      {shiftDateString(blockDate, 14)}
                     </span>{' '}
                     (15 dias)
                   </>
@@ -210,9 +198,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
                   <>
                     📅 <span className="font-bold">{blockDate}</span> até{' '}
                     <span className="font-bold">
-                      {new Date(new Date(`${blockDate}T12:00:00`).getTime() + 29 * 24 * 60 * 60 * 1000)
-                        .toISOString()
-                        .split('T')[0]}
+                      {shiftDateString(blockDate, 29)}
                     </span>{' '}
                     (30 dias)
                   </>

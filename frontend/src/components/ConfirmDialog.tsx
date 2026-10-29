@@ -12,6 +12,8 @@ export interface ConfirmDialogProps {
   isSubmitting?: boolean;
   onConfirm: () => void | Promise<void>;
   onClose: () => void;
+  /** Conteúdo extra entre a descrição e os botões (ex.: uma escolha que acompanha a confirmação) */
+  children?: React.ReactNode;
 }
 
 export function ConfirmDialog({
@@ -25,6 +27,7 @@ export function ConfirmDialog({
   isSubmitting = false,
   onConfirm,
   onClose,
+  children,
 }: ConfirmDialogProps) {
   if (!open) return null;
 
@@ -38,6 +41,7 @@ export function ConfirmDialog({
         <span className="material-symbols-outlined text-4xl text-error mb-4">{icon}</span>
         <h2 className="text-2xl font-headline text-error mb-2">{title}</h2>
         {description && <p className="text-on-surface-variant text-sm mb-6">{description}</p>}
+        {children}
         <div className="flex gap-4">
           <button
             onClick={onClose}

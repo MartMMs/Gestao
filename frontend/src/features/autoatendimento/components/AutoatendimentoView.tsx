@@ -48,16 +48,18 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
   // Modal de expiração
   const [showExpiredModal, setShowExpiredModal] = useState(false);
 
+  // Só há etapa de pagamento com o botão ligado E um gateway conectado no servidor
+  const cobraOnline = config?.exigirPagamento !== false && config?.pagamentoOnlineDisponivel === true;
   const stepsNav = useMemo(() => [
     { step: 1, label: (empresa?.termoServico || 'Produtos & Serviços').split('/')[0].trim(), icon: empresa?.icone || 'menu_book' },
     { step: 2, label: 'Horário', icon: 'schedule' },
     { step: 3, label: 'Dados', icon: 'person' },
     {
       step: 4,
-      label: config?.exigirPagamento === false ? 'Confirmação' : 'Pagamento',
-      icon: config?.exigirPagamento === false ? 'task_alt' : 'payment',
+      label: cobraOnline ? 'Pagamento' : 'Confirmação',
+      icon: cobraOnline ? 'payment' : 'task_alt',
     },
-  ], [config?.exigirPagamento, empresa]);
+  ], [cobraOnline, empresa]);
 
   // Carrega o catálogo, a configuração e dados da empresa na montagem
   useEffect(() => {

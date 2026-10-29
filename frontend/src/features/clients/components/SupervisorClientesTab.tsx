@@ -16,7 +16,7 @@ interface SupervisorClientesTabProps {
   appointments: Appointment[];
   services: Service[];
   onEditClient?: (id: string, clientData: Partial<Client>) => Promise<boolean | void> | void;
-  onDeleteClient?: (id: string) => Promise<boolean | void> | void;
+  onDeleteClient?: (id: string) => Promise<unknown> | void;
   // Colaboradores só editam a anamnese; dados cadastrais ficam com supervisores
   somenteAnamnese?: boolean;
   setToastMessage?: (msg: string | null) => void;
@@ -153,7 +153,9 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
     try {
       const resultado = await onDeleteClient(clientToDelete);
       if (resultado === false) throw new Error('Não foi possível excluir o cliente.');
-      mostrarMensagem('Cliente excluído!');
+      // O servidor diz se o cadastro foi apagado ou só anonimizado (quando há histórico de atendimentos)
+      const mensagem = (resultado as { mensagem?: unknown } | undefined)?.mensagem;
+      mostrarMensagem(typeof mensagem === 'string' ? mensagem : 'Cliente excluído!');
       setClientToDelete(null);
     } catch (error) {
       mostrarMensagem(mensagemDeErro(error, 'Não foi possível excluir o cliente.'));
@@ -377,7 +379,7 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
       <ConfirmDialog
         open={Boolean(clientToDelete)}
         title="Excluir Cliente?"
-        description="Esta ação removerá o histórico e não pode ser desfeita."
+        description="Clientes com atendimentos marcados não podem ser excluídos. Se houver histórico, nome, contato, CPF e ficha de saúde são apagados e os atendimentos ficam sem identificação. Não pode ser desfeito."
         confirmLabel="Excluir"
         cancelLabel="Cancelar"
         icon="warning"

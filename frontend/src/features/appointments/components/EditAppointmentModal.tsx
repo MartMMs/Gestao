@@ -5,6 +5,7 @@ import { AppointmentModalShell } from '../../../components/AppointmentModalShell
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
 import { isApiError } from '../../../api';
 import { formatPhone } from '../../../utils/formatters';
+import { useFormDraft } from '../../../hooks/useFormDraft';
 
 export interface EditAppointmentModalProps {
   appointment: Appointment;
@@ -18,14 +19,24 @@ export interface EditAppointmentModalProps {
 }
 
 export function EditAppointmentModal({ appointment, employees, services, appointments, onClose, onEditAppointment, setErrorMessage, setToastMessage }: EditAppointmentModalProps) {
-  const [editingAppointment, setEditingAppointment] = useState<Appointment>({
+  const [original] = useState<Appointment>(() => ({
     ...appointment,
     contact: appointment.contact && /\d/.test(appointment.contact) ? formatPhone(appointment.contact) : appointment.contact,
-  });
+  }));
+  // Rascunho por agendamento: se a sessão expirar no meio da edição, o que foi digitado volta ao reabrir.
+  // Fechar ou salvar apaga o rascunho (o servidor recusa com 409 se o agendamento mudou nesse meio tempo).
+  const { draft: editingAppointment, setDraft: setEditingAppointment, clearDraft } = useFormDraft<Appointment>(
+    `edit-appointment:${appointment.id}`,
+    original,
+  );
+  const closeAndDiscard = () => {
+    clearDraft();
+    onClose();
+  };
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const isEditingCompleted = editingAppointment.status === 'completed';
-  const [estadoInicial] = useState(() => JSON.stringify(editingAppointment));
+  const [estadoInicial] = useState(() => JSON.stringify(original));
   const hasUnsavedChanges = JSON.stringify(editingAppointment) !== estadoInicial;
 
   const handleEditSubmit = async (e: React.FormEvent) => {
@@ -49,11 +60,15 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
       }
     }
     if (!onEditAppointment || isSubmitting) return;
+    if (!editingAppointment.clientName.trim()) {
+      setErrorMessage('Informe o nome do cliente.');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
       const success = await onEditAppointment(editingAppointment.id, editingAppointment);
-      if (success !== false) { onClose(); setToastMessage('Agendamento atualizado!'); }
+      if (success !== false) { closeAndDiscard(); setToastMessage('Agendamento atualizado!'); }
     } catch (error) {
       if (isApiError(error) && error.status === 409) {
         setConflictMessage(error.message || 'Conflito de horário detectado. Ajuste os dados e tente novamente.');
@@ -62,7 +77,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
 
       if (isApiError(error) && error.status === 404) {
         setToastMessage('Este agendamento foi alterado ou excluído por outra pessoa.');
-        onClose();
+        closeAndDiscard();
         return;
       }
       setErrorMessage(error instanceof Error ? error.message : 'Não foi possível atualizar o agendamento.');
@@ -74,7 +89,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
   return (
     <AppointmentModalShell
       title="Editar Agendamento"
-      onClose={onClose}
+      onClose={closeAndDiscard}
       hasUnsavedChanges={hasUnsavedChanges}
       onSubmit={handleEditSubmit}
       submitLabel="Salvar Alterações"

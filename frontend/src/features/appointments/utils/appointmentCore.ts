@@ -1,4 +1,5 @@
 import { Appointment, Service } from '../../../types';
+import { duracaoTotal, horarioParaMinutos } from '@shared/agenda';
 import { formatPhone } from '../../../utils/formatters';
 
 type ServiceLike = Pick<Service, 'nome'> & Partial<Pick<Service, 'id' | 'duracao' | 'preco' | 'tempoHigienizacaoMin'>>;
@@ -50,15 +51,11 @@ export const normalizeKey = (value: string) => value
   .toLowerCase()
   .trim();
 
-export const getDuration = (serviceNames: string[] = [], services: ServiceLike[] = []) => serviceNames.reduce((sum, rawName) => {
+// Mesma regra do backend (shared/agenda.ts): cada serviço soma duração + higienização; sem serviço, a duração padrão
+export const getDuration = (serviceNames: string[] = [], services: ServiceLike[] = []) => duracaoTotal(serviceNames.map((rawName) => {
   const key = normalizeKey(String(rawName || ''));
-  const srv = services.find((s) => {
-    const sameId = typeof s.id === 'string' && s.id === rawName;
-    const sameName = normalizeKey(s.nome) === key;
-    return sameId || sameName;
-  });
-  return sum + (Number(srv?.duracao) || 60) + (Number(srv?.tempoHigienizacaoMin) || 0);
-}, 0);
+  return services.find((s) => (typeof s.id === 'string' && s.id === rawName) || normalizeKey(s.nome) === key);
+}).map((srv) => srv ?? {}));
 
 export const matchesAppointmentSearch = (appointment: Appointment, searchTerm: string): boolean => {
   const query = normalizeKey(searchTerm);
@@ -88,14 +85,16 @@ export const matchesResourceFilter = (appointment: Appointment, resourceFilter: 
 };
 
 export const hasOverlap = (targetDate: string, targetTime: string, empId: string, serviceNames: string[] = [], appointments: Appointment[], services: ServiceLike[] = [], ignoreAppId: string | null = null) => {
-  const newStart = parseInt(targetTime.split(':')[0]) * 60 + parseInt(targetTime.split(':')[1]);
+  const newStart = horarioParaMinutos(targetTime);
+  // Horário ilegível nunca vira "sem conflito": na dúvida, bloqueia (o backend também recusaria)
+  if (Number.isNaN(newStart)) return true;
   const newEnd = newStart + getDuration(serviceNames, services);
 
   return appointments.some(a => {
     // Atendimentos concluídos continuam ocupando o horário (o backend também os considera)
     if (a.id === ignoreAppId || a.date !== targetDate || a.assignedEmployeeId !== empId || !a.time) return false;
     if (a.status !== 'scheduled' && a.status !== 'completed') return false;
-    const existStart = parseInt(a.time.split(':')[0]) * 60 + parseInt(a.time.split(':')[1]);
+    const existStart = horarioParaMinutos(a.time);
     const existEnd = existStart + getDuration(a.services, services);
     return newStart < existEnd && newEnd > existStart;
   });

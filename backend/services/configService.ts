@@ -1,4 +1,5 @@
 import { prisma } from '../db';
+import { config as ambiente } from '../env';
 
 // Configurações padrão criadas na primeira leitura (fonte única para API interna e totem)
 
@@ -40,4 +41,14 @@ export const getAutoatendimentoConfig = () => prisma.configuracaoAutoatendimento
   where: { id: 'default' },
   update: {},
   create: AUTOATENDIMENTO_PADRAO,
+});
+
+// O pagamento online só vale com um gateway conectado (hoje: o segredo do webhook configurado). Sem ele, o botão
+// "exigir pagamento" fica guardado, mas o totem confirma a reserva com pagamento na recepção, em vez de mostrar
+// uma cobrança que ninguém vai aprovar e deixar a reserva expirar.
+export const pagamentoOnlineDisponivel = () => Boolean(ambiente.pagamentoWebhookSecret);
+
+export const comDisponibilidadePagamento = <T extends { exigirPagamento: boolean }>(config: T) => ({
+  ...config,
+  pagamentoOnlineDisponivel: pagamentoOnlineDisponivel(),
 });

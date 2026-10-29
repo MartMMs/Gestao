@@ -3,6 +3,7 @@ import { prisma } from '../db';
 import { HttpError } from '../lib/http';
 import { transacaoSerializavel, travarChave } from '../lib/transacao';
 import { redisService } from './redisService';
+import { config as ambiente } from '../env';
 import {
   blocosDoIntervalo,
   chaveTravaProfissional,
@@ -237,6 +238,18 @@ export const criarAgendamentoTotem = async (
     if (indisponivel) throw new HttpError(409, 'Este horário acabou de ser ocupado. Por favor, escolha outro horário.');
     if (await verificarConflitoSala(tx, sessao.salaId, inicio, duracaoTotal(servicos), opcoes.sessionToken)) {
       throw new HttpError(409, 'A sala deste horário acabou de ser ocupada. Por favor, escolha outro horário.');
+    }
+
+    const reservasAtivas = await tx.agendamento.count({
+      where: {
+        reservaOrigem: 'autoatendimento',
+        status: 'scheduled',
+        data: { gte: new Date() },
+        cliente: { telefone: { in: variantesTelefone(cliente.telefone) } },
+      },
+    });
+    if (reservasAtivas >= ambiente.totemMaxReservasPorTelefone) {
+      throw new HttpError(429, `Este telefone já tem ${reservasAtivas} reserva(s) futura(s) pelo totem. Para marcar mais, fale com a recepção.`);
     }
 
     const existente = cliente.cpf
