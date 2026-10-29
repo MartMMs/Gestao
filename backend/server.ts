@@ -26,9 +26,10 @@ const app = express();
 const server = http.createServer(app);
 
 // CORS_ORIGINS="https://app.exemplo.com,http://192.168.0.10:3000" define as origens aceitas (obrigatório em produção).
-// Sem a variável (só fora de produção), aceita a própria máquina e a rede local (totens, TVs, celulares da equipe).
+// Sem a variável (só fora de produção), aceita a própria máquina e a rede local (totens, TVs, celulares da equipe),
+// inclusive subdomínios de localhost (ex.: autoatendimento.localhost para testar o totem sem DNS).
 const origensPermitidas = config.corsOrigins;
-const REDE_LOCAL = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/;
+const REDE_LOCAL = /^https?:\/\/((?:[a-z0-9-]+\.)?localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/;
 const corsOptions: CorsOptions = {
   origin: origensPermitidas.length > 0
     ? origensPermitidas
