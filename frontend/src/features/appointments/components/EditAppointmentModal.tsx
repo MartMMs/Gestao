@@ -25,6 +25,8 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const isEditingCompleted = editingAppointment.status === 'completed';
+  const [estadoInicial] = useState(() => JSON.stringify(editingAppointment));
+  const hasUnsavedChanges = JSON.stringify(editingAppointment) !== estadoInicial;
 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,6 +40,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
         appointments,
         services,
         ignoreAppointmentId: editingAppointment.id,
+        permitirPassado: editingAppointment.date === appointment.date && editingAppointment.time === appointment.time,
       });
 
       if (scheduleValidationError) {
@@ -50,20 +53,19 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
     setIsSubmitting(true);
     try {
       const success = await onEditAppointment(editingAppointment.id, editingAppointment);
-      if (success !== false) { onClose(); setToastMessage('Agendamento atualizado!'); setTimeout(() => setToastMessage(null), 3000); }
+      if (success !== false) { onClose(); setToastMessage('Agendamento atualizado!'); }
     } catch (error) {
       if (isApiError(error) && error.status === 409) {
-        setConflictMessage(error.message || 'Conflito de horario detectado. Ajuste os dados e tente novamente.');
+        setConflictMessage(error.message || 'Conflito de horário detectado. Ajuste os dados e tente novamente.');
         return;
       }
 
       if (isApiError(error) && error.status === 404) {
-        setToastMessage('Este agendamento sofreu atualizacao recente e nao existe mais.');
-        setTimeout(() => setToastMessage(null), 3500);
+        setToastMessage('Este agendamento foi alterado ou excluído por outra pessoa.');
         onClose();
         return;
       }
-      setErrorMessage(error instanceof Error ? error.message : 'Nao foi possivel atualizar o agendamento.');
+      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível atualizar o agendamento.');
     } finally {
       setIsSubmitting(false);
     }
@@ -73,6 +75,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
     <AppointmentModalShell
       title="Editar Agendamento"
       onClose={onClose}
+      hasUnsavedChanges={hasUnsavedChanges}
       onSubmit={handleEditSubmit}
       submitLabel="Salvar Alterações"
       isSubmitting={isSubmitting}
@@ -85,7 +88,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
             <div>
               <p className="font-bold text-error uppercase tracking-[0.12em] text-[10px]">Conflito de agenda</p>
               <p className="text-on-surface-variant mt-1">{conflictMessage}</p>
-              <p className="text-on-surface-variant mt-1">Revise horario, colaborador e servicos antes de salvar novamente.</p>
+              <p className="text-on-surface-variant mt-1">Revise horário, colaborador e serviços antes de salvar novamente.</p>
             </div>
           </div>
         </div>

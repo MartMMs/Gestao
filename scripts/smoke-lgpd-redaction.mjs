@@ -1,4 +1,28 @@
-const API = process.env.API_URL || 'http://localhost:3333/api';
+import dotenv from 'dotenv';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.env'), quiet: true });
+
+const API = process.env.API_URL || `http://localhost:${process.env.PORT || 3333}/api`;
+// Contas de teste criadas por `npm --prefix backend run seed:ci`
+const SENHA = process.env.E2E_PASSWORD;
+if (!SENHA) {
+  console.error('Defina E2E_PASSWORD no .env e rode `npm --prefix backend run seed:ci`.');
+  process.exit(1);
+}
+
+// CPF aleatório com dígitos verificadores válidos (não colide com clientes reais)
+const gerarCpf = () => {
+  const base = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10));
+  const dv = (digitos, peso) => {
+    const resto = (digitos.reduce((t, d, i) => t + d * (peso - i), 0) * 10) % 11;
+    return resto === 10 ? 0 : resto;
+  };
+  const d1 = dv(base, 10);
+  const d2 = dv([...base, d1], 11);
+  return [...base, d1, d2].join('').replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+};
 
 const parseResponse = async (res) => {
   const text = await res.text();
@@ -25,31 +49,30 @@ const request = async (path, options = {}, token) => {
 
 const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-const maskedPhonePattern = /^\(\d{2}\)\s\*{5}-\*{2}\d{2}$/;
-const maskedCpfPattern = /^\*{3}\.\d{3}\.\*{3}-\d{2}$/;
+// Só os 2 últimos dígitos ficam visíveis (ver backend/lib/privacidade.ts)
+const maskedPhonePattern = /^\(\*{2}\)\s\*{5}-\*{2}\d{2}$/;
+const maskedCpfPattern = /^\*{3}\.\*{3}\.\*{3}-\d{2}$/;
 
 const run = async () => {
   const created = { appointmentId: null };
 
   const supervisorLogin = await request('/login', {
     method: 'POST',
-    body: JSON.stringify({ email: 'admin@serenidade.com', senha: '123456' }),
+    body: JSON.stringify({ email: 'admin@serenidade.com', senha: SENHA }),
   });
   const supervisorToken = supervisorLogin.body?.token;
 
   const collaboratorLogin = await request('/login', {
     method: 'POST',
-    body: JSON.stringify({ email: 'ana@serenidade.com', senha: '123456' }),
+    body: JSON.stringify({ email: 'ana@serenidade.com', senha: SENHA }),
   });
   if (!collaboratorLogin.ok || !collaboratorLogin.body?.token) {
     throw new Error('COLLABORATOR_LOGIN_FAILED');
   }
   const collaboratorToken = collaboratorLogin.body.token;
 
-  const colabs = await request('/colaboradores', { method: 'GET' }, collaboratorToken);
-  const collaborator = Array.isArray(colabs.body)
-    ? (colabs.body.find((c) => c.id !== 'admin') || colabs.body[0])
-    : null;
+  // A colaboradora agenda para si mesma
+  const collaborator = collaboratorLogin.body.usuario;
   if (!collaborator?.id) {
     throw new Error('COLLABORATOR_NOT_FOUND');
   }
@@ -67,7 +90,7 @@ const run = async () => {
   let selectedTime = null;
 
   for (let dayOffset = 2; dayOffset <= 20 && createAsCollaborator.status !== 201; dayOffset += 1) {
-    for (let hour = 8; hour <= 19 && createAsCollaborator.status !== 201; hour += 1) {
+    for (let hour = 9; hour <= 19 && createAsCollaborator.status !== 201; hour += 1) {
       for (const minute of [0, 15, 30, 45]) {
         const day = new Date();
         day.setDate(day.getDate() + dayOffset);
@@ -82,8 +105,8 @@ const run = async () => {
             collaboratorId: collaborator.id,
             date: `${date}T${hh}:${mm}:00.000-03:00`,
             serviceNames: [serviceName],
-            contact: '(11) 99888-7766',
-            cpf: '123.456.789-10',
+            contact: `(11) 9${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`,
+            cpf: gerarCpf(),
           }),
         }, collaboratorToken);
 
@@ -141,7 +164,11 @@ const run = async () => {
     pass,
   }, null, 2));
 
-  if (created.appointmentId && supervisorToken) {
+  // Remove o cliente de teste (e o agendamento dele) para não deixar restos no banco
+  const createdClientId = createAsCollaborator.body?.clienteId;
+  if (createdClientId && supervisorToken) {
+    await request(`/clientes/${createdClientId}`, { method: 'DELETE' }, supervisorToken);
+  } else if (created.appointmentId && supervisorToken) {
     await request(`/agendamentos/${created.appointmentId}`, { method: 'DELETE' }, supervisorToken);
   }
 

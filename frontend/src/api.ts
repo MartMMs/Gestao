@@ -1,6 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Appointment, Bloqueio, Client, Employee, Service, ServiceEligibilityMode, TurnoSwapRequest, TurnoSwapStatus } from './types';
+import { Appointment, Bloqueio, Client, Employee, EmployeeUpdate, Service, ServiceEligibilityMode, TurnoSwapRequest, TurnoSwapStatus, ConfiguracaoEmpresa } from './types';
 import { getApiUrl } from './config/api';
+import { redactSensitiveData } from '@shared/redact';
+
+// Disparado quando a API recusa o token (sessão expirada); o AuthContext faz logout
+export const SESSAO_EXPIRADA_EVENT = 'auth:sessao-expirada';
 
 export class ApiError extends Error {
   status: number;
@@ -17,46 +21,6 @@ export class ApiError extends Error {
 }
 
 export const isApiError = (error: unknown): error is ApiError => error instanceof ApiError;
-
-const SENSITIVE_LOG_KEYS = ['cpf', 'telefone', 'contact', 'authorization', 'token'];
-
-const sanitizeSensitiveString = (value: string) => value
-  .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]')
-  .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, '***.***.***-**')
-  .replace(/\(?\d{2}\)?\s?\d{4,5}-?\d{4}\b/g, '(**) *****-****');
-
-const redactSensitiveData = (value: unknown, seen = new WeakSet<object>()): unknown => {
-  if (typeof value === 'string') {
-    return sanitizeSensitiveString(value);
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => redactSensitiveData(item, seen));
-  }
-
-  if (value && typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    if (seen.has(obj)) return '[Circular]';
-    seen.add(obj);
-
-    if (value instanceof Error) {
-      return {
-        name: value.name,
-        message: sanitizeSensitiveString(value.message || ''),
-      };
-    }
-
-    const next: Record<string, unknown> = {};
-    for (const [key, nested] of Object.entries(obj)) {
-      const normalizedKey = key.toLowerCase();
-      const shouldRedact = SENSITIVE_LOG_KEYS.some((sensitiveKey) => normalizedKey.includes(sensitiveKey));
-      next[key] = shouldRedact ? '[REDACTED]' : redactSensitiveData(nested, seen);
-    }
-    return next;
-  }
-
-  return value;
-};
 
 const logFrontendApiError = (context: {
   endpoint: string;
@@ -112,7 +76,11 @@ const fetchApi = async (url: string, token: string | null, options: RequestInit 
       responseBody: errorData,
     });
 
-    throw new ApiError(requestId ? `${message} (requestId: ${requestId})` : message, response.status, requestId, code);
+    if (response.status === 401 && token) {
+      window.dispatchEvent(new CustomEvent(SESSAO_EXPIRADA_EVENT));
+    }
+
+    throw new ApiError(message, response.status, requestId, code);
   }
 
   return response.json();
@@ -129,12 +97,13 @@ interface BackendAppointment {
   clientName?: string;
   contact?: string;
   cpf?: string;
+  atualizadoEm?: string;
   guests?: number;
   specialNeeds?: string[];
   observation?: string;
   assignedEmployeeId?: string;
   colaboradorId?: string;
-  status?: 'scheduled' | 'completed';
+  status?: 'scheduled' | 'completed' | 'no_show' | 'cancelled';
 }
 
 interface BackendEmployee {
@@ -185,6 +154,7 @@ interface BackendTurnoSwapRequest {
   criadoEm: string | Date;
   atualizadoEm: string | Date;
   colaborador?: { nome?: string };
+  colaboradorNome?: string;
 }
 
 const normalizeAppointment = (appointment: BackendAppointment): Appointment => {
@@ -228,6 +198,7 @@ const normalizeAppointment = (appointment: BackendAppointment): Appointment => {
     observation: appointment.observation ?? '',
     assignedEmployeeId: appointment.assignedEmployeeId || appointment.colaboradorId || '',
     status: appointment.status || 'scheduled',
+    version: appointment.atualizadoEm,
   };
 };
 
@@ -240,7 +211,7 @@ const normalizeEmployee = (employee: BackendEmployee): Employee => {
     id: String(employee.id),
     name,
     email: employee.email || '',
-    role: role === 'supervisor' ? 'supervisor' : 'collaborator',
+    role: role === 'admin' || role === 'supervisor' || role === 'receptionist' ? role : 'collaborator',
     specialty,
     avatar: employee.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(name)}`,
     rating: Number(employee.rating) || 5,
@@ -288,7 +259,7 @@ const normalizeService = (service: BackendService): Service => {
 const normalizeTurnoSwapRequest = (request: BackendTurnoSwapRequest): TurnoSwapRequest => ({
   id: String(request.id),
   colaboradorId: request.colaboradorId,
-  colaboradorNome: request.colaborador?.nome,
+  colaboradorNome: request.colaboradorNome ?? request.colaborador?.nome,
   dataOriginal: request.dataOriginal,
   dataSolicitada: request.dataSolicitada,
   motivo: request.motivo,
@@ -302,10 +273,10 @@ const normalizeTurnoSwapRequest = (request: BackendTurnoSwapRequest): TurnoSwapR
 // Tipos para os dados de mutação
 type NewAppointmentPayload = Omit<Appointment, 'id' | 'status'>;
 type EditAppointmentPayload = Partial<Appointment> & { id: string };
-type NewEmployeePayload = Omit<Employee, 'id' | 'rating' | 'completedServices' | 'bloqueios' | 'avatar'> & { avatar?: string };
-type EditEmployeePayload = Partial<Employee> & { id: string };
+type NewEmployeePayload = Omit<Employee, 'id' | 'rating' | 'completedServices' | 'bloqueios' | 'avatar'> & { avatar?: string; password: string };
+type EditEmployeePayload = EmployeeUpdate & { id: string };
 type NewServicePayload = Omit<Service, 'id'>;
-type NewBloqueioPayload = Omit<Bloqueio, 'id'>;
+type NewBloqueioPayload = Omit<Bloqueio, 'id'> & { datas?: string[] };
 type NewTurnoSwapPayload = Omit<TurnoSwapRequest, 'id' | 'criadoEm' | 'atualizadoEm' | 'colaboradorNome'>;
 type QueryHookOptions = { enabled?: boolean };
 
@@ -370,8 +341,13 @@ const normalizeScaleOverridePayload = (value: unknown): ScaleOverridePayload | n
 export const useAppointments = (token: string | null) => useQuery({
   queryKey: ['appointments'],
   queryFn: async () => {
+    // O servidor devolve só o último ano: agendas não precisam do arquivo inteiro
+    // (histórico de cliente usa useClientAppointments; relatórios, /agendamentos/relatorio/concluidos)
     const appointments = await fetchApi('/agendamentos', token);
-    return Array.isArray(appointments) ? appointments.map(normalizeAppointment) : [];
+    // O servidor já descarta cancelados e não comparecimentos; o filtro abaixo é só defesa
+    return Array.isArray(appointments)
+      ? appointments.map(normalizeAppointment).filter((a) => a.status === 'scheduled' || a.status === 'completed')
+      : [];
   },
   enabled: !!token,
 });
@@ -388,6 +364,15 @@ export const useCompleteAppointment = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => fetchApi(`/agendamentos/${id}/concluir`, token, { method: 'PATCH' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+  });
+};
+
+// Desmarca o atendimento mantendo o histórico (colaboradores não podem excluir)
+export const useCancelAppointment = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => fetchApi(`/agendamentos/${id}/status`, token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
   });
 };
@@ -420,6 +405,17 @@ export const useDeleteAppointment = (token: string | null) => {
 // =======================
 // COLABORADORES
 // =======================
+// Histórico completo de um cliente, buscado só quando o histórico é aberto.
+// A chave começa com 'appointments' para ser invalidada junto com a agenda.
+export const useClientAppointments = (token: string | null, clientId: string | null) => useQuery({
+  queryKey: ['appointments', 'cliente', clientId],
+  queryFn: async () => {
+    const appointments = await fetchApi(`/agendamentos?clienteId=${encodeURIComponent(clientId || '')}`, token);
+    return Array.isArray(appointments) ? appointments.map(normalizeAppointment) : [];
+  },
+  enabled: !!token && !!clientId,
+});
+
 export const useEmployees = (token: string | null) => useQuery({
   queryKey: ['employees'],
   queryFn: async () => {
@@ -446,6 +442,7 @@ export const useAddEmployee = (token: string | null) => {
           habilidades: data.habilidades,
           papel: data.role,
           diasTrabalho: data.diasTrabalho,
+          senha: data.password,
         }),
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['employees'] })
@@ -457,7 +454,11 @@ export const useDeleteEmployee = (token: string | null) => {
   return useMutation({
     mutationFn: ({ id, reallocateToId }: { id: string, reallocateToId?: string }) => 
       fetchApi(`/colaboradores/${id}`, token, { method: 'DELETE', body: JSON.stringify({ reallocateToId }) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['employees'] })
+    // Remover alguém pode transferir ou cancelar atendimentos futuros
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+    }
   });
 };
 
@@ -478,6 +479,7 @@ export const useEditEmployee = (token: string | null) => {
           habilidades: data.habilidades,
           papel: data.role,
           diasTrabalho: data.diasTrabalho,
+          senha: data.password,
         }),
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['employees'] })
@@ -671,5 +673,25 @@ export const useDeleteBloqueio = (token: string | null) => {
   return useMutation({
     mutationFn: (id: string) => fetchApi(`/bloqueios/${id}`, token, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['employees'] })
+  });
+};
+
+export const useCompanyConfig = (token?: string | null) => useQuery<ConfiguracaoEmpresa>({
+  queryKey: ['company-config'],
+  queryFn: () => fetchApi('/empresa/config', token || null),
+  staleTime: 1000 * 60 * 5,
+});
+
+export const useUpdateCompanyConfig = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Partial<ConfiguracaoEmpresa>) =>
+      fetchApi('/empresa/config', token, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['company-config'] });
+    },
   });
 };

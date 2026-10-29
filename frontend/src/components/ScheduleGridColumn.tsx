@@ -1,12 +1,9 @@
-import React, { createContext, useContext } from 'react';
+import React, { createContext, useContext, useMemo } from 'react';
 import { Appointment, Employee, Service } from '../types';
-import { getDuration, matchesAppointmentSearch } from '../features/appointments/utils/appointmentCore';
+import { getDuration } from '../features/appointments/utils/appointmentCore';
 
 export interface ScheduleGridContext {
   receptionDate: string;
-  scheduleSearchTerm: string;
-  resourceFilter: 'all' | 'sala_massagem' | 'ofuro' | 'estetica';
-  appointments: Appointment[];
   services: Service[];
   startHour: number;
   endHour: number;
@@ -31,6 +28,9 @@ export interface ScheduleGridActions {
 
 interface EmployeeScheduleColumnProps {
   emp: Employee;
+  /** Agendamentos do dia deste profissional, já filtrados. A referência só muda quando a lista muda,
+   *  então o React.memo redesenha apenas a coluna afetada. */
+  appointments: Appointment[];
 }
 
 interface ScheduleGridProviderProps {
@@ -39,17 +39,21 @@ interface ScheduleGridProviderProps {
   children: React.ReactNode;
 }
 
+// Profissional de origem do card arrastado
+const DRAG_SOURCE_EMPLOYEE = 'application/x-source-employee';
+
 const ScheduleGridContextInternal = createContext<{ schedule: ScheduleGridContext; actions: ScheduleGridActions } | null>(null);
 
 export const ScheduleGridProvider = ({ schedule, actions, children }: ScheduleGridProviderProps) => {
+  const value = useMemo(() => ({ schedule, actions }), [schedule, actions]);
   return (
-    <ScheduleGridContextInternal.Provider value={{ schedule, actions }}>
+    <ScheduleGridContextInternal.Provider value={value}>
       {children}
     </ScheduleGridContextInternal.Provider>
   );
 };
 
-export const EmployeeScheduleColumn = React.memo(({ emp }: EmployeeScheduleColumnProps) => {
+export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppointments }: EmployeeScheduleColumnProps) => {
   const gridContext = useContext(ScheduleGridContextInternal);
   if (!gridContext) {
     throw new Error('EmployeeScheduleColumn deve ser usado dentro de ScheduleGridProvider.');
@@ -58,9 +62,6 @@ export const EmployeeScheduleColumn = React.memo(({ emp }: EmployeeScheduleColum
   const { schedule, actions } = gridContext;
   const {
     receptionDate,
-    scheduleSearchTerm,
-    resourceFilter,
-    appointments,
     services,
     startHour,
     endHour,
@@ -85,48 +86,25 @@ export const EmployeeScheduleColumn = React.memo(({ emp }: EmployeeScheduleColum
   const unavailableReason = employeeUnavailableReasons?.[emp.id] || null;
   const isUnavailable = Boolean(unavailableReason);
 
-  const matchesResourceFilter = (appointment: Appointment) => {
-    if (resourceFilter === 'all') return true;
-    const haystack = `${appointment.observation || ''} ${appointment.services.join(' ')}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-
-    if (resourceFilter === 'sala_massagem') {
-      return haystack.includes('sala de massagem') || haystack.includes('massagem');
-    }
-    if (resourceFilter === 'ofuro') {
-      return haystack.includes('ofuro') || haystack.includes('ofurô');
-    }
-    if (resourceFilter === 'estetica') {
-      return haystack.includes('estetica') || haystack.includes('estética') || haystack.includes('limpeza de pele');
-    }
-
-    return true;
-  };
-
-  const empAppointments = appointments
-    .filter((a) => a.date === receptionDate && a.assignedEmployeeId === emp.id)
-    .filter((a) => matchesAppointmentSearch(a, scheduleSearchTerm))
-    .filter((a) => matchesResourceFilter(a));
-
   const empBlockers = (emp.bloqueios || []).filter((b) => b.data === receptionDate);
 
   const handleDropOnColumn = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
 
     if (isUnavailable) {
-      setErrorMessage(`Nao foi possivel mover para ${emp.name}: ${unavailableReason}.`);
+      setErrorMessage(`Não foi possível mover para ${emp.name}: ${unavailableReason}.`);
       return;
     }
 
     const appointmentId = event.dataTransfer.getData('text/plain');
     if (!appointmentId || !onReassignAppointment) return;
 
-    const draggedAppointment = appointments.find((appointment) => appointment.id === appointmentId);
-    if (!draggedAppointment || draggedAppointment.assignedEmployeeId === emp.id) return;
+    // Soltar na própria coluna não muda nada (vale mesmo com busca/filtro ativos); o servidor valida o resto
+    if (event.dataTransfer.getData(DRAG_SOURCE_EMPLOYEE) === emp.id) return;
 
     try {
       await onReassignAppointment(appointmentId, emp.id);
       setToastMessage(`Agendamento movido para ${emp.name}.`);
-      setTimeout(() => setToastMessage(null), 2500);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Erro ao realocar agendamento.';
       setErrorMessage(msg); // Exibe o modal vermelho com a explicação do conflito CLT
@@ -191,7 +169,9 @@ export const EmployeeScheduleColumn = React.memo(({ emp }: EmployeeScheduleColum
         const [appH, appM] = app.time.split(':').map(Number);
         const top = ((appH - startHour) * 60 + appM) * minuteHeight;
         const durationMins = getDuration(app.services, services);
-        const height = Math.max(durationMins * minuteHeight, 30);
+        const height = Math.max(durationMins * minuteHeight, 36);
+        const fimMin = appH * 60 + appM + durationMins;
+        const horaFim = `${String(Math.floor(fimMin / 60)).padStart(2, '0')}:${String(fimMin % 60).padStart(2, '0')}`;
         const delayMinutes = (!isCompleted && isTodayView && currentMinute > appDateTime)
           ? Math.floor((currentMinute.getTime() - appDateTime.getTime()) / 60000)
           : 0;
@@ -257,6 +237,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp }: EmployeeScheduleColum
             onDragStart={(event) => {
               event.dataTransfer.effectAllowed = 'move';
               event.dataTransfer.setData('text/plain', app.id);
+              event.dataTransfer.setData(DRAG_SOURCE_EMPLOYEE, app.assignedEmployeeId);
             }}
             className={`absolute left-1 right-1 rounded-xl border ${cardStatusClass} flex flex-col group overflow-hidden transition-all hover:z-20`}
             style={{ top, height }}
@@ -264,7 +245,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp }: EmployeeScheduleColum
             <div className={`absolute top-0 bottom-0 left-0 w-1 ${sideColorClass}`}></div>
             <div className="pl-2 pr-1 py-1 flex flex-col h-full">
               <div className="flex justify-between items-start">
-                <span className={`text-[10px] font-bold leading-none ${visualStyle.text}`}>{app.time}</span>
+                <span className={`text-[10px] font-bold leading-none whitespace-nowrap ${visualStyle.text}`}>{app.time}–{horaFim}</span>
                 <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-surface-container-lowest/90 rounded-full shadow-sm p-0.5 border border-outline-variant/20 absolute right-1 top-1 z-30">
                   {!isCompleted && (
                     <button
@@ -272,7 +253,6 @@ export const EmployeeScheduleColumn = React.memo(({ emp }: EmployeeScheduleColum
                         e.stopPropagation();
                         onCompleteAppointment(app.id);
                         setToastMessage('Ok!');
-                        setTimeout(() => setToastMessage(null), 2000);
                       }}
                       className="text-on-surface-variant hover:text-primary p-1 rounded-full"
                     >
@@ -283,7 +263,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp }: EmployeeScheduleColum
                   <button onClick={(e) => { e.stopPropagation(); onDeleteAppointmentClick(app.id); }} className="text-on-surface-variant hover:text-error p-1 rounded-full"><span className="material-symbols-outlined text-[14px]">cancel</span></button>
                 </div>
               </div>
-              <h5 className="font-bold text-on-surface text-[11px] leading-tight truncate mt-0.5" title={app.clientName}>{app.clientName}</h5>
+              <h5 className={`font-bold text-on-surface text-[11px] leading-tight mt-0.5 break-words ${height > 52 ? 'line-clamp-2' : 'truncate'}`} title={app.clientName}>{app.clientName}</h5>
               {height > 40 && <p className="text-[9px] text-on-surface-variant leading-tight line-clamp-2 mt-0.5" title={app.services.join(', ')}>{app.services.join(', ')}</p>}
               {height > 60 && app.observation && <p className="text-[8px] text-on-surface-variant my-1 italic border-l-2 border-outline-variant/30 pl-1.5 line-clamp-1">{app.observation}</p>}
               {height > 50 && (

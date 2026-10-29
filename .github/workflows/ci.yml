@@ -38,21 +38,36 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gestao_ci
+      # Os testes rodam todos do mesmo IP; limites do totem mais altos só no CI
+      TOTEM_MAX_REQUISICOES_POR_MINUTO: '1000'
+      TOTEM_MAX_RESERVAS_POR_IP: '100'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Gerar segredos efêmeros do CI
+        # Gerados a cada execução (nunca versionados), para não servirem em nenhum outro ambiente
+        run: |
+          jwt=$(openssl rand -hex 32)
+          senha=$(openssl rand -hex 16)
+          echo "::add-mask::$jwt"
+          echo "::add-mask::$senha"
+          echo "JWT_SECRET=$jwt" >> "$GITHUB_ENV"
+          echo "E2E_PASSWORD=$senha" >> "$GITHUB_ENV"
       - run: npm ci
-      - run: npx prisma generate
-      - run: npx prisma migrate deploy
+      - run: npx prisma generate --schema=prisma/schema.prisma
+        working-directory: backend
+      - run: npx prisma migrate deploy --schema=prisma/schema.prisma
+        working-directory: backend
       - run: npx tsx prisma/seed.ci.ts
+        working-directory: backend
       - run: npx playwright install chromium --with-deps
       - name: Start API and Vite
         run: |
-          npx tsx server.ts &
-          npm run dev -- --port 3000 --host 127.0.0.1 &
+          (cd backend && npx tsx server.ts) &
+          npm run dev &
           for i in $(seq 1 60); do
             ui=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/ || true)
             api=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3333/api/colaboradores || true)

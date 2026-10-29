@@ -2,8 +2,16 @@ import jwt from 'jsonwebtoken';
 import { execSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 
-const JWT_SECRET = 'minha_chave_secreta_super_segura';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('Defina JWT_SECRET no .env antes de rodar o teste de estresse.');
+  process.exit(1);
+}
 
 async function main() {
   try {
@@ -11,7 +19,8 @@ async function main() {
     const AUTH_TOKEN = jwt.sign({ id: 'admin', papel: 'supervisor' }, JWT_SECRET, { expiresIn: '8h' });
 
     // 2. Usando um ID real extraído via psql do banco de dados
-    const COLABORADOR_ID = "b0dc500d-c899-40d6-a941-4c72c0400023";
+    const COLABORADOR_ID = process.env.COLABORADOR_ID;
+    if (!COLABORADOR_ID) throw new Error('Defina COLABORADOR_ID com o id de um colaborador do banco.');
 
     console.log(`[x] Gerado Token Supervisor: ${AUTH_TOKEN.substring(0, 15)}...`);
     console.log(`[x] Selecionado Colaborador ID Real: ${COLABORADOR_ID}`);
@@ -28,7 +37,7 @@ async function main() {
     console.log(`[x] Data/Hora do Agendamento a testar: ${DATE} às ${TIME}`);
     console.log("\n>>> Preparando bombardeio (10 requisições disparadas paralelamente)...\n");
 
-    const command = `API_BASE_URL=http://localhost:3333/api AUTH_TOKEN="${AUTH_TOKEN}" COLABORADOR_ID="${COLABORADOR_ID}" DATE="${DATE}" TIME="${TIME}" REQUESTS=10 node /home/matheusmartinsmoreira/Work/Gestão/scripts/stress-agendamento.mjs`;
+    const command = `API_BASE_URL=http://localhost:${process.env.PORT || 3333}/api AUTH_TOKEN="${AUTH_TOKEN}" COLABORADOR_ID="${COLABORADOR_ID}" DATE="${DATE}" TIME="${TIME}" REQUESTS=10 node "${path.join(__dirname, 'stress-agendamento.mjs')}"`;
 
     execSync(command, { stdio: 'inherit' });
 

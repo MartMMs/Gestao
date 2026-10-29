@@ -23,7 +23,7 @@ const FIELD_LABELS: Record<string, string> = {
   lentesContato: 'Lentes de contato',
   alergia: 'Alergias',
   patologia: 'Patologias',
-  partesNaoTocadas: 'Partes nao tocadas',
+  partesNaoTocadas: 'Partes não tocadas',
   preferencia: 'Preferencia',
   pressao: 'Pressao',
   banho: 'Banho',

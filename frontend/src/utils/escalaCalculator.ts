@@ -3,7 +3,7 @@
  * Lógica de cálculo de escalas (6x1, 5x2, 12x36, rotativo)
  */
 
-import { ehFeriado, obterNomeFeriado } from './feriadosBR';
+import { ehFeriado, obterNomeFeriado } from '@shared/feriadosBR';
 
 export type TipoEscala = '6x1' | '5x1' | '5x2' | '12x36' | 'rotativo' | 'personalizado';
 

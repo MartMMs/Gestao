@@ -145,8 +145,7 @@ export function AnamneseForm({ data, onChange, onClose }: Props) {
             <p className="text-sm font-bold text-error uppercase tracking-widest flex items-center gap-2">
               <span className="material-symbols-outlined text-[20px]">warning</span> Avisos Obrigatórios
             </p>
-            <p className="text-sm text-on-surface leading-relaxed"><strong>Obrigatório:</strong> O uso de roupa íntima durante os procedimentos é obrigatório, sem exceção.</p>
-            <p className="text-sm text-on-surface leading-relaxed"><strong>Intolerância ao comportamento sexual:</strong> Nenhum serviço prestado no Nascente Spa, tem conotação sexual. A relação entre cliente e massoterapeuta é estritamente profissional. É inaceitável a sexualização do atendimento e caso isso ocorra, o atendimento será imediatamente encerrado. Não há nenhuma exceção a esse limite.</p>
+            <p className="text-sm text-on-surface leading-relaxed"><strong>Conduta e Ética Profissional:</strong> Todos os atendimentos prestados em nosso estabelecimento seguem rigorosos padrões éticos e profissionais. A relação entre cliente e profissional é estritamente de respeito mútuo. Qualquer comportamento inadequado resultará no encerramento imediato do atendimento.</p>
           </div>
 
           <h3 className="text-lg font-headline text-secondary border-b border-outline-variant/20 pb-2">Ficha de Perfil</h3>

@@ -1,6 +1,6 @@
 import { Appointment, Service } from '../../../types';
 import { getBrazilCurrentTimeString, getDuration, getLocalTodayString, hasOverlap } from './appointmentCore';
-import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
+import { validarHorarioAgendamento } from '@shared/agenda';
 
 type ServiceLike = Pick<Service, 'nome'> & Partial<Pick<Service, 'id' | 'duracao' | 'preco'>>;
 
@@ -12,6 +12,8 @@ interface ValidateAppointmentInput {
   appointments: Appointment[];
   services: ServiceLike[];
   ignoreAppointmentId?: string;
+  // Edição sem troca de data/horário: não recusa por já ter passado (ex.: incluir serviço após o início)
+  permitirPassado?: boolean;
 }
 
 export function validateAppointmentScheduling(input: ValidateAppointmentInput): string | null {
@@ -23,29 +25,19 @@ export function validateAppointmentScheduling(input: ValidateAppointmentInput): 
     appointments,
     services,
     ignoreAppointmentId,
+    permitirPassado = false,
   } = input;
 
-  const minTime = `${String(SCHEDULE_CONFIG.START_HOUR).padStart(2, '0')}:00`;
-  const maxTime = `${String(SCHEDULE_CONFIG.END_HOUR).padStart(2, '0')}:00`;
-
+  // Mesmas regras do backend (horário de funcionamento, múltiplos de 15 min, fechamento, passado)
+  const durationMinutes = getDuration(serviceNames, services);
   const todayStr = getLocalTodayString();
   const currentTime = getBrazilCurrentTimeString();
-  if (date < todayStr || (date === todayStr && time < currentTime)) {
-    return 'Nao e permitido agendar no passado. Escolha uma data/horario futuro.';
+  if (!permitirPassado && (date < todayStr || (date === todayStr && time < currentTime))) {
+    return 'Não é permitido agendar no passado. Escolha uma data e horário futuros.';
   }
 
-  if (time < minTime || time > maxTime) {
-    return `Os agendamentos devem respeitar o horario comercial (${minTime} as ${maxTime}).`;
-  }
-
-  const [startHour, startMinute] = time.split(':').map(Number);
-  const startMinutes = startHour * 60 + startMinute;
-  const durationMinutes = getDuration(serviceNames, services);
-  const closingMinutes = SCHEDULE_CONFIG.END_HOUR * 60;
-
-  if (startMinutes + durationMinutes > closingMinutes) {
-    return `Este agendamento ultrapassa o fechamento as ${maxTime}.`;
-  }
+  const scheduleError = validarHorarioAgendamento(date, time, durationMinutes);
+  if (scheduleError) return scheduleError;
 
   const isOccupied = hasOverlap(
     date,
@@ -58,7 +50,7 @@ export function validateAppointmentScheduling(input: ValidateAppointmentInput): 
   );
 
   if (isOccupied) {
-    return 'Conflito de Horario.';
+    return 'Conflito de horário: o profissional já tem atendimento neste intervalo.';
   }
 
   return null;

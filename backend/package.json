@@ -1,12 +1,15 @@
 {
   "name": "gestao-backend",
   "private": true,
-  "version": "1.0.5-alpha",
+  "version": "1.1.0-beta.1",
   "type": "module",
   "scripts": {
-    "dev": "node ../node_modules/tsx/dist/cli.mjs server.ts",
+    "dev": "node ../node_modules/tsx/dist/cli.mjs watch server.ts",
     "seed": "node ../node_modules/tsx/dist/cli.mjs seed.ts",
     "prisma:generate": "node ../node_modules/prisma/build/index.js generate --schema=./prisma/schema.prisma",
-    "prisma:migrate": "node ../node_modules/prisma/build/index.js migrate dev --schema=./prisma/schema.prisma"
+    "prisma:migrate": "node ../node_modules/prisma/build/index.js migrate dev --schema=./prisma/schema.prisma",
+    "criar-usuario": "node ../node_modules/tsx/dist/cli.mjs criar-usuario.ts",
+    "seed:ci": "node ../node_modules/tsx/dist/cli.mjs prisma/seed.ci.ts",
+    "prisma:deploy": "node ../node_modules/prisma/build/index.js migrate deploy --schema=./prisma/schema.prisma"
   }
 }

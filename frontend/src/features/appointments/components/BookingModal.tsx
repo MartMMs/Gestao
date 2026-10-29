@@ -5,7 +5,7 @@ import { AnamneseForm, AnamneseData, initialAnamnese, formatAnamnese } from '../
 import { AppointmentScheduleFields } from '../../../components/AppointmentScheduleFields';
 import { AppointmentModalShell } from '../../../components/AppointmentModalShell';
 import { formatAnamneseStorage, parseClientObservation } from '../../../utils/anamneseUtils';
-import { formatPhone, formatCpf } from '../../../utils/formatters';
+import { formatPhone, formatCpf, isTeamMember } from '../../../utils/formatters';
 import { useFormDraft } from '../../../hooks/useFormDraft';
 import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
@@ -58,6 +58,9 @@ type BookingDraft = {
   serviceSearchTerm: string;
   bookDetails: string;
   bookClientObservation: string;
+  selectedClientId?: string | null;
+  showAnamnese?: boolean;
+  anamneseData?: AnamneseData;
 };
 
 type BookingAppointmentPayload = Omit<Appointment, 'id' | 'status'> & {
@@ -82,7 +85,7 @@ export interface BookingModalProps {
   setToastMessage: (msg: string | null) => void;
 }
 
-export function BookingModal({ receptionDate, initialTime, initialEmpId, clients, services, employees, appointments, isAddingAppointment, onClose, onAddAppointment, onEditClient, setErrorMessage, setToastMessage }: BookingModalProps) {
+export function BookingModal({ receptionDate, initialTime, initialEmpId, clients, services, employees, appointments, isAddingAppointment, onClose, onAddAppointment, setErrorMessage, setToastMessage }: BookingModalProps) {
   const initialDraft = useMemo<BookingDraft>(() => ({
     clientMode: 'search',
     bookDate: receptionDate,
@@ -95,44 +98,41 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     serviceSearchTerm: '',
     bookDetails: '',
     bookClientObservation: '',
+    selectedClientId: null,
+    showAnamnese: false,
+    anamneseData: initialAnamnese,
   }), [initialEmpId, initialTime, receptionDate]);
 
-  const { draft, setDraft, clearDraft } = useFormDraft<BookingDraft>('booking-modal-draft', initialDraft);
+  // Rascunho por slot: um formulário abandonado nunca é restaurado em outro horário/profissional
+  const { draft, setDraft, clearDraft } = useFormDraft<BookingDraft>(
+    `booking-modal-draft:${receptionDate}:${initialTime}:${initialEmpId}`,
+    initialDraft,
+  );
 
-  const [clientMode, setClientMode] = useState<'search' | 'new'>('search');
-  const [bookDate, setBookDate] = useState(receptionDate);
-  const [bookName, setBookName] = useState('');
+  const [clientMode, setClientMode] = useState<'search' | 'new'>(() => draft.clientMode || 'search');
+  const [bookDate, setBookDate] = useState(() => draft.bookDate || receptionDate);
+  const [bookName, setBookName] = useState(() => draft.bookName || '');
   const [clientSearchTerm, setClientSearchTerm] = useState('');
   const [isClientSearchOpen, setIsClientSearchOpen] = useState(false);
   const [activeClientIndex, setActiveClientIndex] = useState(-1);
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
-  const [bookPhone, setBookPhone] = useState('');
-  const [bookCpf, setBookCpf] = useState('');
-  const [bookTime, setBookTime] = useState(initialTime);
-  const [bookEmp, setBookEmp] = useState(initialEmpId);
-  const [bookService, setBookService] = useState<string[]>([]);
-  const [serviceSearchTerm, setServiceSearchTerm] = useState('');
-  const [bookDetails, setBookDetails] = useState('');
-  const [bookClientObservation, setBookClientObservation] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [conflictMessage, setConflictMessage] = useState<string | null>(null);
-  const [showAnamnese, setShowAnamnese] = useState(false);
-  const [anamneseData, setAnamneseData] = useState<AnamneseData>(initialAnamnese);
-  const clientSearchWrapperRef = useRef<HTMLDivElement | null>(null);
-  const canShowBookingDetails = clientMode === 'new' || Boolean(selectedClientId);
-  const bookingBusy = Boolean(isAddingAppointment || isSubmitting);
-
-  useEffect(() => {
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(() => draft.selectedClientId ?? null);
+  const [bookPhone, setBookPhone] = useState(() => formatPhone(draft.bookPhone || ''));
+  const [bookCpf, setBookCpf] = useState(() => formatCpf(draft.bookCpf || ''));
+  const [bookTime, setBookTime] = useState(() => draft.bookTime || initialTime);
+  const [bookEmp, setBookEmp] = useState(() => {
     const restoredBookEmp = draft.bookEmp || initialEmpId;
-    const isRestoredEmpValid = employees.some((employee) => employee.id === restoredBookEmp && employee.id !== 'admin');
-    const fallbackEmployeeId = employees.find((employee) => employee.id === initialEmpId && employee.id !== 'admin')?.id
-      || employees.find((employee) => employee.id !== 'admin')?.id
+    const isRestoredEmpValid = employees.some((employee) => employee.id === restoredBookEmp && isTeamMember(employee));
+    const fallbackEmployeeId = employees.find((employee) => employee.id === initialEmpId && isTeamMember(employee))?.id
+      || employees.find((employee) => isTeamMember(employee))?.id
       || '';
-
-    const restoredServices = Array.isArray(draft.bookService)
+    return isRestoredEmpValid ? restoredBookEmp : fallbackEmployeeId;
+  });
+  const [bookService, setBookService] = useState<string[]>(() => {
+    return Array.isArray(draft.bookService)
       ? draft.bookService.filter((serviceName) => services.some((service) => service.nome === serviceName))
       : [];
-
+  });
+  const [serviceSearchTerm, setServiceSearchTerm] = useState(() => {
     const restoredServiceSearchTerm = draft.serviceSearchTerm || '';
     const normalizedSearchTerm = normalizeSearch(restoredServiceSearchTerm);
     const hasSearchMatch = !normalizedSearchTerm || services.some((service) => {
@@ -140,19 +140,17 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       const description = normalizeSearch(service.descricao || '');
       return name.includes(normalizedSearchTerm) || description.includes(normalizedSearchTerm);
     });
-
-    setClientMode(draft.clientMode);
-    setBookDate(draft.bookDate || receptionDate);
-    setBookName(draft.bookName || '');
-    setBookPhone(formatPhone(draft.bookPhone || ''));
-    setBookCpf(formatCpf(draft.bookCpf || ''));
-    setBookTime(draft.bookTime || initialTime);
-    setBookEmp(isRestoredEmpValid ? restoredBookEmp : fallbackEmployeeId);
-    setBookService(restoredServices);
-    setServiceSearchTerm(hasSearchMatch ? restoredServiceSearchTerm : '');
-    setBookDetails(draft.bookDetails || '');
-    setBookClientObservation(draft.bookClientObservation || '');
-  }, [draft, employees, initialEmpId, initialTime, receptionDate, services]);
+    return hasSearchMatch ? restoredServiceSearchTerm : '';
+  });
+  const [bookDetails, setBookDetails] = useState(() => draft.bookDetails || '');
+  const [bookClientObservation, setBookClientObservation] = useState(() => draft.bookClientObservation || '');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+  const [showAnamnese, setShowAnamnese] = useState(() => Boolean(draft.showAnamnese));
+  const [anamneseData, setAnamneseData] = useState<AnamneseData>(() => draft.anamneseData ?? initialAnamnese);
+  const clientSearchWrapperRef = useRef<HTMLDivElement | null>(null);
+  const canShowBookingDetails = clientMode === 'new' || Boolean(selectedClientId);
+  const bookingBusy = Boolean(isAddingAppointment || isSubmitting);
 
   useEffect(() => {
     setDraft({
@@ -167,6 +165,9 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       serviceSearchTerm,
       bookDetails,
       bookClientObservation,
+      selectedClientId,
+      showAnamnese,
+      anamneseData,
     });
   }, [
     clientMode,
@@ -180,6 +181,9 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     serviceSearchTerm,
     bookDetails,
     bookClientObservation,
+    selectedClientId,
+    showAnamnese,
+    anamneseData,
     setDraft,
   ]);
 
@@ -205,7 +209,8 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
         const name = normalizeSearch(client.nome);
         const phone = (client.telefone || '').replace(/\D/g, '');
         const cpf = (client.cpf || '').replace(/\D/g, '');
-        const matches = !q || name.includes(q) || phone.includes(digits) || cpf.includes(digits);
+        // Sem dígitos na busca, só o nome conta (''.includes casaria com todo mundo)
+        const matches = name.includes(q) || (digits.length > 0 && (phone.includes(digits) || cpf.includes(digits)));
         if (!matches) return null;
 
         let score = 0;
@@ -237,7 +242,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     });
   }, [serviceSearchTerm, services]);
 
-  const teamEmployees = useMemo(() => employees.filter((employee) => employee.id !== 'admin'), [employees]);
+  const teamEmployees = useMemo(() => employees.filter((employee) => isTeamMember(employee)), [employees]);
 
   const selectedServiceDefinitions = useMemo(() => {
     if (bookService.length === 0) return [] as Service[];
@@ -292,12 +297,8 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
   const selectClient = (client: Client) => {
     const parsed = parseClientObservation(client.observacao);
-    const cpfFromHistory = appointments
-      .slice()
-      .reverse()
-      .find((app) => app.clientName.toLowerCase() === client.nome.toLowerCase() && app.cpf)?.cpf;
-
-    const finalCpf = client.cpf || cpfFromHistory || '';
+    // CPF só do próprio cadastro: buscar por nome no histórico misturava homônimos
+    const finalCpf = client.cpf || '';
 
     setSelectedClientId(client.id);
     setBookName(client.nome);
@@ -396,7 +397,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     const closingMinutes = SCHEDULE_CONFIG.END_HOUR * 60;
 
     if (startMinutes + durationMinutes > closingMinutes) {
-      setErrorMessage(`Este agendamento ultrapassa o fechamento as ${String(SCHEDULE_CONFIG.END_HOUR).padStart(2, '0')}:00. Reduza os servicos ou escolha um horario mais cedo.`);
+      setErrorMessage(`Este agendamento ultrapassa o fechamento às ${String(SCHEDULE_CONFIG.END_HOUR).padStart(2, '0')}:00. Reduza os serviços ou escolha um horário mais cedo.`);
       return;
     }
 
@@ -417,44 +418,34 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     }
 
     const finalDetails = showAnamnese ? `${bookDetails}${formatAnamnese(anamneseData)}`.trim() : bookDetails;
-    const matchedClient = clientMode === 'search'
-      ? clients.find(c => c.nome.toLowerCase() === bookName.toLowerCase().trim())
-      : undefined;
     const payloadObservation = formatAnamneseStorage(bookClientObservation, anamneseData);
 
+    // Só reaproveita o cliente escolhido na busca; nomes iguais podem ser pessoas diferentes.
+    // O backend atualiza os dados do cliente na mesma transação do agendamento (tudo ou nada).
     const selectedClient = clientMode === 'search'
       ? clients.find(c => c.id === selectedClientId)
       : undefined;
-    const clientToUpdate = selectedClient || matchedClient;
 
     setIsSubmitting(true);
     try {
-      if (clientToUpdate && onEditClient) {
-        await onEditClient(clientToUpdate.id, {
-          telefone: bookPhone,
-          cpf: bookCpf,
-          observacao: payloadObservation,
-        });
-      }
-
       const success = await onAddAppointment({
         clientName: bookName, contact: bookPhone || 'Não informado', date: bookDate, time: bookTime, guests: 1, specialNeeds: [],
         observation: finalDetails,
         assignedEmployeeId: bookEmp,
         services: bookService,
         cpf: bookCpf,
-        clientId: clientToUpdate?.id,
+        clientId: selectedClient?.id,
         clientObservation: payloadObservation,
       });
 
       if (success !== false) {
         clearDraft();
         onClose();
-        setToastMessage('Agendamento salvo na sua agenda!'); setTimeout(() => setToastMessage(null), 3000);
+        setToastMessage('Agendamento salvo na sua agenda!');
       }
     } catch (error) {
       if (isApiError(error) && error.status === 409) {
-        setConflictMessage(error.message || 'Conflito de horario detectado. Atualize a agenda e tente outro intervalo.');
+        setConflictMessage(error.message || 'Conflito de horário detectado. Atualize a agenda e tente outro intervalo.');
         return;
       }
 
@@ -463,17 +454,29 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
         return;
       }
 
-      setErrorMessage(error instanceof Error ? error.message : 'Nao foi possivel salvar o agendamento.');
+      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível salvar o agendamento.');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const hasUnsavedChanges = Boolean(
+    bookName.trim() || bookPhone || bookCpf || bookService.length > 0 || bookDetails.trim()
+    || bookClientObservation.trim() || selectedClientId || JSON.stringify(anamneseData) !== JSON.stringify(initialAnamnese),
+  );
+
+  // Fechar de propósito descarta o rascunho; ele só sobrevive a recarregar a página ou à sessão expirar
+  const handleClose = () => {
+    clearDraft();
+    onClose();
   };
 
   return (
     <>
       <AppointmentModalShell
         title="Novo Agendamento"
-        onClose={onClose}
+        onClose={handleClose}
+        hasUnsavedChanges={hasUnsavedChanges}
         onSubmit={handleQuickBook}
         submitLabel="Confirmar Agendamento"
         submitDisabled={bookingBusy}
@@ -485,9 +488,9 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
             <div className="flex items-start gap-2">
               <span className="material-symbols-outlined text-[16px] text-error mt-0.5">event_busy</span>
               <div>
-                <p className="font-bold text-error uppercase tracking-[0.12em] text-[10px]">Horario indisponivel</p>
+                <p className="font-bold text-error uppercase tracking-[0.12em] text-[10px]">Horário indisponível</p>
                 <p className="text-on-surface-variant mt-1">{conflictMessage}</p>
-                <p className="text-on-surface-variant mt-1">Dica: escolha outro horario ou atualize o colaborador para confirmar os slots livres.</p>
+                <p className="text-on-surface-variant mt-1">Dica: escolha outro horário ou atualize o colaborador para confirmar os slots livres.</p>
               </div>
             </div>
           </div>

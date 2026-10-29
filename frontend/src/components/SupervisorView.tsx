@@ -1,15 +1,19 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { NO_SCALE_OVERRIDES } from '../features/scale/components/SupervisorEscalaTab';
+import { useToast } from '../hooks/useToast';
 import { motion } from 'motion/react';
-import { Appointment, Bloqueio, Client, Employee, Service, TurnoSwapRequest, TurnoSwapStatus, ServiceEligibilityMode } from '../types';
+import { Appointment, Bloqueio, Client, Employee, Service, TurnoSwapRequest, TurnoSwapStatus, ServiceEligibilityMode, EmployeeUpdate } from '../types';
 import { getLocalTodayString } from '../features/appointments/utils/appointmentCore';
 import { SupervisorDashboardTab } from '../features/dashboard/components';
 import { SupervisorClientesTab } from '../features/clients/components';
 import { SupervisorEquipeTab } from '../features/team/components';
 import { SupervisorEscalaTab } from '../features/scale/components';
 import { SupervisorPlanejamentoTab } from '../features/planning/components';
+import { usePlanejamentoEscala, type ScaleOverridePayload } from '../features/planning/hooks/usePlanejamentoEscala';
 import { SupervisorServicosTab } from '../features/services/components';
-import { gerarEscalaComRegras, type DiaEscala } from '../utils/escalaCalculator';
-import { analisarConformidadeCLT } from '../utils/cltValidator';
+import { AutoatendimentoAdminTab } from '../features/autoatendimento/components';
+import { type DiaEscala } from '../utils/escalaCalculator';
+import { isTeamMember } from '../utils/formatters';
 
 type ServicePayload = {
   nome: string;
@@ -63,27 +67,11 @@ const getEligibilitySummary = (service: Service): string => {
   return 'Disponível para qualquer profissional';
 };
 
-const isValidScaleDayType = (value: unknown): value is DiaEscala['tipo'] => (
-  value === 'trabalho' || value === 'folga' || value === 'fds'
-);
-
 type AppointmentCreatePayload = Omit<Appointment, 'id' | 'status'> & {
   cpf?: string;
   clientId?: string;
   clientObservation?: string;
 };
-
-type ScaleOverridePayload = {
-  colaboradorId: string;
-  data: string;
-  tipo: DiaEscala['tipo'];
-  turno?: string;
-  descricao?: string;
-};
-
-type PlanningDateScope = 'mensal' | 'semanal';
-type PlanningShiftFilter = 'all' | 'manha' | 'tarde' | 'noite' | 'comercial' | 'folga';
-type PlanningWorkloadFilter = 'all' | 'ate36' | '37a44' | '45plus';
 
 type ScaleSwapPayload = {
   from: {
@@ -105,19 +93,19 @@ type ScaleReplicatePayload = {
   source?: { tipo: DiaEscala['tipo']; turno?: string; descricao?: string };
 };
 
-interface SupervisorViewProps {
+export interface SupervisorViewProps {
   employees: Employee[];
   appointments: Appointment[];
   services: Service[];
   clients: Client[];
   scaleOverrides?: ScaleOverridePayload[];
   onReassign: (appointmentId: string, newEmployeeId: string) => void;
-  onAddEmployee: (employee: Omit<Employee, 'id' | 'rating' | 'completedServices'>) => Promise<boolean | string | void> | void;
-  onDeleteEmployee: (id: string, reallocateToId?: string) => void;
-  onEditEmployee: (id: string, employee: Partial<Employee>) => Promise<boolean | string | void> | void;
+  onAddEmployee: (employee: Omit<Employee, 'id' | 'rating' | 'completedServices'> & { password: string }) => Promise<boolean | string | void> | void;
+  onDeleteEmployee: (id: string, reallocateToId?: string) => Promise<unknown> | void;
+  onEditEmployee: (id: string, employee: EmployeeUpdate) => Promise<boolean | string | void> | void;
   onAddService: (service: ServicePayload) => Promise<boolean | string | void>;
   onEditService: (id: string, service: ServicePayload) => Promise<boolean | string | void>;
-  onDeleteService: (id: string) => void;
+  onDeleteService: (id: string) => Promise<unknown> | void;
   onAddAppointment: (appointment: AppointmentCreatePayload) => Promise<boolean | void> | void;
   isAddingAppointment?: boolean;
   onDeleteAppointment: (id: string) => Promise<boolean | void> | void;
@@ -135,11 +123,11 @@ interface SupervisorViewProps {
   onReplicateScaleDays?: (payload: ScaleReplicatePayload) => Promise<boolean | void> | void;
 }
 
-export function SupervisorView({ employees, appointments, services, clients, scaleOverrides = [], onReassign, onAddEmployee, onDeleteEmployee, onEditEmployee, onAddService, onEditService, onDeleteService, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onCompleteAppointment, onEditClient, onDeleteClient, onAddBloqueio, onDeleteBloqueio, turnoSwapRequests = [], onUpdateTurnoSwapRequestStatus, onOpenUpcomingAppointments, onSaveScaleOverride, onSwapScaleDays, onReplicateScaleDays }: SupervisorViewProps) {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'escala' | 'planejamento' | 'equipe' | 'servicos' | 'clientes'>(() => {
+export function SupervisorView({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onReassign, onAddEmployee, onDeleteEmployee, onEditEmployee, onAddService, onEditService, onDeleteService, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onCompleteAppointment, onEditClient, onDeleteClient, onAddBloqueio, onDeleteBloqueio, turnoSwapRequests = [], onUpdateTurnoSwapRequestStatus, onOpenUpcomingAppointments, onSaveScaleOverride, onSwapScaleDays, onReplicateScaleDays }: SupervisorViewProps) {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'escala' | 'planejamento' | 'equipe' | 'servicos' | 'clientes' | 'autoatendimento'>(() => {
     if (typeof window === 'undefined') return 'dashboard';
     const saved = window.sessionStorage.getItem('supervisor-active-tab');
-    if (saved === 'dashboard' || saved === 'escala' || saved === 'planejamento' || saved === 'equipe' || saved === 'servicos' || saved === 'clientes') {
+    if (saved === 'dashboard' || saved === 'escala' || saved === 'planejamento' || saved === 'equipe' || saved === 'servicos' || saved === 'clientes' || saved === 'autoatendimento') {
       return saved;
     }
     return 'dashboard';
@@ -151,61 +139,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
     return saved === 'rh' ? 'rh' : 'operacional';
   });
 
-  const [selectedScaleEmployeeId, setSelectedScaleEmployeeId] = useState('');
-  const [selectedScaleMonth, setSelectedScaleMonth] = useState(getLocalTodayString().slice(0, 7));
-  const [selectedPlanningEmployeeId, setSelectedPlanningEmployeeId] = useState<string | null>(null);
-  const [planningScaleType, setPlanningScaleType] = useState<Employee['tipoEscala']>('6x1');
-  const [planningSundayOffs, setPlanningSundayOffs] = useState(2);
-  const [planningCoverageTarget, setPlanningCoverageTarget] = useState(5);
-  const [planningSundayFrequency, setPlanningSundayFrequency] = useState<'1x1' | '2x1'>('2x1');
-  const [isSavingPlanning, setIsSavingPlanning] = useState(false);
-  const [showTopAlerts, setShowTopAlerts] = useState(true);
-  const [dismissedCltAlertIds, setDismissedCltAlertIds] = useState<Record<string, boolean>>({});
-  const cltAlertTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const [planningViewMode, setPlanningViewMode] = useState<'calendario' | 'timeline'>(() => {
-    if (typeof window === 'undefined') return 'calendario';
-    const saved = window.sessionStorage.getItem('supervisor-planning-view-mode');
-    return saved === 'timeline' ? 'timeline' : 'calendario';
-  });
-  const [selectedPlanningDay, setSelectedPlanningDay] = useState<DiaEscala | null>(null);
-  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-  const [isPlanningEditMode, setIsPlanningEditMode] = useState(false);
-  const [employeeSearchTerm, setEmployeeSearchTerm] = useState('');
-  const [filterRole, setFilterRole] = useState<string>('all');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'folgaHoje'>('all');
-  const [planningDateScope, setPlanningDateScope] = useState<PlanningDateScope>('mensal');
-  const [planningWeekIndex, setPlanningWeekIndex] = useState(1);
-  const [planningEmployeeFilter, setPlanningEmployeeFilter] = useState<string>('all');
-  const [planningShiftFilter, setPlanningShiftFilter] = useState<PlanningShiftFilter>('all');
-  const [planningWorkloadFilter, setPlanningWorkloadFilter] = useState<PlanningWorkloadFilter>('all');
-  const [isScaleGeneratorOpen, setIsScaleGeneratorOpen] = useState(false);
-  const [scaleGeneratorEmployeeId, setScaleGeneratorEmployeeId] = useState('');
-  const [scaleGeneratorMonth, setScaleGeneratorMonth] = useState(getLocalTodayString().slice(0, 7));
-  const [scaleGeneratorType, setScaleGeneratorType] = useState<Employee['tipoEscala']>('6x1');
-  const [scaleGeneratorSundayOffs, setScaleGeneratorSundayOffs] = useState(2);
-  const [scaleGeneratorCoverageTarget, setScaleGeneratorCoverageTarget] = useState(5);
-  const [scaleGeneratorSundayFrequency, setScaleGeneratorSundayFrequency] = useState<'1x1' | '2x1'>('2x1');
-  const [scaleGeneratorSearch, setScaleGeneratorSearch] = useState('');
-  const planningMonthInputRef = useRef<HTMLInputElement | null>(null);
-  const [planningOverrides, setPlanningOverrides] = useState<Record<string, ScaleOverridePayload>>({});
-  const [suggestedPlanningKeys, setSuggestedPlanningKeys] = useState<string[]>([]);
-  const planningOverridesList = useMemo(
-    () => Object.values(planningOverrides) as ScaleOverridePayload[],
-    [planningOverrides],
-  );
 
-  // New Employee Form
-  const [newEmpName, setNewEmpName] = useState('');
-  const [newEmpEmail, setNewEmpEmail] = useState('');
-  const [newEmpSpecialty, setNewEmpSpecialty] = useState('');
-  const [newEmpRole, setNewEmpRole] = useState<'supervisor' | 'collaborator'>('collaborator');
-  const [newEmpDiasTrabalho, setNewEmpDiasTrabalho] = useState<string[]>(['1','2','3','4','5','6']);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  // Estado para exibir as credenciais de acesso após a criação do usuário
-  const [createdEmployeeInfo, setCreatedEmployeeInfo] = useState<{name: string, email: string, role: string} | null>(null);
-
-  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   // Estado para controlar o Modal de Exclusão
   const [employeeToDelete, setEmployeeToDelete] = useState<string | null>(null);
   const [reallocateToId, setReallocateToId] = useState<string>('');
@@ -237,13 +171,27 @@ export function SupervisorView({ employees, appointments, services, clients, sca
   const deferredServiceSearchTerm = useDeferredValue(serviceSearchTerm);
 
   // Estado para controlar o Toast de sucesso
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const { toastMessage, setToastMessage } = useToast();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Estado da Paginação de Colaboradores
-  const [employeeCurrentPage, setEmployeeCurrentPage] = useState(1);
-  const EMPLOYEES_PER_PAGE = 6; // Quantidade de cartões por página
-
+  // Estado e regras da Grade de Escalas
+  const planejamento = usePlanejamentoEscala({
+    employees,
+    scaleOverrides,
+    turnoSwapRequests,
+    onEditEmployee,
+    onUpdateTurnoSwapRequestStatus,
+    onSaveScaleOverride,
+    setToastMessage,
+    setErrorMessage,
+  });
+  const {
+    setShowTopAlerts,
+    setPlanningViewMode,
+    setEmployeeSearchTerm,
+    planningOverridesList,
+    cltRealtimeAlerts,
+  } = planejamento;
 
   // Função para formatar minutos em texto legível (ex: 1h 30m)
   const formatDuration = (minutes: number) => {
@@ -255,26 +203,6 @@ export function SupervisorView({ employees, appointments, services, clients, sca
     return `${m}m`;
   };
 
-  useEffect(() => {
-    setPlanningOverrides((prev) => {
-      const next = { ...prev };
-      scaleOverrides.forEach((override) => {
-        if (!override?.colaboradorId || !override?.data) return;
-
-        const tipo = isValidScaleDayType(override.tipo) ? override.tipo : null;
-        if (!tipo) return;
-
-        next[`${override.colaboradorId}:${override.data}`] = {
-          colaboradorId: override.colaboradorId,
-          data: override.data,
-          tipo,
-          turno: tipo === 'trabalho' ? override.turno : undefined,
-          descricao: override.descricao,
-        };
-      });
-      return next;
-    });
-  }, [scaleOverrides]);
 
   // Escuta o comando de Quick Fix vindo do Sino Global
   useEffect(() => {
@@ -312,72 +240,6 @@ export function SupervisorView({ employees, appointments, services, clients, sca
     }
   };
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.sessionStorage.setItem('supervisor-planning-view-mode', planningViewMode);
-  }, [planningViewMode]);
-
-  const handleAddEmployee = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newEmpName || !newEmpSpecialty) return;
-    
-    setIsSubmitting(true);
-    let success;
-
-    if (editingEmployeeId) {
-      success = await onEditEmployee(editingEmployeeId, {
-        name: newEmpName,
-        email: newEmpEmail,
-        specialty: newEmpSpecialty,
-        role: newEmpRole,
-        diasTrabalho: newEmpDiasTrabalho.join(',')
-      });
-
-      if (typeof success === 'string') {
-        setErrorMessage(success);
-        success = false;
-      } else if (success !== false) {
-        setToastMessage('Colaborador atualizado com sucesso!');
-      }
-    } else {
-      // Gera o e-mail automaticamente: remove acentos, espaços duplos e joga para minúsculo
-      const generatedEmail = newEmpName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '.') + '@serenidade.com';
-      
-      success = await onAddEmployee({
-        name: newEmpName,
-        email: generatedEmail,
-        role: newEmpRole,
-        specialty: newEmpSpecialty,
-        diasTrabalho: newEmpDiasTrabalho.join(','),
-        avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${newEmpName}`
-      });
-      
-      if (typeof success === 'string') {
-        setErrorMessage(success);
-        success = false; // Força a não resetar o formulário
-      } else if (success !== false) {
-        setToastMessage('Colaborador adicionado com sucesso!');
-        setCreatedEmployeeInfo({ name: newEmpName, email: generatedEmail, role: newEmpRole });
-      }
-    }
-    
-    setIsSubmitting(false);
-    
-    // Limpa o formulário apenas se a requisição for bem sucedida
-    if (success !== false) {
-      cancelEdit();
-      setTimeout(() => setToastMessage(null), 3000); // Esconde após 3 segundos
-    }
-  };
-
-  const cancelEdit = () => {
-    setEditingEmployeeId(null);
-    setNewEmpName('');
-    setNewEmpEmail('');
-    setNewEmpSpecialty('');
-    setNewEmpRole('collaborator');
-    setNewEmpDiasTrabalho(['1','2','3','4','5','6']);
-  };
 
   // Lógica de filtro para o histórico do colaborador no Modal
   const filteredHistory = viewingEmployee ? appointments.filter(a => {
@@ -441,7 +303,6 @@ export function SupervisorView({ employees, appointments, services, clients, sca
 
       setToastMessage(editingServiceId ? 'Serviço atualizado com sucesso!' : 'Serviço adicionado ao menu!');
       cancelServiceEdit();
-      setTimeout(() => setToastMessage(null), 3000);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Erro ao salvar serviço.');
     }
@@ -488,7 +349,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
     .sort((a, b) => a.localeCompare(b)), [employees]);
 
   const availableProfessionals = useMemo(() => Array.from(new Set(employees
-    .filter((emp) => emp.id !== 'admin')
+    .filter((emp) => isTeamMember(emp))
     .map((employee) => (employee.name || '').trim())
     .filter(Boolean)))
     .sort((a, b) => a.localeCompare(b)), [employees]);
@@ -506,665 +367,6 @@ export function SupervisorView({ employees, appointments, services, clients, sca
     }
     return { viewingEmployeeRevenue: revenue, viewingEmployeeNoShows: noShows };
   }, [viewingEmployee, appointments, services]);
-
-  const activeNonAdminEmployees = useMemo(
-    () => employees.filter((emp) => emp.id !== 'admin'),
-    [employees],
-  );
-
-  const effectiveSelectedScaleEmployeeId = useMemo(
-    () => selectedScaleEmployeeId || activeNonAdminEmployees[0]?.id || '',
-    [selectedScaleEmployeeId, activeNonAdminEmployees],
-  );
-
-  const selectedScaleEmployee = useMemo(
-    () => activeNonAdminEmployees.find((emp) => emp.id === effectiveSelectedScaleEmployeeId) || null,
-    [activeNonAdminEmployees, effectiveSelectedScaleEmployeeId],
-  );
-
-  useEffect(() => {
-    if (!selectedScaleEmployee) return;
-    setPlanningScaleType(selectedScaleEmployee.tipoEscala || '6x1');
-    setPlanningSundayOffs(selectedScaleEmployee.folgasDomingoNoMes ?? 2);
-  }, [selectedScaleEmployee]);
-
-  const splitTurno = (turno?: string) => {
-    if (!turno || !turno.includes('-')) {
-      return { horaInicio: undefined as string | undefined, horaFim: undefined as string | undefined };
-    }
-    const [horaInicio, horaFim] = turno.split('-');
-    return {
-      horaInicio: horaInicio || undefined,
-      horaFim: horaFim || undefined,
-    };
-  };
-
-  const applyOverrideToDia = useCallback((employeeId: string, dia: DiaEscala): DiaEscala => {
-    const override = planningOverrides[`${employeeId}:${dia.data}`];
-    if (!override) return dia;
-
-    if (!isValidScaleDayType(override.tipo)) {
-      return dia;
-    }
-
-    const { horaInicio, horaFim } = splitTurno(override.turno);
-    if (override.tipo !== 'trabalho') {
-      return {
-        ...dia,
-        tipo: override.tipo,
-        turno: undefined,
-        horaInicio: undefined,
-        horaFim: undefined,
-        descricao: override.descricao ?? dia.descricao,
-      };
-    }
-
-    return {
-      ...dia,
-      tipo: override.tipo,
-      turno: override.turno || dia.turno,
-      horaInicio: horaInicio || dia.horaInicio,
-      horaFim: horaFim || dia.horaFim,
-      descricao: override.descricao ?? dia.descricao,
-    };
-  }, [planningOverrides]);
-
-  const buildScaleForEmployee = useCallback((employeeId: string, options?: {
-    tipoEscala?: Employee['tipoEscala'];
-    folgasDomingoNoMes?: number;
-  }) => {
-    const employee = activeNonAdminEmployees.find((emp) => emp.id === employeeId);
-    if (!employee) return [] as DiaEscala[];
-
-    const [yearRaw, monthRaw] = selectedScaleMonth.split('-').map(Number);
-    const year = yearRaw || new Date().getFullYear();
-    const month = monthRaw || new Date().getMonth() + 1;
-    const firstDay = `${year}-${String(month).padStart(2, '0')}-01`;
-    const daysInMonth = new Date(year, month, 0).getDate();
-
-    const diasComRegras = gerarEscalaComRegras(
-      {
-        tipo: options?.tipoEscala || employee.tipoEscala || '6x1',
-        dataInicio: firstDay,
-      },
-      daysInMonth,
-      { folgasDomingoNoMes: options?.folgasDomingoNoMes ?? employee.folgasDomingoNoMes ?? 2 },
-    );
-
-    return diasComRegras.map((dia) => applyOverrideToDia(employeeId, dia));
-  }, [activeNonAdminEmployees, applyOverrideToDia, selectedScaleMonth]);
-
-  const selectedScaleCalendar = useMemo(() => {
-    if (!selectedScaleEmployee) {
-      return { year: 0, month: 0, dias: [] as DiaEscala[] };
-    }
-
-    const [yearRaw, monthRaw] = selectedScaleMonth.split('-').map(Number);
-    const year = yearRaw || new Date().getFullYear();
-    const month = monthRaw || new Date().getMonth() + 1;
-    const firstDay = `${year}-${String(month).padStart(2, '0')}-01`;
-    const daysInMonth = new Date(year, month, 0).getDate();
-
-    return {
-      year,
-      month,
-      dias: buildScaleForEmployee(selectedScaleEmployee.id, {
-        tipoEscala: planningScaleType || selectedScaleEmployee.tipoEscala || '6x1',
-        folgasDomingoNoMes: planningSundayOffs,
-      }),
-    };
-  }, [buildScaleForEmployee, planningScaleType, planningSundayOffs, selectedScaleEmployee, selectedScaleMonth]);
-
-  const selectedScaleMonthLabel = useMemo(() => {
-    const [yearRaw, monthRaw] = selectedScaleMonth.split('-').map(Number);
-    const safeYear = Number.isFinite(yearRaw) ? yearRaw : new Date().getFullYear();
-    const safeMonth = Number.isFinite(monthRaw) ? monthRaw : new Date().getMonth() + 1;
-    const label = new Date(safeYear, Math.max(0, safeMonth - 1), 1).toLocaleDateString('pt-BR', {
-      month: 'long',
-      year: 'numeric',
-    });
-    return label.charAt(0).toUpperCase() + label.slice(1);
-  }, [selectedScaleMonth]);
-
-  const changeScaleMonthBy = useCallback((offset: number) => {
-    setSelectedScaleMonth((current) => {
-      const [yearRaw, monthRaw] = current.split('-').map(Number);
-      const safeYear = Number.isFinite(yearRaw) ? yearRaw : new Date().getFullYear();
-      const safeMonth = Number.isFinite(monthRaw) ? monthRaw : new Date().getMonth() + 1;
-      const next = new Date(safeYear, safeMonth - 1 + offset, 1);
-      return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
-    });
-  }, []);
-
-  const openPlanningMonthPicker = useCallback(() => {
-    const input = planningMonthInputRef.current;
-    if (!input) return;
-
-    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
-    if (typeof pickerInput.showPicker === 'function') {
-      pickerInput.showPicker();
-      return;
-    }
-
-    input.click();
-  }, []);
-
-  const selectedScaleMonthMeta = useMemo(() => {
-    const [yearRaw, monthRaw] = selectedScaleMonth.split('-').map(Number);
-    const year = Number.isFinite(yearRaw) ? yearRaw : new Date().getFullYear();
-    const month = Number.isFinite(monthRaw) ? monthRaw : new Date().getMonth() + 1;
-    const days = new Date(year, month, 0).getDate();
-    const firstWeekday = new Date(year, month - 1, 1).getDay();
-    return { year, month, days, firstWeekday };
-  }, [selectedScaleMonth]);
-
-  const selectedScaleMonthDayCount = selectedScaleMonthMeta.days;
-
-  const planningWeekRanges = useMemo(() => {
-    const ranges: Array<{ start: number; end: number }> = [];
-    const { days, firstWeekday } = selectedScaleMonthMeta;
-
-    if (days <= 0) return [{ start: 1, end: 1 }];
-
-    const firstWeekLength = Math.max(1, 7 - firstWeekday);
-    const firstEnd = Math.min(days, firstWeekLength);
-    ranges.push({ start: 1, end: firstEnd });
-
-    let cursor = firstEnd + 1;
-    while (cursor <= days) {
-      const end = Math.min(days, cursor + 6);
-      ranges.push({ start: cursor, end });
-      cursor = end + 1;
-    }
-
-    return ranges;
-  }, [selectedScaleMonthMeta]);
-
-  const planningWeekOptions = useMemo(() => {
-    return planningWeekRanges.map((_, index) => index + 1);
-  }, [planningWeekRanges]);
-
-  useEffect(() => {
-    setPlanningWeekIndex((current) => {
-      if (current <= planningWeekOptions.length) return current;
-      return planningWeekOptions.length;
-    });
-  }, [planningWeekOptions]);
-
-  const planningVisibleDayRange = useMemo(() => {
-    if (planningDateScope === 'mensal') {
-      return {
-        start: 1,
-        end: selectedScaleMonthDayCount,
-      };
-    }
-
-    const selectedWeekRange = planningWeekRanges[Math.max(0, planningWeekIndex - 1)] || planningWeekRanges[0];
-    return selectedWeekRange;
-  }, [planningDateScope, planningWeekIndex, planningWeekRanges, selectedScaleMonthDayCount]);
-
-  useEffect(() => {
-    if (planningEmployeeFilter === 'all') return;
-    setSelectedScaleEmployeeId(planningEmployeeFilter);
-  }, [planningEmployeeFilter]);
-
-  const classifyShift = useCallback((dia: DiaEscala): Exclude<PlanningShiftFilter, 'all' | 'folga'> | null => {
-    if (dia.tipo !== 'trabalho') return null;
-
-    const turnoRef = dia.turno || ((dia.horaInicio && dia.horaFim) ? `${dia.horaInicio}-${dia.horaFim}` : '');
-    if (!turnoRef.includes('-')) return 'comercial';
-
-    const [start] = turnoRef.split('-');
-    const startHour = Number(start.split(':')[0]);
-
-    if (Number.isNaN(startHour)) return 'comercial';
-    if (startHour >= 12 && startHour < 18) return 'tarde';
-    if (startHour >= 18 || startHour < 5) return 'noite';
-
-    if (startHour >= 5 && startHour < 12) {
-      if (turnoRef.includes('18:00') || turnoRef.includes('19:00') || turnoRef.includes('17:00')) {
-        return 'comercial';
-      }
-      return 'manha';
-    }
-
-    return 'comercial';
-  }, []);
-
-  const scaleByEmployee = useMemo(() => {
-    const map = new Map<string, DiaEscala[]>();
-    activeNonAdminEmployees.forEach((employee) => {
-      map.set(employee.id, buildScaleForEmployee(employee.id));
-    });
-    return map;
-  }, [activeNonAdminEmployees, buildScaleForEmployee]);
-
-  const timelineEmployees = useMemo(() => {
-    const search = employeeSearchTerm.trim().toLowerCase();
-
-    const isDayInsideRange = (dia: DiaEscala) => {
-      const dayValue = Number(dia.data.split('-')[2]);
-      if (!Number.isFinite(dayValue)) return false;
-      return dayValue >= planningVisibleDayRange.start && dayValue <= planningVisibleDayRange.end;
-    };
-
-    const workloadMatches = (employee: Employee) => {
-      const carga = Number(employee.cargaHorariaSemanal) || 40;
-      if (planningWorkloadFilter === 'all') return true;
-      if (planningWorkloadFilter === 'ate36') return carga <= 36;
-      if (planningWorkloadFilter === '37a44') return carga >= 37 && carga <= 44;
-      return carga >= 45;
-    };
-
-    return activeNonAdminEmployees.filter((emp) => {
-      const employeeScale = scaleByEmployee.get(emp.id) || [];
-      const visibleScale = employeeScale.filter(isDayInsideRange);
-
-      if (filterRole !== 'all' && emp.cargo !== filterRole) return false;
-      if (planningEmployeeFilter !== 'all' && emp.id !== planningEmployeeFilter) return false;
-      if (!workloadMatches(emp)) return false;
-
-      if (filterStatus === 'folgaHoje') {
-        const diaHoje = employeeScale.find((dia) => dia.data === todayStr);
-        if (diaHoje?.tipo !== 'folga') return false;
-      }
-
-      if (planningShiftFilter !== 'all') {
-        const hasShiftMatch = planningShiftFilter === 'folga'
-          ? visibleScale.some((dia) => dia.tipo !== 'trabalho')
-          : visibleScale.some((dia) => classifyShift(dia) === planningShiftFilter);
-
-        if (!hasShiftMatch) return false;
-      }
-
-      if (search) {
-        const composite = `${emp.name} ${emp.cargo || ''} ${emp.specialty || ''}`.toLowerCase();
-        if (!composite.includes(search)) return false;
-      }
-
-      return true;
-    });
-  }, [
-    activeNonAdminEmployees,
-    classifyShift,
-    employeeSearchTerm,
-    filterRole,
-    filterStatus,
-    planningEmployeeFilter,
-    planningShiftFilter,
-    planningVisibleDayRange,
-    planningWorkloadFilter,
-    scaleByEmployee,
-    todayStr,
-  ]);
-
-  const filteredScaleGeneratorEmployees = useMemo(() => {
-    const search = scaleGeneratorSearch.trim().toLowerCase();
-    if (!search) return activeNonAdminEmployees;
-    return activeNonAdminEmployees.filter((emp) => {
-      const composite = `${emp.name} ${emp.cargo || ''} ${emp.specialty || ''}`.toLowerCase();
-      return composite.includes(search);
-    });
-  }, [activeNonAdminEmployees, scaleGeneratorSearch]);
-
-  const handleOpenScaleGenerator = () => {
-    const baseEmployee = activeNonAdminEmployees.find((emp) => emp.id === effectiveSelectedScaleEmployeeId)
-      || activeNonAdminEmployees[0]
-      || null;
-
-    if (!baseEmployee) {
-      setErrorMessage('Nenhum colaborador disponível para gerar escala.');
-      return;
-    }
-
-    setScaleGeneratorEmployeeId(baseEmployee.id);
-    setScaleGeneratorMonth(selectedScaleMonth);
-    setScaleGeneratorType(baseEmployee.tipoEscala || '6x1');
-    setScaleGeneratorSundayOffs(baseEmployee.folgasDomingoNoMes ?? 2);
-    setScaleGeneratorCoverageTarget(planningCoverageTarget);
-    setScaleGeneratorSundayFrequency(planningSundayFrequency);
-    setScaleGeneratorSearch('');
-    setIsScaleGeneratorOpen(true);
-  };
-
-  useEffect(() => {
-    if (!isScaleGeneratorOpen) return;
-    const employee = activeNonAdminEmployees.find((emp) => emp.id === scaleGeneratorEmployeeId);
-    if (!employee) return;
-    setScaleGeneratorType(employee.tipoEscala || '6x1');
-    setScaleGeneratorSundayOffs(employee.folgasDomingoNoMes ?? 2);
-  }, [activeNonAdminEmployees, isScaleGeneratorOpen, scaleGeneratorEmployeeId]);
-
-  const handleGenerateScale = async () => {
-    if (!scaleGeneratorEmployeeId || !scaleGeneratorMonth || isSavingPlanning) return;
-
-    setIsSavingPlanning(true);
-    try {
-      const success = await onEditEmployee(scaleGeneratorEmployeeId, {
-        tipoEscala: scaleGeneratorType,
-        folgasDomingoNoMes: scaleGeneratorSundayOffs,
-      });
-
-      if (typeof success === 'string') {
-        setErrorMessage(success);
-        return;
-      }
-
-      if (success !== false) {
-        setSelectedScaleEmployeeId(scaleGeneratorEmployeeId);
-        setSelectedScaleMonth(scaleGeneratorMonth);
-        setPlanningScaleType(scaleGeneratorType);
-        setPlanningSundayOffs(scaleGeneratorSundayOffs);
-        setPlanningCoverageTarget(scaleGeneratorCoverageTarget);
-        setPlanningSundayFrequency(scaleGeneratorSundayFrequency);
-        setIsScaleGeneratorOpen(false);
-
-        setToastMessage('Escala gerada com sucesso.');
-        setTimeout(() => setToastMessage(null), 2500);
-      }
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Nao foi possivel gerar a escala.');
-    } finally {
-      setIsSavingPlanning(false);
-    }
-  };
-
-  const handleTogglePlanningEditMode = () => {
-    if (!isPlanningEditMode) {
-      setIsPlanningEditMode(true);
-      setToastMessage('Modo de edição ativado. Arraste para ajustar a escala.');
-      setTimeout(() => setToastMessage(null), 2200);
-      return;
-    }
-
-    setIsPlanningEditMode(false);
-    setToastMessage('Alterações de grade salvas.');
-    setTimeout(() => setToastMessage(null), 2200);
-  };
-
-  const applyManualPlanningOverride = useCallback((payload: ScaleOverridePayload, successMessage: string) => {
-    const key = `${payload.colaboradorId}:${payload.data}`;
-
-    setPlanningOverrides((prev) => ({
-      ...prev,
-      [key]: payload,
-    }));
-
-    setSuggestedPlanningKeys((prev) => prev.filter((item) => item !== key));
-
-    void (async () => {
-      try {
-        if (onSaveScaleOverride) {
-          const success = await onSaveScaleOverride(payload);
-          if (success === false) {
-            setToastMessage('Alteração aplicada localmente. Sincronização pendente.');
-            setTimeout(() => setToastMessage(null), 2800);
-            return;
-          }
-        }
-
-        setToastMessage(successMessage);
-        setTimeout(() => setToastMessage(null), 1800);
-      } catch (error) {
-        setToastMessage('Alteração aplicada localmente. Falha na sincronização com servidor.');
-        setTimeout(() => setToastMessage(null), 3200);
-      }
-    })();
-  }, [onSaveScaleOverride]);
-
-  const handleQuickToggleTimelineDay = useCallback((employeeId: string, day: string, current?: DiaEscala) => {
-    const nextType: DiaEscala['tipo'] = current?.tipo === 'trabalho' ? 'folga' : 'trabalho';
-    const payload: ScaleOverridePayload = {
-      colaboradorId: employeeId,
-      data: day,
-      tipo: nextType,
-      turno: nextType === 'trabalho' ? (current?.turno || '08:00-18:00') : undefined,
-      descricao: nextType === 'trabalho' ? 'Ajuste manual rápido' : 'Folga manual rápida',
-    };
-
-    applyManualPlanningOverride(payload, `Dia atualizado para ${nextType === 'trabalho' ? 'trabalho' : 'folga'}.`);
-  }, [applyManualPlanningOverride]);
-
-  const handleQuickSetTimelineDay = useCallback((employeeId: string, day: string, tipo: DiaEscala['tipo'], turno?: string) => {
-    const payload: ScaleOverridePayload = {
-      colaboradorId: employeeId,
-      data: day,
-      tipo,
-      turno: tipo === 'trabalho' ? (turno || '08:00-18:00') : undefined,
-      descricao: tipo === 'folga' ? 'Folga manual' : `Turno manual (${turno || '08:00-18:00'})`,
-    };
-
-    applyManualPlanningOverride(payload, 'Turno ajustado manualmente.');
-  }, [applyManualPlanningOverride]);
-
-  const handleSuggestAutomaticScale = useCallback(() => {
-    if (timelineEmployees.length === 0) {
-      setErrorMessage('Nenhum colaborador disponível para sugerir escala.');
-      return;
-    }
-
-    const [yearRaw, monthRaw] = selectedScaleMonth.split('-').map(Number);
-    const year = yearRaw || new Date().getFullYear();
-    const month = monthRaw || new Date().getMonth() + 1;
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const sundayPatternLength = planningSundayFrequency === '1x1' ? 2 : 3;
-    const shiftRotation = ['06:00-14:00', '14:00-22:00', '22:00-06:00'];
-
-    const nextSuggested: Record<string, ScaleOverridePayload> = {};
-    const suggestedKeys: string[] = [];
-
-    const getProjectedDia = (employeeId: string, date: string) => {
-      const key = `${employeeId}:${date}`;
-      if (nextSuggested[key]) {
-        return {
-          tipo: nextSuggested[key].tipo,
-          turno: nextSuggested[key].turno,
-          descricao: nextSuggested[key].descricao,
-        } as DiaEscala;
-      }
-
-      return buildScaleForEmployee(employeeId).find((dia) => dia.data === date);
-    };
-
-    timelineEmployees.forEach((employee, employeeIndex) => {
-      const employeeScale = buildScaleForEmployee(employee.id);
-      const sundays = employeeScale.filter((dia) => new Date(`${dia.data}T12:00:00`).getDay() === 0);
-
-      sundays.forEach((dia, sundayIndex) => {
-        const shouldRestOnSunday = ((sundayIndex + employeeIndex) % sundayPatternLength) === (sundayPatternLength - 1);
-        if (!shouldRestOnSunday) return;
-
-        const key = `${employee.id}:${dia.data}`;
-        nextSuggested[key] = {
-          colaboradorId: employee.id,
-          data: dia.data,
-          tipo: 'folga',
-          turno: undefined,
-          descricao: 'Sugestão automática (regra de domingo)',
-        };
-
-        suggestedKeys.push(key);
-      });
-    });
-
-    for (let day = 1; day <= daysInMonth; day += 1) {
-      const date = `${selectedScaleMonth}-${String(day).padStart(2, '0')}`;
-      let activeCount = timelineEmployees.reduce((acc, employee) => {
-        const projectedDia = getProjectedDia(employee.id, date);
-        return acc + ((projectedDia?.tipo || 'trabalho') === 'trabalho' ? 1 : 0);
-      }, 0);
-
-      if (activeCount >= planningCoverageTarget) continue;
-
-      const standbyEmployees = timelineEmployees.filter((employee) => {
-        const projectedDia = getProjectedDia(employee.id, date);
-        return (projectedDia?.tipo || 'trabalho') !== 'trabalho';
-      });
-
-      for (let idx = 0; idx < standbyEmployees.length && activeCount < planningCoverageTarget; idx += 1) {
-        const employee = standbyEmployees[idx];
-        const key = `${employee.id}:${date}`;
-
-        nextSuggested[key] = {
-          colaboradorId: employee.id,
-          data: date,
-          tipo: 'trabalho',
-          turno: shiftRotation[(day + idx) % shiftRotation.length],
-          descricao: 'Sugestão automática (meta de cobertura)',
-        };
-
-        if (!suggestedKeys.includes(key)) suggestedKeys.push(key);
-        activeCount += 1;
-      }
-    }
-
-    setPlanningOverrides((prev) => {
-      const next = { ...prev };
-      suggestedPlanningKeys.forEach((key) => {
-        delete next[key];
-      });
-
-      Object.entries(nextSuggested).forEach(([key, override]) => {
-        next[key] = override;
-      });
-
-      return next;
-    });
-
-    setSuggestedPlanningKeys(suggestedKeys);
-    setToastMessage(`Sugestão aplicada em ${suggestedKeys.length} dia(s).`);
-    setTimeout(() => setToastMessage(null), 2600);
-  }, [buildScaleForEmployee, planningCoverageTarget, planningSundayFrequency, selectedScaleMonth, suggestedPlanningKeys, timelineEmployees]);
-
-  const handleConfirmSuggestedScale = useCallback(async () => {
-    if (suggestedPlanningKeys.length === 0 || isSavingPlanning) return;
-
-    if (!onSaveScaleOverride) {
-      setSuggestedPlanningKeys([]);
-      setToastMessage('Escala confirmada localmente.');
-      setTimeout(() => setToastMessage(null), 2200);
-      return;
-    }
-
-    setIsSavingPlanning(true);
-    try {
-      let successCount = 0;
-      const failedKeys: string[] = [];
-
-      for (const key of suggestedPlanningKeys) {
-        const override = planningOverrides[key];
-        if (!override) continue;
-
-        try {
-          const success = await onSaveScaleOverride(override);
-          if (success === false) {
-            failedKeys.push(key);
-            continue;
-          }
-          successCount += 1;
-        } catch (error) {
-          failedKeys.push(key);
-        }
-      }
-
-      setSuggestedPlanningKeys(failedKeys);
-
-      if (failedKeys.length === 0) {
-        setToastMessage(`Escala confirmada (${successCount} ajuste(s) sincronizados).`);
-      } else {
-        setToastMessage(`Escala parcialmente confirmada. ${failedKeys.length} ajuste(s) pendente(s).`);
-      }
-      setTimeout(() => setToastMessage(null), 3200);
-    } finally {
-      setIsSavingPlanning(false);
-    }
-  }, [isSavingPlanning, onSaveScaleOverride, planningOverrides, suggestedPlanningKeys]);
-
-  const cltRealtimeAlerts = useMemo(() => {
-    return activeNonAdminEmployees
-      .map((emp) => {
-        const malha = buildScaleForEmployee(emp.id);
-        const analise = analisarConformidadeCLT(malha);
-
-        return {
-          id: emp.id,
-          nome: emp.name,
-          conforme: analise.statusGeral,
-          resumo: analise.resumo,
-        };
-      })
-      .filter((item) => !item.conforme);
-  }, [activeNonAdminEmployees, buildScaleForEmployee]);
-
-  const pendingTurnoSwapRequests = useMemo(
-    () => turnoSwapRequests.filter((request) => request.status === 'pendente'),
-    [turnoSwapRequests],
-  );
-
-  const visibleCltToastAlerts = useMemo(
-    () => cltRealtimeAlerts.filter((alerta) => !dismissedCltAlertIds[alerta.id]),
-    [cltRealtimeAlerts, dismissedCltAlertIds],
-  );
-
-  useEffect(() => {
-    const activeIds = new Set(cltRealtimeAlerts.map((alerta) => alerta.id));
-
-    setDismissedCltAlertIds((prev) => {
-      let changed = false;
-      const next: Record<string, boolean> = {};
-
-      Object.keys(prev).forEach((id) => {
-        if (activeIds.has(id)) {
-          next[id] = prev[id];
-        } else {
-          changed = true;
-        }
-      });
-
-      return changed ? next : prev;
-    });
-
-    Object.keys(cltAlertTimersRef.current).forEach((id) => {
-      if (!activeIds.has(id)) {
-        clearTimeout(cltAlertTimersRef.current[id]);
-        delete cltAlertTimersRef.current[id];
-      }
-    });
-  }, [cltRealtimeAlerts]);
-
-  useEffect(() => {
-    visibleCltToastAlerts.forEach((alerta) => {
-      if (cltAlertTimersRef.current[alerta.id]) return;
-
-      cltAlertTimersRef.current[alerta.id] = setTimeout(() => {
-        setDismissedCltAlertIds((prev) => ({ ...prev, [alerta.id]: true }));
-        const timer = cltAlertTimersRef.current[alerta.id];
-        if (timer) {
-          clearTimeout(timer);
-          delete cltAlertTimersRef.current[alerta.id];
-        }
-      }, 8000);
-    });
-  }, [visibleCltToastAlerts]);
-
-  useEffect(() => {
-    return () => {
-      Object.keys(cltAlertTimersRef.current).forEach((id) => {
-        clearTimeout(cltAlertTimersRef.current[id]);
-      });
-      cltAlertTimersRef.current = {};
-    };
-  }, []);
-
-  const handleUpdateSwapStatus = async (id: string, status: Exclude<TurnoSwapStatus, 'pendente'>) => {
-    if (!onUpdateTurnoSwapRequestStatus) return;
-
-    const success = await onUpdateTurnoSwapRequestStatus(id, status);
-    if (success !== false) {
-      setToastMessage(`Solicitacao ${status === 'aprovada' ? 'aprovada' : 'rejeitada'} com sucesso.`);
-      setTimeout(() => setToastMessage(null), 2500);
-    }
-  };
 
   return (
     <div className="w-full max-w-6xl">
@@ -1202,6 +404,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
                   <button onClick={() => setActiveTab('escala')} className={`px-6 py-2 rounded-full text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all ${activeTab === 'escala' ? 'bg-primary text-on-primary shadow-md' : 'text-on-surface-variant hover:text-primary'}`}>Agenda</button>
                   <button onClick={() => setActiveTab('servicos')} className={`px-6 py-2 rounded-full text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all ${activeTab === 'servicos' ? 'bg-primary text-on-primary shadow-md' : 'text-on-surface-variant hover:text-primary'}`}>Serviços</button>
                   <button onClick={() => setActiveTab('clientes')} className={`px-6 py-2 rounded-full text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all ${activeTab === 'clientes' ? 'bg-primary text-on-primary shadow-md' : 'text-on-surface-variant hover:text-primary'}`}>Clientes</button>
+                  <button onClick={() => setActiveTab('autoatendimento')} className={`px-6 py-2 rounded-full text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all ${activeTab === 'autoatendimento' ? 'bg-primary text-on-primary shadow-md' : 'text-on-surface-variant hover:text-primary'}`}>Totem & Autoatendimento</button>
                 </>
               ) : (
                 <>
@@ -1246,86 +449,13 @@ export function SupervisorView({ employees, appointments, services, clients, sca
 
       {activeTab === 'planejamento' && (
         <SupervisorPlanejamentoTab
+          {...planejamento}
           employees={employees}
           appointments={appointments}
-          filterRole={filterRole}
-          setFilterRole={setFilterRole}
-          changeScaleMonthBy={changeScaleMonthBy}
-          openPlanningMonthPicker={openPlanningMonthPicker}
-          selectedScaleMonthLabel={selectedScaleMonthLabel}
-          planningMonthInputRef={planningMonthInputRef}
-          selectedScaleMonth={selectedScaleMonth}
-          setSelectedScaleMonth={setSelectedScaleMonth}
-          planningViewMode={planningViewMode}
-          setPlanningViewMode={setPlanningViewMode}
-          employeeSearchTerm={employeeSearchTerm}
-          setEmployeeSearchTerm={setEmployeeSearchTerm}
-          filterStatus={filterStatus}
-          setFilterStatus={setFilterStatus}
-          planningDateScope={planningDateScope}
-          setPlanningDateScope={setPlanningDateScope}
-          planningWeekIndex={planningWeekIndex}
-          setPlanningWeekIndex={setPlanningWeekIndex}
-          planningWeekOptions={planningWeekOptions}
-          planningEmployeeFilter={planningEmployeeFilter}
-          setPlanningEmployeeFilter={setPlanningEmployeeFilter}
-          planningShiftFilter={planningShiftFilter}
-          setPlanningShiftFilter={setPlanningShiftFilter}
-          planningWorkloadFilter={planningWorkloadFilter}
-          setPlanningWorkloadFilter={setPlanningWorkloadFilter}
-          planningVisibleDayRange={planningVisibleDayRange}
-          handleTogglePlanningEditMode={handleTogglePlanningEditMode}
-          isPlanningEditMode={isPlanningEditMode}
-          handleOpenScaleGenerator={handleOpenScaleGenerator}
-          handleSuggestAutomaticScale={handleSuggestAutomaticScale}
-          suggestedPlanningKeys={suggestedPlanningKeys}
-          handleConfirmSuggestedScale={handleConfirmSuggestedScale}
-          isSavingPlanning={isSavingPlanning}
-          showTopAlerts={showTopAlerts}
-          setShowTopAlerts={setShowTopAlerts}
-          visibleCltToastAlerts={visibleCltToastAlerts}
-          pendingTurnoSwapRequests={pendingTurnoSwapRequests}
-          handleUpdateSwapStatus={handleUpdateSwapStatus}
-          setDismissedCltAlertIds={setDismissedCltAlertIds}
-          selectedScaleEmployee={selectedScaleEmployee}
-          selectedScaleCalendar={selectedScaleCalendar}
-          setSelectedPlanningEmployeeId={setSelectedPlanningEmployeeId}
-          setSelectedPlanningDay={setSelectedPlanningDay}
-          setIsPopoverOpen={setIsPopoverOpen}
-          onSwapScaleDays={onSwapScaleDays}
-          setPlanningOverrides={setPlanningOverrides}
-          setToastMessage={setToastMessage}
-          timelineEmployees={timelineEmployees}
-          handleQuickToggleTimelineDay={handleQuickToggleTimelineDay}
-          handleQuickSetTimelineDay={handleQuickSetTimelineDay}
-          planningOverridesList={planningOverridesList}
-          buildScaleForEmployee={buildScaleForEmployee}
-          onReplicateScaleDays={onReplicateScaleDays}
-          planningCoverageTarget={planningCoverageTarget}
-          isPopoverOpen={isPopoverOpen}
-          selectedPlanningDay={selectedPlanningDay}
-          selectedPlanningEmployeeId={selectedPlanningEmployeeId}
-          splitTurno={splitTurno}
           onSaveScaleOverride={onSaveScaleOverride}
-          isScaleGeneratorOpen={isScaleGeneratorOpen}
-          setIsScaleGeneratorOpen={setIsScaleGeneratorOpen}
-          filteredScaleGeneratorEmployees={filteredScaleGeneratorEmployees}
-          scaleGeneratorSearch={scaleGeneratorSearch}
-          setScaleGeneratorSearch={setScaleGeneratorSearch}
-          scaleGeneratorEmployeeId={scaleGeneratorEmployeeId}
-          setScaleGeneratorEmployeeId={setScaleGeneratorEmployeeId}
-          scaleGeneratorMonth={scaleGeneratorMonth}
-          setScaleGeneratorMonth={setScaleGeneratorMonth}
-          scaleGeneratorType={scaleGeneratorType}
-          setScaleGeneratorType={setScaleGeneratorType}
-          scaleGeneratorSundayOffs={scaleGeneratorSundayOffs}
-          setScaleGeneratorSundayOffs={setScaleGeneratorSundayOffs}
-          scaleGeneratorCoverageTarget={scaleGeneratorCoverageTarget}
-          setScaleGeneratorCoverageTarget={setScaleGeneratorCoverageTarget}
-          scaleGeneratorSundayFrequency={scaleGeneratorSundayFrequency}
-          setScaleGeneratorSundayFrequency={setScaleGeneratorSundayFrequency}
-          handleGenerateScale={handleGenerateScale}
-          setSelectedScaleEmployeeId={setSelectedScaleEmployeeId}
+          onSwapScaleDays={onSwapScaleDays}
+          onReplicateScaleDays={onReplicateScaleDays}
+          setToastMessage={setToastMessage}
         />
       )}
 
@@ -1413,6 +543,10 @@ export function SupervisorView({ employees, appointments, services, clients, sca
         />
       )}
 
+      {activeTab === 'autoatendimento' && (
+        <AutoatendimentoAdminTab />
+      )}
+
         {/* Modal de Confirmação de Exclusão */}
         {employeeToDelete && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1448,12 +582,16 @@ export function SupervisorView({ employees, appointments, services, clients, sca
                   Cancelar
                 </button>
                 <button 
-                  onClick={() => {
-                    onDeleteEmployee(employeeToDelete, reallocateToId || undefined);
-                    setEmployeeToDelete(null);
-                    setReallocateToId('');
-                    setToastMessage('Ação concluída com sucesso.');
-                    setTimeout(() => setToastMessage(null), 3000);
+                  onClick={async () => {
+                    try {
+                      const resposta = await onDeleteEmployee(employeeToDelete, reallocateToId || undefined) as { mensagem?: string } | undefined;
+                      setToastMessage(resposta?.mensagem || 'Colaborador removido.');
+                    } catch (error) {
+                      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível remover o colaborador.');
+                    } finally {
+                      setEmployeeToDelete(null);
+                      setReallocateToId('');
+                    }
                   }}
                   className="flex-1 flex items-center justify-center gap-2 bg-error text-white py-3 rounded-xl font-bold text-sm uppercase tracking-wider hover:bg-error/90 transition-colors shadow-sm"
                 >
@@ -1486,11 +624,15 @@ export function SupervisorView({ employees, appointments, services, clients, sca
                 <button onClick={() => setServiceToDelete(null)} className="flex-1 py-3 rounded-xl font-bold text-sm uppercase tracking-wider text-on-surface-variant hover:bg-surface-container transition-colors">
                   Cancelar
                 </button>
-                <button onClick={() => {
-                    onDeleteService(serviceToDelete);
-                    setServiceToDelete(null);
-                    setToastMessage('Serviço excluído com sucesso!');
-                    setTimeout(() => setToastMessage(null), 3000);
+                <button onClick={async () => {
+                    try {
+                      await onDeleteService(serviceToDelete);
+                      setToastMessage('Serviço excluído com sucesso!');
+                    } catch (error) {
+                      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível excluir o serviço.');
+                    } finally {
+                      setServiceToDelete(null);
+                    }
                   }} className="flex-1 flex items-center justify-center gap-2 bg-error text-white py-3 rounded-xl font-bold text-sm uppercase tracking-wider hover:bg-error/90 transition-colors shadow-sm">
                   <span className="material-symbols-outlined text-[18px]">delete</span>
                   Excluir
@@ -1678,53 +820,6 @@ export function SupervisorView({ employees, appointments, services, clients, sca
               )}
             </div>
           )}
-            </motion.div>
-          </div>
-        )}
-
-        {/* Modal de Sucesso - Credenciais do Novo Usuário */}
-        {createdEmployeeInfo && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-              className="bg-surface-container-lowest/80 backdrop-blur-2xl p-8 rounded-3xl shadow-2xl max-w-md w-full border border-outline-variant/30"
-            >
-              <div className="text-center mb-6">
-                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="material-symbols-outlined text-3xl text-primary">how_to_reg</span>
-                </div>
-                <h2 className="text-2xl font-headline text-primary mb-2">Acesso Criado!</h2>
-                <p className="text-on-surface-variant text-sm">O profissional foi cadastrado e já pode acessar o sistema.</p>
-              </div>
-              
-              <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/20 space-y-4 mb-6">
-                <div>
-                  <p className="text-[10px] font-bold text-outline uppercase tracking-widest">Nome</p>
-                  <p className="text-sm font-bold text-on-surface mt-0.5">{createdEmployeeInfo.name}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold text-outline uppercase tracking-widest">E-mail de Acesso</p>
-                  <p className="text-sm font-bold text-primary mt-0.5 select-all">{createdEmployeeInfo.email}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold text-outline uppercase tracking-widest">Senha Padrão</p>
-                  <p className="text-sm font-bold text-on-surface mt-0.5 select-all">123456</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold text-outline uppercase tracking-widest">Nível de Acesso</p>
-                  <p className="text-sm font-bold text-on-surface mt-0.5 capitalize">{
-                    createdEmployeeInfo.role === 'supervisor' ? 'Supervisor (Acesso Total)' : 
-                    'Colaborador (Agenda Padrão)'
-                  }</p>
-                </div>
-              </div>
-
-              <button 
-                onClick={() => setCreatedEmployeeInfo(null)}
-                className="w-full py-3 bg-primary text-on-primary rounded-xl font-bold text-sm uppercase tracking-wider shadow-sm hover:bg-primary-dim transition-colors"
-              >
-                Concluir
-              </button>
             </motion.div>
           </div>
         )}

@@ -1,0 +1,38 @@
+name: Release
+
+# Dispara ao enviar uma tag de versão, ex.: git tag v1.0.6 && git push origin v1.0.6
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:unit
+      - run: npm run build
+
+      - name: Empacotar frontend
+        run: cd frontend/dist && zip -r "../../gestao-frontend-${GITHUB_REF_NAME}.zip" .
+
+      - name: Criar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSAO="${GITHUB_REF_NAME#v}"
+          NOTAS="docs/RELEASE_NOTES_${VERSAO}.md"
+          ARGS=(--title "$GITHUB_REF_NAME")
+          # Versões com sufixo (-alpha, -beta, -rc) são marcadas como pré-release
+          [[ "$VERSAO" == *-* ]] && ARGS+=(--prerelease)
+          if [ -f "$NOTAS" ]; then ARGS+=(--notes-file "$NOTAS"); else ARGS+=(--generate-notes); fi
+          gh release create "$GITHUB_REF_NAME" "gestao-frontend-${GITHUB_REF_NAME}.zip" "${ARGS[@]}"

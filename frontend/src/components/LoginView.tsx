@@ -7,10 +7,22 @@ import bgImage from '../../0768-TA-Alex-nov20.jpg';
 interface LoginViewProps {
   onLogin: (email: string, pass: string) => Promise<void>;
   onOpenTVPanel: () => void;
+  onOpenAutoatendimento?: () => void;
   error: string | null;
+  companyName?: string;
+  companySlogan?: string;
+  companyIcon?: string;
 }
 
-export function LoginView({ onLogin, onOpenTVPanel, error }: LoginViewProps) {
+export function LoginView({
+  onLogin,
+  onOpenTVPanel,
+  onOpenAutoatendimento,
+  error,
+  companyName,
+  companySlogan,
+  companyIcon,
+}: LoginViewProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -44,27 +56,36 @@ export function LoginView({ onLogin, onOpenTVPanel, error }: LoginViewProps) {
   };
 
   // Preenchimento automático para testes
-  const handleAutoFill = (testEmail: string, testPass: string) => {
-    setEmail(testEmail);
-    setPassword(testPass);
-    setEmailError(false);
-  };
-
   // Detecta o horário para uma saudação dinâmica
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
 
   return (
     <div className="min-h-screen w-full flex flex-col md:flex-row bg-surface-container-lowest text-on-surface antialiased font-body relative">
-      {/* Botão TV - Canto superior esquerdo */}
-      <button
-        type="button"
-        onClick={onOpenTVPanel}
-        className="fixed top-6 left-6 text-primary opacity-70 hover:opacity-100 transition-opacity cursor-pointer z-50"
-        title="Abrir Painel TV"
-      >
-        <span className="material-symbols-outlined text-2xl">tv</span>
-      </button>
+      {/* Botões Topo - TV e Totem Autoatendimento */}
+      <div className="fixed top-6 left-6 flex items-center gap-3 z-50">
+        <button
+          type="button"
+          onClick={onOpenTVPanel}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container/90 backdrop-blur-md border border-outline-variant/30 text-primary hover:bg-surface-container hover:border-primary/40 transition-all text-xs font-semibold cursor-pointer shadow-sm"
+          title="Abrir Painel TV"
+        >
+          <span className="material-symbols-outlined text-lg">tv</span>
+          <span className="hidden sm:inline">Painel TV</span>
+        </button>
+
+        {onOpenAutoatendimento && (
+          <button
+            type="button"
+            onClick={onOpenAutoatendimento}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 backdrop-blur-md border border-primary/30 text-primary hover:bg-primary hover:text-on-primary transition-all text-xs font-semibold cursor-pointer shadow-sm"
+            title="Abrir Totem de Autoatendimento do Cliente"
+          >
+            <span className="material-symbols-outlined text-lg">touch_app</span>
+            <span>Autoatendimento</span>
+          </button>
+        )}
+      </div>
 
       {/* Coluna da Imagem (Esquerda) - Visível em telas médias e maiores */}
       <div 
@@ -73,8 +94,8 @@ export function LoginView({ onLogin, onOpenTVPanel, error }: LoginViewProps) {
       >
         <div className="absolute inset-0 bg-linear-to-t from-black/60 via-black/20 to-transparent"></div>
         <div className="absolute bottom-10 left-10 text-white">
-          <h1 className="text-5xl font-serif italic mb-2">Serenidade Spa</h1>
-          <p className="text-lg text-white/80">Plataforma de gestão completa para o seu negócio.</p>
+          <h1 className="text-5xl font-serif italic mb-2">{companyName || 'OmniGestão'}</h1>
+          <p className="text-lg text-white/80">{companySlogan || 'Plataforma de gestão completa para o seu negócio.'}</p>
         </div>
       </div>
 
@@ -87,9 +108,11 @@ export function LoginView({ onLogin, onOpenTVPanel, error }: LoginViewProps) {
           className="w-full max-w-md"
         >
           <div className="text-center mb-10 md:text-left">
-            <span className="material-symbols-outlined text-5xl mb-4 text-primary">spa</span>
-            <h1 className="text-4xl md:text-5xl font-serif italic mb-2 tracking-wide text-on-surface">Serenidade</h1>
-            <p className="text-sm uppercase tracking-[0.3em] text-on-surface-variant">Sistema de Gestão</p>
+            <span className="material-symbols-outlined text-5xl mb-4 text-primary">{companyIcon || 'storefront'}</span>
+            <h1 className="text-4xl md:text-5xl font-serif italic mb-2 tracking-wide text-on-surface">
+              {companyName ? companyName.split(' ')[0] : 'OmniGestão'}
+            </h1>
+            <p className="text-sm uppercase tracking-[0.3em] text-on-surface-variant">Sistema de Gestão & Agendamento</p>
             <p className="text-lg font-light text-on-surface-variant mt-4">{greeting}, faça seu login.</p>
           </div>
 
@@ -149,35 +172,6 @@ export function LoginView({ onLogin, onOpenTVPanel, error }: LoginViewProps) {
             </button>
           </form>
 
-          <div className="pt-8 mt-8 border-t border-outline-variant/20">
-            <p className="text-[10px] text-center font-bold uppercase tracking-[0.2em] mb-4 text-on-surface-variant/60">Acesso Rápido (Testes)</p>
-            <div className="grid grid-cols-3 gap-3">
-              <button 
-                type="button"
-                onClick={() => handleAutoFill('admin@serenidade.com', '123456')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl border border-outline-variant/20 bg-surface-container hover:bg-surface-container-high transition-colors group"
-              >
-                <span className="material-symbols-outlined mb-1 text-on-surface-variant/70 group-hover:text-primary transition-opacity">shield_person</span>
-                <span className="text-[10px] font-bold tracking-widest uppercase text-on-surface-variant">Supervisor</span>
-              </button>
-              <button 
-                type="button"
-                onClick={() => handleAutoFill('roberto@serenidade.com', '123456')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl border border-outline-variant/20 bg-surface-container hover:bg-surface-container-high transition-colors group"
-              >
-                <span className="material-symbols-outlined mb-1 text-on-surface-variant/70 group-hover:text-primary transition-opacity">support_agent</span>
-                <span className="text-[10px] font-bold tracking-widest uppercase text-on-surface-variant">Recepção</span>
-              </button>
-              <button 
-                type="button"
-                onClick={() => handleAutoFill('helena@serenidade.com', '123456')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl border border-outline-variant/20 bg-surface-container hover:bg-surface-container-high transition-colors group"
-              >
-                <span className="material-symbols-outlined mb-1 text-on-surface-variant/70 group-hover:text-primary transition-opacity">spa</span>
-                <span className="text-[10px] font-bold tracking-widest uppercase text-on-surface-variant">Colaborador</span>
-              </button>
-            </div>
-          </div>
         </motion.div>
       </div>
     </div>

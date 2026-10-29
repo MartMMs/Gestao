@@ -32,3 +32,10 @@ google-chrome-stable_current_x86_64.rpm*
 .cursor/
 .vscode/
 Gestao-*.desktop
+
+# Dados locais gerados em tempo de execucao
+backend/escala_overrides.json
+
+# Projeto externo (FreeLLMAPI) baixado na pasta; não faz parte do app
+freellmapi/
+install.sh

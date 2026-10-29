@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useToast } from '../hooks/useToast';
 import { Employee, Appointment, Service, Client, Bloqueio } from '../types';
 import { getBrazilCurrentMinuteOfDay, getLocalTodayString, getDuration, matchesAppointmentSearch } from '../features/appointments/utils/appointmentCore';
 import { SCHEDULE_CONFIG } from '../config/scheduleConfig';
@@ -18,7 +19,7 @@ interface CollaboratorViewProps {
   appointments: Appointment[];
   services: Service[];
   clients: Client[];
-  onCompleteAppointment: (id: string) => void;
+  onCompleteAppointment: (id: string) => Promise<unknown> | void;
   onAddAppointment: (appointment: Omit<Appointment, 'id' | 'status'>) => Promise<boolean | void> | void;
   isAddingAppointment?: boolean;
   onEditAppointment?: (id: string, appointment: Partial<Appointment>) => Promise<boolean | void> | void;
@@ -48,7 +49,7 @@ export function CollaboratorView({
   onSubmitTurnoSwapRequest,
 }: CollaboratorViewProps) {
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const { toastMessage, setToastMessage } = useToast();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentMinute, setCurrentMinute] = useState(new Date());
   const [scheduleSearchTerm, setScheduleSearchTerm] = useState('');
@@ -126,10 +127,13 @@ export function CollaboratorView({
     };
   }, [myAppointments, currentUser]);
 
-  const handleComplete = (id: string) => {
-    onCompleteAppointment(id);
-    setToastMessage('Atendimento concluído com sucesso!');
-    setTimeout(() => setToastMessage(null), 3000);
+  const handleComplete = async (id: string) => {
+    try {
+      await onCompleteAppointment(id);
+      setToastMessage('Atendimento concluído com sucesso!');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível concluir o atendimento.');
+    }
   };
 
   const handleGridClick = useCallback((e: React.MouseEvent<HTMLDivElement>, empId: string) => {
@@ -403,7 +407,7 @@ export function CollaboratorView({
           appointments={appointments}
           services={services}
           onEditClient={onEditClient}
-          onDeleteClient={onDeleteClient}
+          somenteAnamnese
           setToastMessage={setToastMessage}
         />
       </div>
@@ -421,13 +425,14 @@ export function CollaboratorView({
         />
       )}
 
-      {appointmentToDelete && (
+      {appointmentToDelete && onDeleteAppointment && (
         <DeleteAppointmentModal
           appointmentId={appointmentToDelete}
           onClose={closeDeleteAppointmentModal}
           onDeleteAppointment={onDeleteAppointment}
           setToastMessage={setToastMessage}
           setErrorMessage={setErrorMessage}
+          modo="cancelar"
         />
       )}
 

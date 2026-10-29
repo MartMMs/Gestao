@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { motion } from 'motion/react';
 import { Service, ServiceEligibilityMode } from '../../../types';
 
@@ -13,7 +14,9 @@ interface SupervisorServicosTabProps {
   formatDuration: (minutes: number) => string;
   getEligibilitySummary: (service: Service) => string;
   onEditServiceCard: (service: Service) => void;
-  onDeleteServiceCard: (serviceId: string) => void;
+  onDeleteServiceCard: (serviceId: string) => unknown;
+  // Quando o componente pai não tem diálogo próprio, a aba pede confirmação antes de excluir
+  confirmarExclusao?: boolean;
   serviceIcons: string[];
   newServiceIcon: string;
   setNewServiceIcon: (value: string) => void;
@@ -57,6 +60,7 @@ export function SupervisorServicosTab({
   getEligibilitySummary,
   onEditServiceCard,
   onDeleteServiceCard,
+  confirmarExclusao = false,
   serviceIcons,
   newServiceIcon,
   setNewServiceIcon,
@@ -87,6 +91,24 @@ export function SupervisorServicosTab({
   newServiceDescription,
   setNewServiceDescription,
 }: SupervisorServicosTabProps) {
+  const [servicoParaExcluir, setServicoParaExcluir] = useState<Service | null>(null);
+  const [excluindo, setExcluindo] = useState(false);
+  const [erroExclusao, setErroExclusao] = useState<string | null>(null);
+
+  const confirmarExclusaoServico = async () => {
+    if (!servicoParaExcluir) return;
+    setExcluindo(true);
+    setErroExclusao(null);
+    try {
+      await onDeleteServiceCard(servicoParaExcluir.id);
+      setServicoParaExcluir(null);
+    } catch (error) {
+      setErroExclusao(error instanceof Error ? error.message : 'Não foi possível excluir o serviço.');
+    } finally {
+      setExcluindo(false);
+    }
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
       <div className="xl:col-span-7 space-y-6">
@@ -178,7 +200,7 @@ export function SupervisorServicosTab({
                 </div>
                 <div className="flex gap-2 justify-end border-t border-outline-variant/10 pt-3 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                   <button onClick={(e) => { e.stopPropagation(); onEditServiceCard(srv); }} className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full transition-colors" title="Editar"><span className="material-symbols-outlined text-[22px]">edit</span></button>
-                  <button onClick={(e) => { e.stopPropagation(); onDeleteServiceCard(srv.id); }} className="p-2 text-on-surface-variant hover:bg-error-container/20 hover:text-error rounded-full transition-colors" title="Excluir"><span className="material-symbols-outlined text-[22px]">delete</span></button>
+                  <button onClick={(e) => { e.stopPropagation(); if (confirmarExclusao) setServicoParaExcluir(srv); else onDeleteServiceCard(srv.id); }} className="p-2 text-on-surface-variant hover:bg-error-container/20 hover:text-error rounded-full transition-colors" title="Excluir"><span className="material-symbols-outlined text-[22px]">delete</span></button>
                 </div>
               </div>
             );
@@ -352,6 +374,18 @@ export function SupervisorServicosTab({
           <button type="submit" className="w-full mt-4 bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim transition-all active:scale-[0.98]">{editingServiceId ? 'Salvar Alterações' : 'Salvar Serviço'}</button>
         </form>
       </div>
+      <ConfirmDialog
+        open={Boolean(servicoParaExcluir)}
+        title={`Excluir o serviço ${servicoParaExcluir?.nome ?? ''}?`}
+        description={erroExclusao ?? 'O serviço sairá do catálogo. Serviços com agendamentos vinculados não podem ser excluídos.'}
+        confirmLabel="Sim, excluir"
+        confirmingLabel="Excluindo..."
+        cancelLabel="Manter serviço"
+        icon="delete"
+        isSubmitting={excluindo}
+        onClose={() => { setServicoParaExcluir(null); setErroExclusao(null); }}
+        onConfirm={confirmarExclusaoServico}
+      />
     </motion.div>
   );
 }

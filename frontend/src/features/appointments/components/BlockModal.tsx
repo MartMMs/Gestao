@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Appointment, Bloqueio, Employee } from '../../../types';
 import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
+import { isTeamMember } from '../../../utils/formatters';
 
 export interface BlockModalProps {
   receptionDate: string;
@@ -10,8 +11,8 @@ export interface BlockModalProps {
   employees: Employee[];
   appointments?: Appointment[];
   onClose: () => void;
-  onAddBloqueio?: (b: Omit<Bloqueio, 'id'>) => Promise<boolean | void>;
-  onReassignAppointment?: (appointmentId: string, newEmployeeId: string) => void;
+  onAddBloqueio?: (b: Omit<Bloqueio, 'id'> & { datas?: string[] }) => Promise<unknown>;
+  onReassignAppointment?: (appointmentId: string, newEmployeeId: string) => Promise<unknown> | void;
   setErrorMessage: (msg: string | null) => void;
   setToastMessage: (msg: string | null) => void;
 }
@@ -34,6 +35,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
   const [blockReason, setBlockReason] = useState('');
   const [isFolga, setIsFolga] = useState(false);
   const [reassignToId, setReassignToId] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [blockPreset, setBlockPreset] = useState<'custom' | 'folga' | 'ferias15' | 'ferias30'>('custom');
 
   const dayOfWeek = useMemo(() => new Date(`${blockDate}T12:00:00`).getDay(), [blockDate]);
@@ -44,7 +46,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
 
   const suggestedEmployees = useMemo(() => {
     const candidates = employees.filter((emp) => {
-      if (emp.id === bookEmp || emp.id === 'admin') return false;
+      if (emp.id === bookEmp || !isTeamMember(emp)) return false;
       if (emp.diasTrabalho && !emp.diasTrabalho.split(',').includes(String(dayOfWeek))) return false;
       return true;
     });
@@ -108,17 +110,24 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
       return;
     }
 
-    if (isFolga && pendingAppointments.length > 0 && onReassignAppointment && reassignToId) {
-      pendingAppointments.forEach((app) => onReassignAppointment(app.id, reassignToId));
-    }
+    if (isSaving) return;
+    setIsSaving(true);
+    let transferidos = 0;
+    try {
+      // Transfere os atendimentos antes de bloquear. Se uma transferência falhar, o bloqueio não é criado
+      // (as já feitas continuam válidas) e o usuário é avisado de quantas foram feitas.
+      if (isFolga && pendingAppointments.length > 0 && onReassignAppointment && reassignToId) {
+        for (const app of pendingAppointments) {
+          await onReassignAppointment(app.id, reassignToId);
+          transferidos += 1;
+        }
+      }
 
-    const datesToCreate = buildBlockDateList();
-    let allCreated = true;
-
-    for (const dateValue of datesToCreate) {
-      // Férias e presets recorrentes usam blocos diários consecutivos no modelo atual.
+      // Todos os dias (férias/folgas) vão numa única requisição: gravados todos ou nenhum
+      const datas = buildBlockDateList();
       const success = await onAddBloqueio({
-        data: dateValue,
+        data: datas[0],
+        datas,
         horaInicio: effectiveStart,
         horaFim: effectiveEnd,
         motivo: blockPreset === 'ferias15'
@@ -130,14 +139,8 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
               : effectiveReason,
         colaboradorId: bookEmp,
       });
+      if (success === false) throw new Error('Erro ao registrar bloqueio.');
 
-      if (!success) {
-        allCreated = false;
-        break;
-      }
-    }
-
-    if (allCreated) {
       onClose();
       setToastMessage(
         blockPreset === 'ferias15'
@@ -148,9 +151,13 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
               ? 'Folga registrada e agendamentos transferidos!'
               : 'Bloqueio registrado!'
       );
-      setTimeout(() => setToastMessage(null), 3000);
-    } else {
-      setErrorMessage('Erro ao registrar bloqueio.');
+    } catch (error) {
+      const motivoErro = error instanceof Error && error.message ? error.message : 'Erro ao registrar bloqueio.';
+      setErrorMessage(transferidos > 0
+        ? `${motivoErro} ${transferidos} de ${pendingAppointments.length} agendamento(s) já foram transferidos; o bloqueio ainda não foi criado. Resolva o restante e tente de novo.`
+        : motivoErro);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -159,7 +166,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
       <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-surface-container-lowest p-8 rounded-3xl shadow-xl max-w-sm w-full border border-outline-variant/20">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-headline text-error">Bloquear Agenda</h2>
-          <button onClick={onClose} className="p-2 hover:bg-surface-container rounded-full text-on-surface-variant"><span className="material-symbols-outlined">close</span></button>
+          <button onClick={onClose} disabled={isSaving} aria-label="Fechar" className="p-2 hover:bg-surface-container rounded-full text-on-surface-variant disabled:opacity-40"><span className="material-symbols-outlined">close</span></button>
         </div>
         <form onSubmit={handleBlockSubmit} className="space-y-4">
           <div>
@@ -250,7 +257,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
               )}
             </div>
           )}
-          <button type="submit" className="w-full mt-4 bg-error text-onError py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-error/90 transition-all text-white">Salvar Bloqueio</button>
+          <button type="submit" disabled={isSaving} className="w-full mt-4 bg-error text-onError py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-error/90 transition-all text-white disabled:opacity-60 disabled:cursor-not-allowed">{isSaving ? 'Salvando...' : 'Salvar Bloqueio'}</button>
         </form>
       </motion.div>
     </div>

@@ -3,6 +3,24 @@
 
 Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e servicos.
 
+**Versao atual: 1.1.0-beta.1** (pre-release). Notas completas em [docs/RELEASE_NOTES_1.1.0-beta.1.md](docs/RELEASE_NOTES_1.1.0-beta.1.md).
+
+## Novidades da 1.1.0-beta.1
+
+- **Totem em subdominio proprio:** o autoatendimento roda em `autoatendimento.<seu-dominio>` (ou no host definido
+  em `VITE_AUTOATENDIMENTO_HOST`), sem tela de login e sem o codigo do portal da equipe. Como e outra origem, a
+  sessao da equipe nunca fica acessivel no aparelho do totem. Botao "Recomecar" libera a reserva em aberto.
+- **Agenda mais rapida:** cada coluna so redesenha quando os agendamentos daquele profissional mudam; o servidor
+  devolve so o ultimo ano (`GET /agendamentos`, com `?desde=AAAA-MM-DD` validado).
+- **Historico do cliente completo:** busca o periodo todo do cliente (com faltas), ate os 300 atendimentos mais
+  recentes, e grava cada acesso na trilha de auditoria (`AcessoHistoricoCliente`: quem, qual cliente, IP, quando).
+- **Tempo real com escopo:** o aviso `db_updated` informa o que mudou e cada tela recarrega so essas listas.
+  Conexoes sem login (totem/TV) recebem apenas um aviso vazio, e so quando mudam agendamentos ou servicos.
+- **Cargo x funcao de acesso:** o cadastro de profissional separa o *cargo* (rotulo livre, usado nas regras
+  "Somente cargos") da *funcao de acesso* (o que a pessoa pode fazer no sistema).
+- **Correcoes:** `VITE_API_URL`/`VITE_SOCKET_URL` voltam a valer no build de producao; linha vermelha da agenda
+  cobre todas as colunas; painel da TV usa o fuso de Brasilia; mensagens (toasts) nao se apagam umas as outras.
+
 ## Guias detalhados
 
 Para detalhes tecnicos completos de cada camada:
@@ -17,6 +35,7 @@ O projeto esta separado em frontend e backend dedicados.
 - Frontend: `frontend/` (React + Vite)
 - Backend: `backend/` (Express + Prisma + Socket.IO)
 - Banco: `backend/prisma/schema.prisma`
+- Regras compartilhadas (agenda, feriados, validacao de CPF/telefone, mascara de logs): `shared/`
 - Orquestracao: raiz com scripts e automacoes em `scripts/`
 
 ## Estado da migracao
@@ -25,10 +44,24 @@ O projeto esta separado em frontend e backend dedicados.
 - Scripts da raiz atualizados para delegar para `frontend/` e `backend/`.
 - Validacao executada apos split: lint, build, testes unitarios e smoke de inicializacao do backend.
 
-## Como rodar hoje
+## Primeiro uso
 
 ```bash
 npm install
+cp .env.example .env                 # preencha DATABASE_URL e JWT_SECRET (openssl rand -hex 32)
+npm --prefix backend run prisma:deploy
+npm --prefix backend run criar-usuario -- --email voce@empresa.com --nome "Seu Nome" --papel admin
+```
+
+O ultimo comando cria o primeiro administrador e pede a senha no terminal (sem eco e fora do historico
+do shell). Use `--gerar-senha` para receber uma senha forte gerada uma unica vez. Uma conta existente so e
+alterada com `--sobrescrever`.
+Nao existem mais logins fixos no codigo: todo acesso exige usuario cadastrado com senha.
+Novos colaboradores recebem uma senha provisoria aleatoria, exibida ao supervisor no cadastro.
+
+## Como rodar hoje
+
+```bash
 npm run dev
 ```
 
@@ -46,78 +79,62 @@ npm --prefix backend run dev
 
 ## Variaveis de ambiente
 
+Veja `.env.example`. Principais:
+
 - `DATABASE_URL`
-- `JWT_SECRET`
-- `VITE_API_URL` opcional
-- `VITE_SOCKET_URL` opcional
+- `JWT_SECRET` (obrigatoria, minimo 32 caracteres; o servidor nao sobe sem ela)
+- `PORT` (padrao 3333)
+- `CORS_ORIGINS` opcional (origens aceitas, separadas por virgula)
+- `TRUST_PROXY` opcional (atras de nginx/proxy reverso)
+- `PAYMENT_WEBHOOK_SECRET` (segredo HMAC do gateway; sem ele, pagamentos online ficam "aguardando pagamento")
+- `LIMPEZA_AGENDAMENTOS_DIAS` (padrao 30): agendamentos nunca concluidos apos esse prazo viram "no_show"; 0 desativa
+- `E2E_PASSWORD` / `SEED_PASSWORD` (senhas dos usuarios de teste e de demonstracao)
+- `VITE_API_URL` / `VITE_SOCKET_URL` opcionais (aplicadas no build do frontend)
+- `VITE_AUTOATENDIMENTO_HOST` opcional: host(s) do totem, separados por virgula (vazio = qualquer host que comece com `autoatendimento.`)
+- `VITE_AUTOATENDIMENTO_URL`: endereco do totem usado pelo botao da tela de login (sem ela, o totem abre dentro do portal, sem isolamento)
+
+## Totem em subdominio (producao)
+
+1. Aponte o DNS de `autoatendimento.<seu-dominio>` para o mesmo servidor do portal e sirva o mesmo build do frontend.
+2. Inclua as duas origens em `CORS_ORIGINS` (ex.: `https://app.suaempresa.com,https://autoatendimento.suaempresa.com`).
+3. Gere o build com `VITE_AUTOATENDIMENTO_URL=https://autoatendimento.suaempresa.com`.
+
+Use um subdominio, nao um caminho (`app.x.com/autoatendimento`): so outra origem isola a sessao da equipe.
+
+## Pagamentos do autoatendimento
+
+O totem nunca marca um agendamento como pago sozinho. Com pagamento online ativo, o agendamento
+fica `aguardando_pagamento` ate o gateway chamar `POST /api/autoatendimento/webhook-pagamento`
+com os cabecalhos `x-webhook-timestamp` (segundos) e `x-webhook-signature` (HMAC-SHA256 de `timestamp.corpo` com
+`PAYMENT_WEBHOOK_SECRET`). Chamadas com mais de 5 minutos ou com valor menor que o cobrado sao recusadas.
 
 ## Validacao rapida
 
 ```bash
-npm run lint
+npm run lint        # TypeScript estrito no frontend, backend e shared
 npm run build
 npm run test:unit
 ```
 
-## Execucao com 1 clique no VS Code
-
-Foi adicionada uma task para subir frontend + backend juntos e mostrar logs no terminal integrado.
-
-Como usar:
-
-1. Abra Command Palette (`Ctrl+Shift+P`)
-2. Execute `Tasks: Run Task`
-3. Selecione `Gestao: Iniciar Front + API`
-
-Logs aparecem no mesmo painel com prefixos:
-
-- `[FRONT]` para frontend (Vite)
-- `[API]` para backend (Express/Socket.IO)
-
-Tambem e possivel iniciar via terminal com:
+Testes E2E (precisam do banco e de `E2E_PASSWORD` no `.env`):
 
 ```bash
-npm run dev:all
+npm --prefix backend run seed:ci   # cria admin@serenidade.com, helena e ana com a senha E2E_PASSWORD
+npm run test:e2e
 ```
 
-## Execucao
+Na 1.1.0-beta.1 a suite passou com 63 testes unitarios e 14/14 testes E2E (Playwright + Postgres 16).
 
-Foram adicionados atalhos para Linux no diretorio raiz do projeto:
-
-- `Gestao-Start.desktop`: abre menu de controle (Iniciar, Parar, Status)
-- `Gestao-Stop.desktop`: encerra processos das portas da aplicacao
-
-Arquivos de suporte:
-
-- `scripts/run-all.sh`
-- `scripts/stop-all.sh`
-- `scripts/gestao-control.sh`
-
-Como usar:
-
-1. No gerenciador de arquivos, abra a pasta do projeto
-2. Clique duas vezes em `Gestao-Start.desktop`
-3. No menu, escolha Iniciar, Parar ou Status
-
-Uso via terminal (fora do VS Code):
+## Execucao pelos scripts
 
 ```bash
-cd /home/matheusmartinsmoreira/Work/Gestão
-./scripts/gestao-control.sh menu
-```
-
-Comandos diretos:
-
-```bash
+./scripts/gestao-control.sh menu     # menu: Iniciar, Parar, Status
 ./scripts/gestao-control.sh start
 ./scripts/gestao-control.sh stop
 ./scripts/gestao-control.sh status
 ```
 
-Importante: arquivo `.desktop` nao deve ser executado com `bash Gestao-Start.desktop`.
-Ele deve ser aberto pelo gerenciador de arquivos (clique duplo) ou pelo menu de aplicativos.
-
-Se o sistema pedir confianca do atalho `.desktop`, marque como "Permitir execucao" ou "Confiar e iniciar".
+Atalhos locais (`Gestao-*.desktop`, tasks do VS Code) podem ser criados por cada um e ficam fora do repositorio (`.gitignore`).
 
 ## Fluxos criticos para teste manual
 
@@ -133,15 +150,17 @@ Se o sistema pedir confianca do atalho `.desktop`, marque como "Permitir execuca
 - Split frontend/backend concluido.
 - Refatoracao por features em andamento com entregas principais aplicadas.
 - Pendencias de consolidacao:
+   - tela para consultar a trilha de auditoria de acessos ao historico de clientes
    - filtrar agenda para destacar somente profissionais em folga (regra final de exibicao)
-   - bloquear automaticamente agendamento em dia marcado como folga
    - permitir ajuste de horario de trabalho pelo Supervisor com persistencia na listagem
-   - continuar saneamento de `any` residual em `SupervisorView`
+   - continuar saneamento de `any` residual em `SupervisorView` e `SupervisorPlanejamentoTab` (props ainda genericas)
+   - integrar um gateway de pagamento real ao webhook assinado
    - finalizar adocao de hooks/contexto compartilhado em todos os fluxos do Supervisor
 
 ## Documentacao relacionada
 
-- `REFACTOR.md` - plano e status de refatoracao
-- `REFACTOR_CODE.md` - referencias de implementacao
-- `IMPLEMENTATION_CHECKLIST.md` - checklist de entrega
-- `ESCALA_FEATURES.md` - escopo funcional de escalas
+- `docs/RELEASE_NOTES_1.1.0-beta.1.md` - notas da versao atual
+- `docs/REFACTOR.md` - plano e status de refatoracao
+- `docs/REFACTOR_CODE.md` - referencias de implementacao
+- `docs/IMPLEMENTATION_CHECKLIST.md` - checklist de entrega
+- `docs/ESCALA_FEATURES.md` - escopo funcional de escalas

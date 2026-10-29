@@ -1,7 +1,24 @@
-export type Role = 'collaborator' | 'supervisor';
+export type Role = 'collaborator' | 'supervisor' | 'admin' | 'receptionist';
 export type TipoEscala = '6x1' | '5x1' | '5x2' | '12x36' | 'rotativo' | 'personalizado';
 export type TurnoSwapStatus = 'pendente' | 'aprovada' | 'rejeitada';
 export type ServiceEligibilityMode = 'livre' | 'cargo' | 'habilidade' | 'profissional';
+
+export interface ConfiguracaoEmpresa {
+  id: string;
+  nomeEmpresa: string;
+  segmento: 'geral' | 'beleza_barbearia' | 'clinica_saude' | 'spa_bemestar' | 'estudio_fitness' | string;
+  slogan?: string;
+  icone?: string;
+  termoAtendimento?: string;
+  termoProfissional?: string;
+  termoEspaco?: string;
+  termoServico?: string;
+  telefoneContato?: string;
+  emailContato?: string;
+  endereco?: string;
+  corTemaPrimaria?: string;
+  atualizadoEm?: string;
+}
 
 export interface Bloqueio {
   id: string;
@@ -30,6 +47,9 @@ export interface Employee {
   bloqueios?: Bloqueio[];
 }
 
+// Alteração de um profissional; `password` redefine a senha de acesso
+export type EmployeeUpdate = Partial<Employee> & { password?: string };
+
 export interface Appointment {
   id: string;
   clientId?: string;
@@ -43,7 +63,9 @@ export interface Appointment {
   specialNeeds: string[];
   observation?: string;
   assignedEmployeeId: string;
-  status: 'scheduled' | 'completed';
+  status: 'scheduled' | 'completed' | 'cancelled' | 'no_show';
+  // Versão do registro no servidor (detecta edição simultânea)
+  version?: string;
 }
 
 export interface Service {
@@ -108,3 +130,91 @@ export const SERVICE_DURATIONS: Record<string, number> = {
 export const SPECIAL_NEEDS_OPTIONS = [
   'Mobilidade Reduzida'
 ];
+
+export interface AutoatendimentoSlot {
+  horario: string;
+  disponivel: boolean;
+  terapeuta?: { id: string; nome: string; especialidade: string };
+  sala?: { id: string; nome: string; numero: number | null };
+  motivoIndisponibilidade?: string;
+}
+
+export interface AutoatendimentoDisponibilidadeResponse {
+  data: string;
+  servico: {
+    id: string;
+    nome: string;
+    preco: number;
+    duracao: number;
+    tempoHigienizacaoMin: number;
+  };
+  servicos?: Array<{
+    id: string;
+    nome: string;
+    preco: number;
+    duracao: number;
+    tempoHigienizacaoMin?: number;
+  }>;
+  duracaoTotalProdutos?: number;
+  bufferHigienizacao?: number;
+  duracaoTotalSlot?: number;
+  valorTotal?: number;
+  slots: AutoatendimentoSlot[];
+}
+
+export interface AutoatendimentoConfig {
+  id: string;
+  ativo: boolean;
+  exigirPagamento: boolean;
+  percentualSinal: number;
+  tempoLockMinutos: number;
+  permitirCancelamento: boolean;
+  tempoMinimoCancelamentoHoras: number;
+  instrucoesCheckin?: string;
+  mensagemBoasVindas?: string;
+  atualizadoEm?: string;
+}
+
+export interface AutoatendimentoReservaSession {
+  sessionToken: string;
+  servicoId: string;
+  servicoIds?: string[];
+  servicosNomes?: string[];
+  data: string;
+  horario: string;
+  terapeutaId: string;
+  salaId: string;
+  terapeutaNome: string;
+  salaNome: string;
+  servicoNome: string;
+  duracao: number;
+  bufferHigienizacao?: number;
+  duracaoTotalSlot?: number;
+  valorTotal: number;
+  valorSinal: number;
+  exigirPagamento?: boolean;
+  percentualSinal?: number;
+  instrucoesCheckin?: string;
+  tempoLockMinutos?: number;
+  lockExpiresAt: number;
+}
+
+export interface Voucher {
+  reservaId: string;
+  codigoConfirmacao: string;
+  clienteNome: string;
+  clienteTelefone: string;
+  terapiaNome: string;
+  duracaoMin: number;
+  data: string;
+  horario: string;
+  terapeutaNome: string;
+  salaNome: string;
+  valorTotal: number;
+  valorSinal: number;
+  statusPagamento: string;
+  politicaCancelamento: string;
+  orientacoesCheckIn: string[];
+}
+
+

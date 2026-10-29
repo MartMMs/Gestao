@@ -1,14 +1,36 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Employee, TurnoSwapStatus } from '../../../types';
+import { Employee, TurnoSwapRequest } from '../../../types';
+import type { ScaleOverridePayload } from '../../../api';
 import { type DiaEscala } from '../../../utils/escalaCalculator';
 import { CalendarioEscala } from './CalendarioEscala';
 import { DraggableCalendarioEscala } from './DraggableCalendarioEscala';
 import { PlanningDayPopover } from './PlanningDayPopover';
 import { TimelineGantt } from './TimelineGantt';
+import { isTeamMember } from '../../../utils/formatters';
+import type { usePlanejamentoEscala } from '../hooks/usePlanejamentoEscala';
+import type { SupervisorViewProps } from '../../../components/SupervisorView';
 
-interface SupervisorPlanejamentoTabProps {
-  [key: string]: any;
+type Setter<T> = React.Dispatch<React.SetStateAction<T>>;
+type AlertaClt = { id: string; nome: string; conforme: boolean; resumo: string[] };
+
+// Estado e ações vêm do hook usePlanejamentoEscala (via SupervisorView), mais as ações da API
+type EstadoPlanejamento = ReturnType<typeof usePlanejamentoEscala>;
+interface SupervisorPlanejamentoTabProps
+  extends EstadoPlanejamento,
+    Pick<SupervisorViewProps, 'employees' | 'appointments' | 'onSaveScaleOverride' | 'onSwapScaleDays' | 'onReplicateScaleDays'> {
+  setToastMessage: (mensagem: string | null) => void;
+  setShowTopAlerts: Setter<boolean>;
+  visibleCltToastAlerts: AlertaClt[];
+  pendingTurnoSwapRequests: TurnoSwapRequest[];
+  setDismissedCltAlertIds: Setter<Record<string, boolean>>;
+  selectedScaleCalendar: { year: number; month: number; dias: DiaEscala[] };
+  setPlanningOverrides: Setter<Record<string, ScaleOverridePayload>>;
+  planningOverridesList: ScaleOverridePayload[];
+  buildScaleForEmployee: (employeeId: string, options?: { tipoEscala?: Employee['tipoEscala']; folgasDomingoNoMes?: number }) => DiaEscala[];
+  setSelectedPlanningDay: Setter<DiaEscala | null>;
+  filteredScaleGeneratorEmployees: Employee[];
+  setScaleGeneratorSundayOffs: Setter<number>;
 }
 
 export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps) {
@@ -356,7 +378,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                   >
                     <option value="all">Todos</option>
                     {(employees as Employee[])
-                      .filter((employee) => employee.id !== 'admin')
+                      .filter((employee) => isTeamMember(employee))
                       .sort((a, b) => a.name.localeCompare(b.name))
                       .map((employee) => (
                         <option key={employee.id} value={employee.id}>{employee.name}</option>
@@ -558,16 +580,13 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                               });
                               if (success === false) {
                                 setToastMessage('Troca aplicada localmente. Sincronização pendente.');
-                                setTimeout(() => setToastMessage(null), 2800);
                                 return;
                               }
                             }
 
                             setToastMessage(`Dia ${from} trocado com dia ${to}.`);
-                            setTimeout(() => setToastMessage(null), 2500);
                           } catch (error) {
                             setToastMessage('Troca aplicada localmente. Falha na sincronização com servidor.');
-                            setTimeout(() => setToastMessage(null), 3200);
                           }
                         })();
                       }}
@@ -666,16 +685,13 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                             });
                             if (success === false) {
                               setToastMessage('Transferência aplicada localmente. Sincronização pendente.');
-                              setTimeout(() => setToastMessage(null), 3000);
                               return;
                             }
                           }
 
                           setToastMessage(`Transferência aplicada: ${fromDay} → ${toDay}`);
-                          setTimeout(() => setToastMessage(null), 3000);
                         } catch (error) {
                           setToastMessage('Transferência aplicada localmente. Falha na sincronização com servidor.');
-                          setTimeout(() => setToastMessage(null), 3200);
                         }
                       })();
                     }}
@@ -721,16 +737,13 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                             });
                             if (success === false) {
                               setToastMessage('Replicação aplicada localmente. Sincronização pendente.');
-                              setTimeout(() => setToastMessage(null), 3000);
                               return;
                             }
                           }
 
                           setToastMessage(`Replicação aplicada em ${targetDates.length} dia(s).`);
-                          setTimeout(() => setToastMessage(null), 2500);
                         } catch (error) {
                           setToastMessage('Replicação aplicada localmente. Falha na sincronização com servidor.');
-                          setTimeout(() => setToastMessage(null), 3200);
                         }
                       })();
                     }}
@@ -799,16 +812,13 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                   });
                   if (success === false) {
                     setToastMessage('Dia atualizado localmente. Sincronização pendente.');
-                    setTimeout(() => setToastMessage(null), 3000);
                     return;
                   }
                 }
 
                 setToastMessage('Dia planejado salvo com sucesso.');
-                setTimeout(() => setToastMessage(null), 2500);
               } catch (error) {
                 setToastMessage('Dia atualizado localmente. Falha na sincronização com servidor.');
-                setTimeout(() => setToastMessage(null), 3200);
               }
             }}
           />
