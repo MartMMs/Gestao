@@ -16,6 +16,9 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
+      # Os tipos do Prisma vêm do cliente gerado: sem ele, o typecheck do backend falha
+      - run: npx prisma generate --schema=prisma/schema.prisma
+        working-directory: backend
       - run: npm run lint
       - run: npm run test:unit
       - run: npm run build
