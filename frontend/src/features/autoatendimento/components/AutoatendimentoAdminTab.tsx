@@ -290,7 +290,7 @@ export function AutoatendimentoAdminTab() {
                 : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-800 dark:text-emerald-300'
             }`}
           >
-            {config.exigirPagamento ? (
+            {config.exigirPagamento && config.pagamentoOnlineDisponivel ? (
               <div className="space-y-1">
                 <p className="font-bold flex items-center gap-1.5 text-primary">
                   <span className="material-symbols-outlined text-[16px]">lock_clock</span>

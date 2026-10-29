@@ -1,3 +1,5 @@
+import { normalizarTexto } from '@shared/validadores';
+
 export const formatPhone = (value: string) => {
   // Valores mascarados pela API ("(11) *****-**21") são exibidos como vieram
   if (!value || value.includes('*')) return value;
@@ -43,11 +45,7 @@ export const gerarSenhaProvisoria = () => {
 
 // E-mail de acesso gerado a partir do nome; homônimos recebem sufixo numérico (ana.silva2@...)
 export const gerarEmailUnico = (nomeCompleto: string, emailsExistentes: string[], dominio = 'serenidade.com') => {
-  const partes = nomeCompleto
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+  const partes = normalizarTexto(nomeCompleto)
     .replace(/[^a-z\s]/g, ' ')
     .split(/\s+/)
     .filter(Boolean);

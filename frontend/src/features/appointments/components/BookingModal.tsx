@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { normalizarTexto } from '@shared/validadores';
 import { horarioParaMinutos } from '@shared/agenda';
 import { Appointment, Client, Employee, Service, ServiceEligibilityMode } from '../../../types';
 import { getDuration } from '../utils/appointmentCore';
@@ -12,11 +13,7 @@ import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
 import { isApiError } from '../../../api';
 
-const normalizeSearch = (value: string) => value
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .toLowerCase()
-  .trim();
+const normalizeSearch = normalizarTexto;
 
 const normalizeEligibilityMode = (mode?: string): ServiceEligibilityMode => {
   if (mode === 'cargo' || mode === 'habilidade' || mode === 'livre') return mode;

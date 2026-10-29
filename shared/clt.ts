@@ -4,6 +4,7 @@
  */
 
 import { type DiaEscala } from './escala';
+import { horarioParaMinutos } from './agenda';
 
 export interface AnaliseConformidadeCLT {
   interjornada: {
@@ -67,16 +68,7 @@ const combineDateAndHour = (date: string, hour: string): Date | null => {
   const baseDate = parseDate(date);
   if (!baseDate || !isValidHour(hour)) return null;
 
-  const [hours, minutes] = hour.split(':').map(Number);
-  return new Date(
-    baseDate.getFullYear(),
-    baseDate.getMonth(),
-    baseDate.getDate(),
-    hours,
-    minutes,
-    0,
-    0,
-  );
+  return new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 0, horarioParaMinutos(hour), 0, 0);
 };
 
 const roundHour = (value: number) => Math.round(value * 10) / 10;
@@ -285,27 +277,30 @@ export function analisarSetimoDiaConsecutivo(diasEscala: DiaEscala[]): {
   };
 }
 
-const calcularCargaSemanalMedia = (diasEscala: DiaEscala[]): number => {
-  if (diasEscala.length === 0) return 0;
-
-  let totalHoras = 0;
-
-  diasEscala.forEach((dia) => {
-    if (dia.tipo !== 'trabalho') return;
-
-    const range = getShiftDateRange(dia);
-    if (!range) {
-      totalHoras += 8;
-      return;
-    }
-
-    const horas = (range.fim.getTime() - range.inicio.getTime()) / 3_600_000;
-    totalHoras += Math.max(0, horas);
-  });
-
-  const semanasNoPeriodo = Math.max(1, diasEscala.length / 7);
-  return roundHour(totalHoras / semanasNoPeriodo);
+// Horas de um dia de trabalho (turno que vira a meia-noite conta até o fim no dia seguinte)
+const horasDoDia = (dia: DiaEscala): number => {
+  if (dia.tipo !== 'trabalho' || !dia.horaInicio || !dia.horaFim) return 0;
+  const minutos = horarioParaMinutos(dia.horaFim) - horarioParaMinutos(dia.horaInicio);
+  return Number.isNaN(minutos) ? 0 : (minutos < 0 ? minutos + 24 * 60 : minutos) / 60;
 };
+
+/**
+ * Semana (segunda a domingo) com mais horas na malha. A CLT limita cada semana a 44h: uma semana de 60h não pode
+ * sumir na média do mês.
+ */
+export function calcularMaiorCargaSemanal(diasEscala: DiaEscala[]): { horas: number; inicioSemana: string | null } {
+  const porSemana = new Map<string, number>();
+  for (const dia of diasEscala) {
+    const data = new Date(`${dia.data}T12:00:00Z`);
+    const recuo = (data.getUTCDay() + 6) % 7; // dias desde a segunda-feira
+    data.setUTCDate(data.getUTCDate() - recuo);
+    const semana = data.toISOString().slice(0, 10);
+    porSemana.set(semana, (porSemana.get(semana) ?? 0) + horasDoDia(dia));
+  }
+  let maior = { horas: 0, inicioSemana: null as string | null };
+  for (const [semana, horas] of porSemana) if (horas > maior.horas) maior = { horas, inicioSemana: semana };
+  return { horas: Math.round(maior.horas * 10) / 10, inicioSemana: maior.inicioSemana };
+}
 
 /**
  * Análise completa de conformidade CLT baseada na malha de escala.
@@ -314,15 +309,16 @@ export function analisarConformidadeCLT(diasEscala: DiaEscala[]): AnaliseConform
   const interjornada = analisarInterjornadaEscala(diasEscala);
   const setimoDia = analisarSetimoDiaConsecutivo(diasEscala);
 
-  const cargaTotal = calcularCargaSemanalMedia(diasEscala);
-  const semanaAnalisada = diasEscala.length > 0
-    ? `${diasEscala[0].data.slice(0, 7)} (média)`
+  const maiorSemana = calcularMaiorCargaSemanal(diasEscala);
+  const cargaTotal = maiorSemana.horas;
+  const semanaAnalisada = maiorSemana.inicioSemana
+    ? `semana de ${maiorSemana.inicioSemana.split('-').reverse().join('/')}`
     : 'N/A';
 
   const cargaConforme = cargaTotal <= CARGA_SEMANAL_MAXIMA_HORAS;
   const alertasCarga = cargaConforme
     ? []
-    : [`⚠️ Carga semanal média de ${cargaTotal}h excede o limite legal de ${CARGA_SEMANAL_MAXIMA_HORAS}h.`];
+    : [`⚠️ Carga de ${cargaTotal}h na ${semanaAnalisada} excede o limite legal de ${CARGA_SEMANAL_MAXIMA_HORAS}h semanais.`];
 
   const resumo = [
     ...interjornada.alertas,

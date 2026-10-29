@@ -49,7 +49,7 @@ test('Capturar capturas de tela completas do fluxo de Autoatendimento', async ({
     await page.screenshot({ path: test.info().outputPath('06_identificacao_anamnese.png') });
 
     // 8. Avança para Etapa 4: Garantia & Pagamento (Timer de 10 min + Pix)
-    const btnIrPagamento = page.getByRole('button', { name: /Ir para Pagamento/i });
+    const btnIrPagamento = page.getByRole('button', { name: /Ir para Pagamento|Revisar e Confirmar/i });
     await expect(btnIrPagamento).toBeEnabled();
     await btnIrPagamento.click();
 

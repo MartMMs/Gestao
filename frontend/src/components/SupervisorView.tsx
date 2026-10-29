@@ -1,4 +1,5 @@
 import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { normalizarTexto } from '@shared/validadores';
 import { NO_SCALE_OVERRIDES } from '../features/scale/components/SupervisorEscalaTab';
 import { useToast } from '../hooks/useToast';
 import { motion } from 'motion/react';
@@ -30,11 +31,7 @@ type ServicePayload = {
   comissaoPercentual?: number | string;
 };
 
-const normalizeServiceSearch = (value: string) => value
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .toLowerCase()
-  .trim();
+const normalizeServiceSearch = normalizarTexto;
 
 const normalizeRuleList = (value: string): string[] => Array.from(new Set(value
   .split(',')
@@ -780,7 +777,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
                 </div>
                 <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10">
                   <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-1">Carga Horária Base</p>
-                  <p className="text-xl font-headline text-on-surface">{viewingEmployee.cargaHorariaSemanal ?? 44}h / semana</p>
+                  <p className="text-xl font-headline text-on-surface">{viewingEmployee.cargaHorariaSemanal ?? 40}h / semana</p>
                 </div>
               </div>
             </div>

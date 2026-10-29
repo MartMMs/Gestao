@@ -16,7 +16,10 @@ export function createClientesRouter(notificar: Notificar) {
       const clientes = await prisma.cliente.findMany({
         where: {
           removidoEm: null,
-          ...(usuarioGerenciaAgenda(req) ? {} : { agendamentos: { some: { colaboradorId: getUsuario(req)?.id ?? '' } } }),
+          // Mesmo critério do agendamento (resolverCliente): cancelado ou falta não conta como cliente do profissional
+          ...(usuarioGerenciaAgenda(req) ? {} : {
+            agendamentos: { some: { colaboradorId: getUsuario(req)?.id ?? '', status: { in: ['scheduled', 'completed'] } } },
+          }),
         },
         orderBy: { nome: 'asc' },
       });
@@ -83,7 +86,8 @@ export function createClientesRouter(notificar: Notificar) {
         const cliente = await tx.cliente.findUnique({ where: { id } });
         if (!cliente || cliente.removidoEm) return { tipo: 'nao_encontrado' as const };
 
-        const marcados = await tx.agendamento.count({ where: { clienteId: id, status: 'scheduled', data: { gte: new Date() } } });
+        // Inclui o que está em andamento ou ainda não foi fechado: anonimizar no meio do atendimento apagaria a ficha
+        const marcados = await tx.agendamento.count({ where: { clienteId: id, status: 'scheduled' } });
         if (marcados > 0) return { tipo: 'com_marcados' as const, marcados };
 
         const historico = await tx.agendamento.count({ where: { clienteId: id } });

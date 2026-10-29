@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { horarioParaMinutos } from '@shared/agenda';
 import { motion } from 'motion/react';
 import { Service, AutoatendimentoSlot, AutoatendimentoReservaSession } from '../../../types';
 import {
@@ -130,7 +131,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
     const noite: AutoatendimentoSlot[] = [];
 
     slots.forEach((s) => {
-      const [h] = s.horario.split(':').map(Number);
+      const h = Math.floor(horarioParaMinutos(s.horario) / 60);
       if (h < 12) manha.push(s);
       else if (h < 18) tarde.push(s);
       else noite.push(s);

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { normalizarTexto } from '@shared/validadores';
 import { horarioParaMinutos } from '@shared/agenda';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Service } from '../types';
@@ -15,7 +16,7 @@ interface UpcomingAppointmentsModalProps {
 
 type DateFilter = 'today' | '7days' | '30days' | 'all';
 
-const normalizeText = (value?: string) => (value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const normalizeText = (value?: string) => normalizarTexto(value);
 
 export function UpcomingAppointmentsModal({ open, appointments, employees, services, onClose }: UpcomingAppointmentsModalProps) {
   const [dateFilter, setDateFilter] = useState<DateFilter>('today');

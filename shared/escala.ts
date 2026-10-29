@@ -28,6 +28,9 @@ export interface ConfiguracaoEscala {
 
 // Datas AAAA-MM-DD tratadas sempre em UTC ao meio-dia. new Date('AAAA-MM-DD') é meia-noite UTC, e ler o dia
 // da semana no horário local (-03 no Brasil) trocava o domingo pela segunda e deslocava toda a escala.
+// Referência fixa do ciclo 12x36 (plantão nos dias pares contados a partir dela)
+const ANCORA_12X36 = new Date('2000-01-01T12:00:00Z');
+
 const dataUTC = (data: string) => new Date(`${data.slice(0, 10)}T12:00:00Z`);
 
 /**
@@ -104,31 +107,31 @@ export function gerarEscala5x1(dataInicio: string, numeroDias: number): DiaEscal
 }
 
 /**
- * Gera escala 12x36: 12 horas de trabalho e 36 horas de descanso, ou seja, ciclo de 2 dias
- * (um dia de trabalho, um de folga). Os plantões alternam entre o turno diurno e o noturno.
+ * Gera escala 12x36: plantões de 12 horas com 36 horas de descanso, ou seja, um dia sim, um dia não, sempre no
+ * mesmo turno (alternar noturno e diurno deixaria só 24h de descanso entre um plantão e outro).
+ * O dia de plantão é ancorado numa data fixa: gerando mês a mês, o ciclo continua de um mês para o outro em vez
+ * de recomeçar no dia 1 (31 e 1 seriam plantões seguidos, com 0h de descanso).
  */
 export function gerarEscala12x36(
   dataInicio: string,
   numeroDias: number,
-  turnos: { diurno: { inicio: string; fim: string }; noturno: { inicio: string; fim: string } }
+  turnos: { diurno: { inicio: string; fim: string }; noturno?: { inicio: string; fim: string } }
 ): DiaEscala[] {
   const resultado: DiaEscala[] = [];
   let data = dataUTC(dataInicio);
-  let plantoes = 0;
+  const turno = turnos.diurno;
 
   for (let i = 0; i < numeroDias; i++) {
-    if (i % 2 === 0) {
-      const diurno = plantoes % 2 === 0;
-      const turnoAtual = diurno ? turnos.diurno : turnos.noturno;
+    const diasDesdeAncora = Math.round((data.getTime() - ANCORA_12X36.getTime()) / 86_400_000);
+    if (((diasDesdeAncora % 2) + 2) % 2 === 0) {
       resultado.push({
         data: data.toISOString().split('T')[0],
         tipo: 'trabalho',
-        turno: diurno ? 'Diurno' : 'Noturno',
-        horaInicio: turnoAtual.inicio,
-        horaFim: turnoAtual.fim,
+        turno: 'Diurno',
+        horaInicio: turno.inicio,
+        horaFim: turno.fim,
         descricao: '12h de trabalho',
       });
-      plantoes++;
     } else {
       resultado.push({
         data: data.toISOString().split('T')[0],
@@ -389,4 +392,44 @@ export function proximaFolga(dias: DiaEscala[], dataReferencia: string): string 
  */
 export function proximoTurno(dias: DiaEscala[], dataReferencia: string): DiaEscala | null {
   return dias.find(d => d.data >= dataReferencia && d.tipo === 'trabalho') || null;
+}
+
+// Turno "HH:MM-HH:MM" em início e fim (indefinidos quando o texto não tem esse formato)
+export const separarTurno = (turno?: string | null) => {
+  if (!turno || !turno.includes('-')) return { horaInicio: undefined as string | undefined, horaFim: undefined as string | undefined };
+  const [horaInicio, horaFim] = turno.split('-');
+  return { horaInicio: horaInicio || undefined, horaFim: horaFim || undefined };
+};
+
+// Hora (0-23) em que o turno "HH:MM-HH:MM" começa; null quando o turno não é legível (não vira 08:00 escondido)
+export const horaInicialDoTurno = (turno?: string | null): number | null => {
+  const { horaInicio } = separarTurno(turno);
+  const minutos = horaInicio ? horarioParaMinutos(horaInicio) : NaN;
+  return Number.isNaN(minutos) ? null : Math.floor(minutos / 60);
+};
+
+// Ajuste salvo para um dia (override): fonte única para o backend (alertas de CLT) e as telas
+export type AjusteEscala = { tipo?: string | null; turno?: string | null; descricao?: string | null };
+
+/**
+ * Aplica o ajuste salvo sobre o dia calculado pelo contrato. Tipo desconhecido é ignorado; folga/fds limpa o
+ * turno; dia de trabalho com turno "HH:MM-HH:MM" troca o horário. A descrição do ajuste prevalece quando existe.
+ */
+export function aplicarAjusteEscala(dia: DiaEscala, ajuste?: AjusteEscala | null): DiaEscala {
+  if (!ajuste) return dia;
+  const tipo = ajuste.tipo;
+  if (tipo !== 'trabalho' && tipo !== 'folga' && tipo !== 'fds') return dia;
+  const descricao = ajuste.descricao ?? dia.descricao;
+  if (tipo !== 'trabalho') {
+    return { ...dia, tipo, turno: undefined, horaInicio: undefined, horaFim: undefined, descricao };
+  }
+  const { horaInicio, horaFim } = separarTurno(ajuste.turno);
+  return {
+    ...dia,
+    tipo: 'trabalho',
+    turno: ajuste.turno || dia.turno,
+    horaInicio: horaInicio || dia.horaInicio,
+    horaFim: horaFim || dia.horaFim,
+    descricao,
+  };
 }

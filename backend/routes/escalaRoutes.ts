@@ -4,9 +4,9 @@ import { prisma } from '../db';
 import { getUsuario, usuarioEhSupervisor, verificarSupervisorToken, verificarToken } from '../auth';
 import { HttpError, responderErro, type Notificar } from '../lib/http';
 import { transacaoSerializavel, travarChave } from '../lib/transacao';
-import { dataValida, partesNoFuso, TURNO_PADRAO, TURNO_REGEX } from '../../shared/agenda';
+import { dataValida, horarioParaMinutos, partesNoFuso, TURNO_PADRAO, TURNO_REGEX } from '../../shared/agenda';
 import { agendamentosDoDia } from '../services/agendaService';
-import { gerarEscalaComRegras, type DiaEscala as DiaCalculado, type TipoEscala as TipoContrato } from '../../shared/escala';
+import { aplicarAjusteEscala, gerarEscalaComRegras, type TipoEscala as TipoContrato } from '../../shared/escala';
 import { analisarConformidadeCLT } from '../../shared/clt';
 
 type TipoEscala = 'trabalho' | 'folga' | 'fds';
@@ -40,12 +40,22 @@ const gravarDia = (tx: Prisma.TransactionClient, colaboradorId: string, data: st
 // um dia com atendimentos marcados não pode virar folga sem que eles sejam realocados antes.
 const gravarDiaValidado = async (tx: Prisma.TransactionClient, colaboradorId: string, data: string, dia: DiaEscala) => {
   if (data < partesNoFuso(new Date()).data) {
-    throw new HttpError(409, `Não é possível alterar a escala de ${data}: a data já passou.`);
+    throw new HttpError(409, `Não é possível alterar a escala de ${data.split('-').reverse().join('/')}: a data já passou.`);
   }
+  const dataBr = data.split('-').reverse().join('/');
   if (dia.tipo !== 'trabalho') {
     const marcados = await agendamentosDoDia(tx, data, { colaboradorId });
     if (marcados.length > 0) {
-      throw new HttpError(409, `O profissional tem ${marcados.length} atendimento(s) em ${data}. Realoque-os antes de marcar folga nesse dia.`);
+      throw new HttpError(409, `O profissional tem ${marcados.length} atendimento(s) em ${dataBr}. Realoque-os antes de marcar folga nesse dia.`);
+    }
+  } else if (dia.turno) {
+    // Troca de turno: nenhum atendimento do dia pode ficar fora do novo horário (turno noturno vira a meia-noite)
+    const [inicioTurno, fimTurno] = dia.turno.split('-').map(horarioParaMinutos);
+    const fimEfetivo = fimTurno <= inicioTurno ? fimTurno + 24 * 60 : fimTurno;
+    const foraDoTurno = (await agendamentosDoDia(tx, data, { colaboradorId }))
+      .filter((ag) => ag.inicioMin < inicioTurno || ag.fimMin > fimEfetivo);
+    if (foraDoTurno.length > 0) {
+      throw new HttpError(409, `O profissional tem ${foraDoTurno.length} atendimento(s) em ${dataBr} fora do turno ${dia.turno}. Realoque-os antes de mudar o turno.`);
     }
   }
   return gravarDia(tx, colaboradorId, data, dia);
@@ -58,26 +68,23 @@ const TIPOS_CONTRATO: TipoContrato[] = ['6x1', '5x2', '5x1', '12x36', 'rotativo'
 const alertasCltDoMes = async (tx: Prisma.TransactionClient, colaboradorId: string, data: string): Promise<string[]> => {
   const colaborador = await tx.colaborador.findUnique({ where: { id: colaboradorId } });
   if (!colaborador) return [];
+  // Tipo de contrato desconhecido não vira 6x1 em silêncio: sem contrato válido não há o que analisar
+  if (!TIPOS_CONTRATO.includes(colaborador.tipoEscala as TipoContrato)) return [];
   const mes = data.slice(0, 7);
   const [ano, numeroMes] = mes.split('-').map(Number);
-  const tipo = TIPOS_CONTRATO.includes(colaborador.tipoEscala as TipoContrato) ? (colaborador.tipoEscala as TipoContrato) : '6x1';
+  // Inclui a última semana do mês anterior: descanso e 7º dia atravessam a virada do mês
+  const inicio = new Date(Date.UTC(ano, numeroMes - 1, 1 - 7));
+  const inicioIso = inicio.toISOString().slice(0, 10);
+  const totalDias = 7 + new Date(Date.UTC(ano, numeroMes, 0)).getUTCDate();
   const base = gerarEscalaComRegras(
-    { tipo, dataInicio: `${mes}-01` },
-    new Date(Date.UTC(ano, numeroMes, 0)).getUTCDate(),
+    { tipo: colaborador.tipoEscala as TipoContrato, dataInicio: inicioIso },
+    totalDias,
     { folgasDomingoNoMes: colaborador.folgasDomingoNoMes ?? 2 },
   );
   const ajustes = new Map(
-    (await tx.escalaOverride.findMany({ where: { colaboradorId, data: { startsWith: `${mes}-` } } })).map((o) => [o.data, o]),
+    (await tx.escalaOverride.findMany({ where: { colaboradorId, data: { gte: inicioIso, lte: `${mes}-31` } } })).map((o) => [o.data, o]),
   );
-  const dias: DiaCalculado[] = base.map((dia) => {
-    const ajuste = ajustes.get(dia.data);
-    if (!ajuste) return dia;
-    const tipoDia = normalizarTipo(ajuste.tipo);
-    if (tipoDia !== 'trabalho') return { ...dia, tipo: tipoDia, turno: undefined, horaInicio: undefined, horaFim: undefined, descricao: ajuste.descricao ?? dia.descricao };
-    const [horaInicio, horaFim] = (ajuste.turno ?? '').split('-');
-    return { ...dia, tipo: 'trabalho', turno: ajuste.turno ?? dia.turno, horaInicio: horaInicio || dia.horaInicio, horaFim: horaFim || dia.horaFim };
-  });
-  const analise = analisarConformidadeCLT(dias);
+  const analise = analisarConformidadeCLT(base.map((dia) => aplicarAjusteEscala(dia, ajustes.get(dia.data))));
   return analise.statusGeral ? [] : analise.resumo;
 };
 

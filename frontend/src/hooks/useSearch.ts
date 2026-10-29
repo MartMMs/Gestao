@@ -1,10 +1,7 @@
 import { useMemo } from 'react';
+import { normalizarTexto } from '@shared/validadores';
 
-const normalize = (value: string) => value
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .toLowerCase()
-  .trim();
+const normalize = normalizarTexto;
 
 export function useSearch<T>(items: T[], searchTerm: string, selector: (item: T) => Array<string | undefined | null>) {
   return useMemo(() => {

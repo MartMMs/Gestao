@@ -8,7 +8,7 @@ import { useAuth } from './AuthContext';
 import { LoginView } from './components/LoginView';
 import io from 'socket.io-client';
 import { getSocketUrl } from './config/api';
-import { gerarEscalaComRegras, type DiaEscala } from './utils/escalaCalculator';
+import { aplicarAjusteEscala, gerarEscalaComRegras, type DiaEscala } from './utils/escalaCalculator';
 import { analisarConformidadeCLT } from './utils/cltValidator';
 import { AuditorModal } from './components/AuditorModal';
 import { Employee, Appointment, Service, Client, Role, TurnoSwapRequest, TurnoSwapStatus, ServiceEligibilityMode, EmployeeUpdate } from './types'; // Tipos mais fortes
@@ -340,42 +340,8 @@ export default function App() {
       });
     });
 
-    const splitTurno = (turno?: string) => {
-      if (!turno || !turno.includes('-')) {
-        return { horaInicio: undefined as string | undefined, horaFim: undefined as string | undefined };
-      }
-      const [horaInicio, horaFim] = turno.split('-');
-      return {
-        horaInicio: horaInicio || undefined,
-        horaFim: horaFim || undefined,
-      };
-    };
-
-    const applyOverrideToDia = (employeeId: string, dia: DiaEscala): DiaEscala => {
-      const override = overridesMap.get(`${employeeId}:${dia.data}`);
-      if (!override) return dia;
-
-      if (override.tipo !== 'trabalho') {
-        return {
-          ...dia,
-          tipo: override.tipo,
-          turno: undefined,
-          horaInicio: undefined,
-          horaFim: undefined,
-          descricao: override.descricao ?? dia.descricao,
-        };
-      }
-
-      const { horaInicio, horaFim } = splitTurno(override.turno);
-      return {
-        ...dia,
-        tipo: 'trabalho',
-        turno: override.turno || dia.turno,
-        horaInicio: horaInicio || dia.horaInicio,
-        horaFim: horaFim || dia.horaFim,
-        descricao: override.descricao ?? dia.descricao,
-      };
-    };
+    const applyOverrideToDia = (employeeId: string, dia: DiaEscala): DiaEscala =>
+      aplicarAjusteEscala(dia, overridesMap.get(`${employeeId}:${dia.data}`));
 
     return teamMembers
       .map((emp) => {

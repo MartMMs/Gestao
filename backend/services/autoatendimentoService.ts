@@ -209,6 +209,10 @@ export type SessaoReservaTotem = {
   tempoLockMinutos: number;
   lockKeys: string[];
   lockExpiresAt: number;
+  // Preenchidos pelo gateway de pagamento, quando houver integração (ver configService.gatewayPagamento)
+  pixCopiaECola?: string;
+  pixQrCode?: string;
+  cartaoOnlineDisponivel?: boolean;
 };
 
 type SessaoReserva = Pick<SessaoReservaTotem, 'servicoIds' | 'data' | 'horario' | 'terapeutaId' | 'salaId' | 'valorTotal'>;

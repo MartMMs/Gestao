@@ -98,7 +98,7 @@ test.describe('Autoatendimento - Modo Admin, Agendamento Sem Pagamento & Mobile'
       await page.locator('input[placeholder*="98765" i]').fill('(11) 97777-6655');
       await page.screenshot({ path: test.info().outputPath('14_mobile_04_anamnese.png') });
 
-      const btnIrPagamento = page.getByRole('button', { name: /Ir para Pagamento/i });
+      const btnIrPagamento = page.getByRole('button', { name: /Ir para Pagamento|Revisar e Confirmar/i });
       await btnIrPagamento.click();
 
       // 5. Etapa 4: Confirmação Direta SEM PAGAMENTO (Pagar no Local)

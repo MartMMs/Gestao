@@ -43,10 +43,18 @@ export const getAutoatendimentoConfig = () => prisma.configuracaoAutoatendimento
   create: AUTOATENDIMENTO_PADRAO,
 });
 
-// O pagamento online só vale com um gateway conectado (hoje: o segredo do webhook configurado). Sem ele, o botão
-// "exigir pagamento" fica guardado, mas o totem confirma a reserva com pagamento na recepção, em vez de mostrar
-// uma cobrança que ninguém vai aprovar e deixar a reserva expirar.
-export const pagamentoOnlineDisponivel = () => Boolean(ambiente.pagamentoWebhookSecret);
+// Integração com o banco: quem conectar a API implementa a criação da cobrança aqui (gera o Pix "copia e cola" e,
+// se houver, o checkout de cartão) e a registra em gatewayPagamento. Sem integração, nada é cobrado online.
+export type CobrancaGateway = { pixCopiaECola?: string; pixQrCode?: string; cartaoOnlineDisponivel?: boolean };
+export type GatewayPagamento = {
+  criarCobranca: (reserva: { sessionToken: string; valor: number; descricao: string }) => Promise<CobrancaGateway>;
+};
+export const gatewayPagamento: GatewayPagamento | null = null;
+
+// O pagamento online só vale com o gateway implementado E o segredo do webhook configurado (para receber as
+// confirmações). Sem os dois, o botão "exigir pagamento" fica guardado, mas o totem confirma a reserva com
+// pagamento na recepção, em vez de mostrar uma cobrança que ninguém vai aprovar e deixar a reserva expirar.
+export const pagamentoOnlineDisponivel = () => Boolean(gatewayPagamento && ambiente.pagamentoWebhookSecret);
 
 export const comDisponibilidadePagamento = <T extends { exigirPagamento: boolean }>(config: T) => ({
   ...config,

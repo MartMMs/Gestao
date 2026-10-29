@@ -40,8 +40,8 @@ const clearStoredAuth = ({ manterRascunhos = false } = {}) => {
 };
 
 const MENSAGEM_SESSAO_EXPIRADA = 'Sua sessão expirou. Faça login novamente.';
-// Só o "Novo agendamento" tem rascunho; ele volta ao abrir de novo o mesmo horário e profissional
-const MENSAGEM_RASCUNHO_GUARDADO = ' O novo agendamento que você estava preenchendo foi guardado: abra o mesmo horário para continuar.';
+// Novo agendamento e edição guardam rascunho; ele volta ao abrir de novo o mesmo horário ou o mesmo agendamento
+const MENSAGEM_RASCUNHO_GUARDADO = ' O que você estava preenchendo foi guardado: abra de novo o mesmo agendamento ou horário para continuar.';
 
 const registrarDonoRascunhos = (usuarioId: string) => {
   try {

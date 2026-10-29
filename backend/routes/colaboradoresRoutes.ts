@@ -39,8 +39,8 @@ const TIPOS_ESCALA = ['6x1', '5x2', '5x1', '12x36', 'rotativo'];
 const DIAS_TRABALHO_REGEX = /^[0-6](,[0-6]){0,6}$/;
 // Limites por campo: carga semanal até 44h (CLT) e no máximo 5 domingos num mês
 const LIMITES_NUMERICOS = {
-  folgasDomingoNoMes: { max: 5, rotulo: 'Folgas aos domingos no mês', faixa: 'entre 0 e 5' },
-  cargaHorariaSemanal: { max: 44, rotulo: 'Carga horária semanal', faixa: 'entre 0 e 44 horas' },
+  folgasDomingoNoMes: { min: 0, max: 5, rotulo: 'Folgas aos domingos no mês', faixa: 'entre 0 e 5' },
+  cargaHorariaSemanal: { min: 1, max: 44, rotulo: 'Carga horária semanal', faixa: 'entre 1 e 44 horas' },
 } as const;
 
 // Campos opcionais de escala/cargo aceitos na criação e na edição. Valor inválido é recusado (400) em vez de
@@ -48,8 +48,11 @@ const LIMITES_NUMERICOS = {
 const lerCamposEscala = (body: Record<string, unknown>) => {
   const dados: Record<string, unknown> = {};
   if (body.diasTrabalho !== undefined) {
-    const dias = String(body.diasTrabalho).replace(/\s/g, '');
-    if (!DIAS_TRABALHO_REGEX.test(dias)) throw new HttpError(400, 'Dias de trabalho inválidos. Use números de 0 (domingo) a 6 (sábado) separados por vírgula.');
+    const dias = typeof body.diasTrabalho === 'string' ? body.diasTrabalho.replace(/\s/g, '') : '';
+    const lista = dias.split(',');
+    if (!DIAS_TRABALHO_REGEX.test(dias) || new Set(lista).size !== lista.length) {
+      throw new HttpError(400, 'Dias de trabalho inválidos. Use números de 0 (domingo) a 6 (sábado), sem repetir, separados por vírgula.');
+    }
     dados.diasTrabalho = dias;
   }
   if (typeof body.cargo === 'string') dados.cargo = body.cargo.trim().slice(0, LIMITE_CARGO);
@@ -62,9 +65,10 @@ const lerCamposEscala = (body: Record<string, unknown>) => {
   if (typeof body.especialidade === 'string') dados.especialidade = body.especialidade.trim().slice(0, LIMITE_ESPECIALIDADE);
   for (const campo of ['folgasDomingoNoMes', 'cargaHorariaSemanal'] as const) {
     if (body[campo] === undefined) continue;
-    const numero = Number(body[campo]);
     const limite = LIMITES_NUMERICOS[campo];
-    if (!Number.isInteger(numero) || numero < 0 || numero > limite.max) {
+    // null, texto vazio e booleanos não viram número (Number(null) seria 0)
+    const numero = typeof body[campo] === 'number' || (typeof body[campo] === 'string' && body[campo] !== '') ? Number(body[campo]) : NaN;
+    if (!Number.isInteger(numero) || numero < limite.min || numero > limite.max) {
       throw new HttpError(400, `${limite.rotulo} deve ser um número inteiro ${limite.faixa}.`);
     }
     dados[campo] = numero;

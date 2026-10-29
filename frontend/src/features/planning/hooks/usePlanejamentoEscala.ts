@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Employee, TurnoSwapRequest, TurnoSwapStatus, EmployeeUpdate } from '../../../types';
 import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
-import { gerarEscalaComRegras, type DiaEscala } from '../../../utils/escalaCalculator';
+import { aplicarAjusteEscala, gerarEscalaComRegras, horaInicialDoTurno, separarTurno, type DiaEscala } from '../../../utils/escalaCalculator';
 import { analisarConformidadeCLT } from '../../../utils/cltValidator';
 import { isTeamMember } from '../../../utils/formatters';
 import type { ScaleOverridePayload } from '../../../api';
@@ -125,46 +125,10 @@ export function usePlanejamentoEscala({
     setPlanningSundayOffs(selectedScaleEmployee.folgasDomingoNoMes ?? 2);
   }, [selectedScaleEmployee]);
 
-  const splitTurno = (turno?: string) => {
-    if (!turno || !turno.includes('-')) {
-      return { horaInicio: undefined as string | undefined, horaFim: undefined as string | undefined };
-    }
-    const [horaInicio, horaFim] = turno.split('-');
-    return {
-      horaInicio: horaInicio || undefined,
-      horaFim: horaFim || undefined,
-    };
-  };
-
-  const applyOverrideToDia = useCallback((employeeId: string, dia: DiaEscala): DiaEscala => {
-    const override = planningOverrides[`${employeeId}:${dia.data}`];
-    if (!override) return dia;
-
-    if (!isValidScaleDayType(override.tipo)) {
-      return dia;
-    }
-
-    const { horaInicio, horaFim } = splitTurno(override.turno);
-    if (override.tipo !== 'trabalho') {
-      return {
-        ...dia,
-        tipo: override.tipo,
-        turno: undefined,
-        horaInicio: undefined,
-        horaFim: undefined,
-        descricao: override.descricao ?? dia.descricao,
-      };
-    }
-
-    return {
-      ...dia,
-      tipo: override.tipo,
-      turno: override.turno || dia.turno,
-      horaInicio: horaInicio || dia.horaInicio,
-      horaFim: horaFim || dia.horaFim,
-      descricao: override.descricao ?? dia.descricao,
-    };
-  }, [planningOverrides]);
+  const applyOverrideToDia = useCallback(
+    (employeeId: string, dia: DiaEscala): DiaEscala => aplicarAjusteEscala(dia, planningOverrides[`${employeeId}:${dia.data}`]),
+    [planningOverrides],
+  );
 
   const employeeById = useMemo(
     () => new Map(activeNonAdminEmployees.map((emp) => [emp.id, emp])),
@@ -314,10 +278,8 @@ export function usePlanejamentoEscala({
     const turnoRef = dia.turno || ((dia.horaInicio && dia.horaFim) ? `${dia.horaInicio}-${dia.horaFim}` : '');
     if (!turnoRef.includes('-')) return 'comercial';
 
-    const [start] = turnoRef.split('-');
-    const startHour = Number(start.split(':')[0]);
-
-    if (Number.isNaN(startHour)) return 'comercial';
+    const startHour = horaInicialDoTurno(turnoRef);
+    if (startHour === null) return 'comercial';
     if (startHour >= 12 && startHour < 18) return 'tarde';
     if (startHour >= 18 || startHour < 5) return 'noite';
 
@@ -812,7 +774,7 @@ export function usePlanejamentoEscala({
     suggestedPlanningKeys,
     planningOverridesList,
     selectedScaleEmployee,
-    splitTurno,
+    splitTurno: separarTurno,
     buildScaleForEmployee,
     selectedScaleCalendar,
     selectedScaleMonthLabel,

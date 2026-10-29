@@ -22,8 +22,6 @@ export interface BlockModalProps {
 const START_TIME = `${String(SCHEDULE_CONFIG.START_HOUR).padStart(2, '0')}:00`;
 const END_TIME = `${String(SCHEDULE_CONFIG.END_HOUR).padStart(2, '0')}:00`;
 
-const toMinutes = horarioParaMinutos;
-const isFullDayBlock = (b: Bloqueio) => bloqueioDiaInteiro(b);
 
 export function BlockModal({ receptionDate, initialTime, initialEmpId, employees, appointments = [], onClose, onAddBloqueio, onReassignAppointment, setErrorMessage, setToastMessage }: BlockModalProps) {
   const [blockDate, setBlockDate] = useState(receptionDate);
@@ -50,8 +48,8 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
     });
 
     return candidates.sort((a, b) => {
-      const aOnFolga = (a.bloqueios || []).some((b) => b.data === blockDate && isFullDayBlock(b));
-      const bOnFolga = (b.bloqueios || []).some((b) => b.data === blockDate && isFullDayBlock(b));
+      const aOnFolga = (a.bloqueios || []).some((bloq) => bloq.data === blockDate && bloqueioDiaInteiro(bloq));
+      const bOnFolga = (b.bloqueios || []).some((bloq) => bloq.data === blockDate && bloqueioDiaInteiro(bloq));
       if (aOnFolga !== bOnFolga) return aOnFolga ? 1 : -1;
 
       const aLoad = appointments.filter((app) => app.assignedEmployeeId === a.id && app.date === blockDate && app.status === 'scheduled').length;
@@ -85,7 +83,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
       return;
     }
 
-    if (toMinutes(effectiveEnd) <= toMinutes(effectiveStart)) {
+    if (horarioParaMinutos(effectiveEnd) <= horarioParaMinutos(effectiveStart)) {
       setErrorMessage('Horário final deve ser maior que o horário inicial.');
       return;
     }
@@ -233,7 +231,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
                     <option value="">Selecione para transferir...</option>
                     {suggestedEmployees.map((emp) => {
                       const load = appointments.filter((app) => app.assignedEmployeeId === emp.id && app.date === blockDate && app.status === 'scheduled').length;
-                      const onFolga = (emp.bloqueios || []).some((b) => b.data === blockDate && isFullDayBlock(b));
+                      const onFolga = (emp.bloqueios || []).some((b) => b.data === blockDate && bloqueioDiaInteiro(b));
                       return <option key={emp.id} value={emp.id}>{emp.name}{onFolga ? ' - Folga' : ''} ({load} no dia)</option>;
                     })}
                   </select>

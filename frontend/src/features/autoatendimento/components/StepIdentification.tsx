@@ -398,8 +398,8 @@ export function StepIdentification({ reservation, onSubmit, onBack }: StepIdenti
           type="submit"
           className="w-full sm:w-auto px-8 py-3 rounded-xl font-bold text-xs uppercase tracking-[0.15em] bg-primary text-on-primary hover:bg-primary-dim transition-all shadow-sm flex items-center justify-center gap-2 active:scale-[0.98]"
         >
-          <span>Ir para Pagamento</span>
-          <span className="material-symbols-outlined text-[18px]">payment</span>
+          <span>{reservation.exigirPagamento === false ? 'Revisar e Confirmar' : 'Ir para Pagamento'}</span>
+          <span className="material-symbols-outlined text-[18px]">{reservation.exigirPagamento === false ? 'task_alt' : 'payment'}</span>
         </button>
       </div>
     </form>

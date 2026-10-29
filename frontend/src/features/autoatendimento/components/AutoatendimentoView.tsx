@@ -397,6 +397,7 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
                   onSelectService={handleSelectSingleService}
                   onContinue={handleSelectServiceAndContinue}
                   empresa={empresa}
+                  percentualSinal={cobraOnline ? config?.percentualSinal ?? null : null}
                 />
               </motion.div>
             )}

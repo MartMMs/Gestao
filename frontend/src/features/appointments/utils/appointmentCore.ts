@@ -1,4 +1,5 @@
 import { Appointment, Service } from '../../../types';
+import { normalizarTexto } from '@shared/validadores';
 import { duracaoTotal, horarioParaMinutos } from '@shared/agenda';
 import { formatPhone } from '../../../utils/formatters';
 
@@ -44,12 +45,8 @@ export const shiftDateString = (date: string, days: number) => {
   return base.toISOString().slice(0, 10);
 };
 
-// Sem acentos, minúsculo e sem espaços nas pontas: base de todas as comparações de texto daqui
-export const normalizeKey = (value: string) => value
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .toLowerCase()
-  .trim();
+// Base de todas as comparações de texto daqui (fonte única em shared/validadores)
+export const normalizeKey = normalizarTexto;
 
 // Mesma regra do backend (shared/agenda.ts): cada serviço soma duração + higienização; sem serviço, a duração padrão
 export const getDuration = (serviceNames: string[] = [], services: ServiceLike[] = []) => duracaoTotal(serviceNames.map((rawName) => {

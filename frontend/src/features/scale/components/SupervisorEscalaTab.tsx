@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { normalizarTexto } from '@shared/validadores';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Client, Service, Bloqueio } from '../../../types';
 import { getBrazilCurrentMinuteOfDay, getBrazilCurrentTimeString, getLocalTodayString, matchesAppointmentSearch, matchesResourceFilter, shiftDateString, type ResourceFilter } from '../../../features/appointments/utils/appointmentCore';
@@ -157,11 +158,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
 
   const isFeriasReason = useCallback((value?: string | null) => {
     if (!value) return false;
-    return value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .includes('ferias');
+    return normalizarTexto(value).includes('ferias');
   }, []);
 
   const getEmployeeDayStatus = useCallback((emp: Employee): EmployeeDayStatus | null => {

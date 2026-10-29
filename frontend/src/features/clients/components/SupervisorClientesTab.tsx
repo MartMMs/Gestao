@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { normalizarTexto } from '@shared/validadores';
 import { motion } from 'motion/react';
 import { Appointment, Client, Service } from '../../../types';
 import { AnamneseForm, AnamneseData } from '../../../components/AnamneseForm';
@@ -44,7 +45,7 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
 
   const filteredClients = useSearch(clients, searchTerm, (client) => [client.nome, client.telefone, client.cpf]);
 
-  const normalizeValue = (value?: string) => (value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const normalizeValue = (value?: string) => normalizarTexto(value);
   const digitsOnly = (value?: string) => (value || '').replace(/\D/g, '');
 
   const getClientHistory = (client: Client) => {

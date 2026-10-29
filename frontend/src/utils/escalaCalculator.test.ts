@@ -38,13 +38,22 @@ describe('gerarEscala6x1', () => {
 });
 
 describe('gerarEscala12x36', () => {
-  it('12h de trabalho e 36h de descanso: trabalha dia sim, dia não, alternando diurno e noturno', () => {
+  it('12h de trabalho e 36h de descanso: dia sim, dia não, sempre no mesmo turno', () => {
     const dias = gerarEscala12x36(BR_NOON('2026-06-01'), 6, {
       diurno: { inicio: '07:00', fim: '19:00' },
       noturno: { inicio: '19:00', fim: '07:00' },
     });
-    expect(dias.map((d) => d.tipo)).toEqual(['trabalho', 'folga', 'trabalho', 'folga', 'trabalho', 'folga']);
-    expect(dias.filter((d) => d.tipo === 'trabalho').map((d) => d.turno)).toEqual(['Diurno', 'Noturno', 'Diurno']);
+    const tipos = dias.map((d) => d.tipo);
+    for (let i = 1; i < tipos.length; i++) expect(tipos[i]).not.toBe(tipos[i - 1]);
+    expect(new Set(dias.filter((d) => d.tipo === 'trabalho').map((d) => d.turno))).toEqual(new Set(['Diurno']));
+  });
+
+  it('gerada mês a mês, não junta dois plantões na virada (31/01 e 01/02)', () => {
+    const turnos = { diurno: { inicio: '07:00', fim: '19:00' }, noturno: { inicio: '19:00', fim: '07:00' } };
+    const janeiro = gerarEscala12x36('2026-01-01', 31, turnos);
+    const fevereiro = gerarEscala12x36('2026-02-01', 28, turnos);
+    const emSequencia = [...janeiro, ...fevereiro].map((d) => d.tipo);
+    for (let i = 1; i < emSequencia.length; i++) expect(emSequencia[i]).not.toBe(emSequencia[i - 1]);
   });
 });
 

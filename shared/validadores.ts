@@ -53,12 +53,16 @@ export const MENSAGEM_CPF_INVALIDO = 'CPF inválido. Confira os dígitos.';
 // Valores mascarados pela API (ex.: "(11) *****-**21") nunca devem ser gravados de volta
 export const valorMascarado = (valor: unknown) => typeof valor === 'string' && valor.includes('*');
 
-export const normalizarNome = (nome: unknown) => String(nome ?? '')
+// Texto para comparação e busca: sem acentos, minúsculo, espaços repetidos colapsados e sem espaços nas pontas.
+// Fonte única no projeto (backend e frontend); não reimplementar localmente.
+export const normalizarTexto = (texto: unknown) => String(texto ?? '')
   .normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '')
   .replace(/\s+/g, ' ')
   .trim()
   .toLowerCase();
+
+export const normalizarNome = normalizarTexto;
 
 // Limite comum para observações/anamnese (agenda interna, clientes e totem)
 export const LIMITE_OBSERVACAO = 5000;

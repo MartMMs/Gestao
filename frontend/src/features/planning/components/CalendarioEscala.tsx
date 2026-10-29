@@ -1,4 +1,5 @@
 import React, { useMemo, useRef } from 'react';
+import { horaInicialDoTurno } from '../../../utils/escalaCalculator';
 import { DiaEscala } from '../../../utils/escalaCalculator';
 
 interface CalendarioEscalaProps {
@@ -159,8 +160,7 @@ export function CalendarioEscala({ escalas, year, month, dayRange, selectedMonth
           } else if (isTrabalho) {
             textClass = 'text-white';
             const t = escala?.turno || '';
-            const [start] = t.split('-');
-            const startHour = parseInt(start?.split(':')[0] || '8', 10);
+            const startHour = horaInicialDoTurno(t) ?? -1;
             
             if (startHour >= 12 && startHour < 18) {
               bgClass = 'bg-indigo-600 border-indigo-700 shadow-md hover:bg-indigo-700';

@@ -108,8 +108,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
       setErrorMessage('Preencha o nome e a especialidade do profissional.');
       return;
     }
-    if (newEmpCargaHoraria === '' || !Number.isInteger(newEmpCargaHoraria) || newEmpCargaHoraria < 0 || newEmpCargaHoraria > 44) {
-      setErrorMessage('Carga horária semanal deve ser um número inteiro entre 0 e 44 horas.');
+    if (newEmpCargaHoraria === '' || !Number.isInteger(newEmpCargaHoraria) || newEmpCargaHoraria < 1 || newEmpCargaHoraria > 44) {
+      setErrorMessage('Carga horária semanal deve ser um número inteiro entre 1 e 44 horas.');
       return;
     }
     if (newEmpFolgasDomingoNoMes === '' || !Number.isInteger(newEmpFolgasDomingoNoMes) || newEmpFolgasDomingoNoMes < 0 || newEmpFolgasDomingoNoMes > 5) {
@@ -434,7 +434,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                     <h4 className="text-sm font-bold text-on-surface truncate">{emp.name}</h4>
                     <p className="text-xs text-on-surface-variant truncate">{emp.email}</p>
                     <p className="text-[10px] uppercase tracking-widest text-primary mt-1">{emp.specialty}</p>
-                    <p className="text-[10px] text-on-surface-variant mt-1">{emp.tipoEscala || '6x1'} • {emp.cargaHorariaSemanal || 40}h/sem</p>
+                    <p className="text-[10px] text-on-surface-variant mt-1">{emp.tipoEscala || '6x1'} • {emp.cargaHorariaSemanal ?? 40}h/sem</p>
                     <p className="text-[10px] text-on-surface-variant">Domingos de folga/mês: {emp.folgasDomingoNoMes ?? 2}</p>
                   </div>
                 </div>
@@ -469,7 +469,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                       setNewEmpCargo(emp.cargo || '');
                       setNewEmpTipoEscala(emp.tipoEscala || '6x1');
                       setNewEmpFolgasDomingoNoMes(emp.folgasDomingoNoMes ?? 2);
-                      setNewEmpCargaHoraria(emp.cargaHorariaSemanal || 40);
+                      setNewEmpCargaHoraria(emp.cargaHorariaSemanal ?? 40);
                       setNewEmpHabilidades(emp.habilidades || []);
                       setNewEmpRole(emp.role === 'supervisor' ? 'supervisor' : 'collaborator');
                       setNewEmpDiasTrabalho((emp.diasTrabalho || '1,2,3,4,5,6').split(','));
@@ -590,7 +590,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                 <option value="personalizado">Personalizado</option>
               </select>
               <input type="number" min={0} max={5} value={newEmpFolgasDomingoNoMes} onChange={e => setNewEmpFolgasDomingoNoMes(e.target.value === '' ? '' : Number(e.target.value))} placeholder="Folgas de domingo por mês (Ex: 2)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
-              <input type="number" min={0} max={44} value={newEmpCargaHoraria} onChange={e => setNewEmpCargaHoraria(e.target.value === '' ? '' : Number(e.target.value))} placeholder="Carga horária semanal (Ex: 40)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              <input type="number" min={1} max={44} value={newEmpCargaHoraria} onChange={e => setNewEmpCargaHoraria(e.target.value === '' ? '' : Number(e.target.value))} placeholder="Carga horária semanal (Ex: 40)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Habilidades</p>
                 <div className="grid grid-cols-2 gap-2">

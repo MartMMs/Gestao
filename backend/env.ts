@@ -58,9 +58,16 @@ const bancoRemoto = () => {
   }
 };
 
+const AMBIENTES_CONHECIDOS = new Set(['production', 'development', 'test']);
+
 export const validarConfigProducao = (): string[] => {
   if (!producao) {
-    return !process.env.NODE_ENV && bancoRemoto()
+    const ambiente = process.env.NODE_ENV;
+    // "prod", "staging" etc. cairiam no modo de desenvolvimento (CORS aberto, limites em memória) sem avisar
+    if (ambiente && !AMBIENTES_CONHECIDOS.has(ambiente)) {
+      return [`NODE_ENV="${ambiente}" não é reconhecido. Use production, development ou test.`];
+    }
+    return !ambiente && bancoRemoto()
       ? ['NODE_ENV não definido com banco remoto. Use NODE_ENV=production no servidor (ou NODE_ENV=development para desenvolver com banco remoto).']
       : [];
   }

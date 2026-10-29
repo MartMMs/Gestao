@@ -11,8 +11,10 @@ const politicaDeSeguranca = (env: Record<string, string>): Plugin => {
   };
   const api = [origem(env.VITE_API_URL), origem(env.VITE_SOCKET_URL)].filter(Boolean);
   const sockets = api.map((o) => o.replace(/^http/, 'ws'));
-  // Sem URL configurada, a API fica na porta 3333 do mesmo host: libera qualquer host em http(s)/ws(s)
-  const conexoes = api.length > 0 ? [...api, ...sockets] : ['http:', 'https:', 'ws:', 'wss:'];
+  // Sem URL configurada, a API fica na porta 3333 do mesmo host (ver config/api.ts): libera só essa porta
+  const conexoes = api.length > 0
+    ? [...api, ...sockets]
+    : ['http://*:3333', 'https://*:3333', 'ws://*:3333', 'wss://*:3333'];
   const csp = [
     "default-src 'self'",
     "script-src 'self'",

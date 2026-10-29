@@ -9,6 +9,8 @@ interface StepCatalogProps {
   onToggleService?: (service: Service) => void;
   onContinue: () => void;
   empresa?: ConfiguracaoEmpresa | null;
+  /** Percentual do sinal cobrado online; null quando não há cobrança online (pagamento na recepção) */
+  percentualSinal?: number | null;
   // Compatibilidade regressiva
   selectedService?: Service | null;
   onSelectService?: (service: Service) => void;
@@ -20,6 +22,7 @@ export function StepCatalog({
   onToggleService,
   onContinue,
   empresa,
+  percentualSinal = null,
   selectedService = null,
   onSelectService,
 }: StepCatalogProps) {
@@ -79,7 +82,7 @@ export function StepCatalog({
   }, [activeSelectedList]);
 
   const valorSinalTotal = React.useMemo(() => {
-    return Math.round(valorTotal * 0.4 * 100) / 100;
+    return percentualSinal ? Math.round(valorTotal * (percentualSinal / 100) * 100) / 100 : 0;
   }, [valorTotal]);
 
   return (
@@ -148,7 +151,7 @@ export function StepCatalog({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredServices.map((service) => {
           const isSelected = activeSelectedList.some((s) => s.id === service.id);
-          const valorSinal = Math.round(service.preco * 0.4 * 100) / 100;
+          const valorSinal = percentualSinal ? Math.round(service.preco * (percentualSinal / 100) * 100) / 100 : 0;
           const tempoBuffer = service.tempoHigienizacaoMin || 15;
 
           return (
@@ -193,9 +196,11 @@ export function StepCatalog({
                     <span className="text-lg sm:text-xl font-bold font-headline text-primary">
                       {formatarReais(service.preco)}
                     </span>
-                    <p className="text-[10px] text-on-surface-variant font-medium">
-                      Sinal de {formatarReais(valorSinal)}
-                    </p>
+                    {percentualSinal ? (
+                      <p className="text-[10px] text-on-surface-variant font-medium">
+                        Sinal de {formatarReais(valorSinal)}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
 
@@ -288,7 +293,7 @@ export function StepCatalog({
           {activeSelectedList.length > 0 ? (
             <span className="font-medium">
               Total: <strong className="text-primary text-sm font-bold">{formatarReais(valorTotal)}</strong> (
-              Sinal de {formatarReais(valorSinalTotal)} · {duracaoTotal} min contínuos na agenda)
+              {percentualSinal ? `Sinal de ${formatarReais(valorSinalTotal)}` : 'Pagamento na recepção'} · {duracaoTotal} min contínuos na agenda)
             </span>
           ) : (
             <span>Selecione um ou mais produtos ou serviços acima para prosseguir para a escolha do horário.</span>

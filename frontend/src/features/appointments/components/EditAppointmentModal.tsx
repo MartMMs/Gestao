@@ -23,12 +23,14 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
     ...appointment,
     contact: appointment.contact && /\d/.test(appointment.contact) ? formatPhone(appointment.contact) : appointment.contact,
   }));
-  // Rascunho por agendamento: se a sessão expirar no meio da edição, o que foi digitado volta ao reabrir.
-  // Fechar ou salvar apaga o rascunho (o servidor recusa com 409 se o agendamento mudou nesse meio tempo).
+  // Rascunho por agendamento E versão: se a sessão expirar no meio da edição, o que foi digitado volta ao reabrir;
+  // se o agendamento mudou no servidor nesse meio tempo, o rascunho antigo é ignorado (não sobrescreve o novo).
+  // Fechar ou salvar apaga o rascunho.
   const { draft: editingAppointment, setDraft: setEditingAppointment, clearDraft } = useFormDraft<Appointment>(
-    `edit-appointment:${appointment.id}`,
+    `edit-appointment:${appointment.id}:${appointment.version ?? ''}`,
     original,
   );
+  const [rascunhoRestaurado] = useState(() => JSON.stringify(editingAppointment) !== JSON.stringify(original));
   const closeAndDiscard = () => {
     clearDraft();
     onClose();
@@ -106,6 +108,11 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
               <p className="text-on-surface-variant mt-1">Revise horário, colaborador e serviços antes de salvar novamente.</p>
             </div>
           </div>
+        </div>
+      ) : rascunhoRestaurado ? (
+        <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-on-surface flex gap-2 items-center">
+          <span className="material-symbols-outlined text-[16px] text-amber-600">history</span>
+          <span>Rascunho restaurado: estas são as alterações que você não chegou a salvar. Cancele para descartá-las.</span>
         </div>
       ) : undefined}
       infoBanner={isEditingCompleted ? (

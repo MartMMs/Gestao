@@ -116,6 +116,8 @@ const resolverCliente = async (
   let cliente = typeof dados.clientId === 'string' && dados.clientId
     ? await tx.cliente.findUnique({ where: { id: dados.clientId } })
     : null;
+  // Cliente excluído (anonimizado) não recebe agendamentos novos
+  if (cliente?.removidoEm) throw new HttpError(404, 'Cliente não encontrado. Ele pode ter sido excluído.');
 
   // Colaborador não vincula clientes arbitrários: só o cliente atual do atendimento ou alguém que ele já atendeu
   if (cliente && !gerenciaAgenda(req) && cliente.id !== clienteAtualId) {
@@ -133,7 +135,8 @@ const resolverCliente = async (
     if (atual && (!nome || normalizarNome(atual.nome) === normalizarNome(nome))) cliente = atual;
   }
   // Só o cliente aberto na edição tem o cadastro alterado; quem foi achado por CPF/telefone é outra ficha
-  const editandoCadastro = Boolean(cliente && clienteAtualId && cliente.id === clienteAtualId);
+  // Ficha anonimizada nunca volta a receber nome, telefone ou CPF (isso a reidentificaria)
+  const editandoCadastro = Boolean(cliente && clienteAtualId && cliente.id === clienteAtualId && !cliente.removidoEm);
   if (!cliente && gerenciaAgenda(req)) {
     // CPF identifica a pessoa; telefone pode ser compartilhado (família), então só vale se o nome também conferir
     if (cpf && cpfValido(cpf)) cliente = await tx.cliente.findFirst({ where: { cpf: { in: variantesCpf(cpf) } } });
@@ -155,7 +158,7 @@ const resolverCliente = async (
   if (!editandoCadastro) {
     // Cliente escolhido na busca ou achado por CPF/telefone: o agendamento usa a ficha como está
     const podeEditarSaudeFicha = supervisor || acessoSaude.has(cliente.id);
-    return podeEditarSaudeFicha && observacao !== undefined && observacao !== cliente.observacao
+    return podeEditarSaudeFicha && !cliente.removidoEm && observacao !== undefined && observacao !== cliente.observacao
       ? tx.cliente.update({ where: { id: cliente.id }, data: { observacao } })
       : cliente;
   }

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { horaInicialDoTurno } from '../../../utils/escalaCalculator';
 import { Employee, Appointment } from '../../../types';
 import { gerarEscalaComRegras, DiaEscala } from '../../../utils/escalaCalculator';
 
@@ -216,8 +217,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
     if (tipo === 'folga' || tipo === 'fds') return `bg-surface-variant/40 shadow-inner bg-[repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(0,0,0,0.03)_5px,rgba(0,0,0,0.03)_10px)] dark:bg-[repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(255,255,255,0.03)_5px,rgba(255,255,255,0.03)_10px)] hover:opacity-80 ${weekendClass}`;
     if (tipo === 'trabalho') {
       if (!turno) return `bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 ${weekendClass}`;
-      const [start] = turno.split('-');
-      const startHour = parseInt(start?.split(':')[0] || '8', 10);
+      const startHour = horaInicialDoTurno(turno) ?? -1;
       if (startHour >= 5 && startHour < 12) {
         if (turno.includes('18:00') || turno.includes('19:00') || turno.includes('17:00')) return `bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 ${weekendClass}`;
         return `bg-blue-600 text-white shadow-sm hover:bg-blue-700 ${weekendClass}`;
@@ -235,8 +235,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
     if (dia.tipo === 'folga') return { label: 'FOLGA', icon: 'event_busy' };
     if (dia.tipo === 'fds') return { label: 'FDS', icon: 'weekend' };
     if (dia.turno) {
-      const [start] = dia.turno.split('-');
-      const startHour = parseInt(start?.split(':')[0] || '8', 10);
+      const startHour = horaInicialDoTurno(dia.turno) ?? -1;
       let icon = 'work';
       if (startHour >= 12 && startHour < 18) icon = 'partly_cloudy_day';
       else if (startHour >= 18 || startHour < 5) icon = 'dark_mode';

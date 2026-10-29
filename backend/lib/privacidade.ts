@@ -49,6 +49,7 @@ type AgendamentoBase = { clienteId: string; observacoesSaude?: string | null; cl
 // Janela em que um atendimento libera a ficha de saúde ao profissional
 const ACESSO_ANTES_HORAS = 7 * 24; // atendimento marcado para os próximos 7 dias
 const ACESSO_DEPOIS_DIAS = 30; // atendimento concluído nos últimos 30 dias
+const ACESSO_TOTEM_HORAS = 2; // reserva do totem: só a partir de 2h antes do início
 
 /**
  * Clientes cuja anamnese o profissional pode ver/editar. Regras:
@@ -67,7 +68,18 @@ export const clientesComAcessoSaude = async (req: Request): Promise<Set<string>>
       colaboradorId: usuario.id,
       NOT: { reservaOrigem: ORIGEM_COLABORADOR },
       OR: [
-        { status: 'scheduled', data: { gte: new Date(agora - 12 * 3_600_000), lte: new Date(agora + ACESSO_ANTES_HORAS * 3_600_000) } },
+        {
+          status: 'scheduled',
+          NOT: { reservaOrigem: 'autoatendimento' },
+          data: { gte: new Date(agora - 12 * 3_600_000), lte: new Date(agora + ACESSO_ANTES_HORAS * 3_600_000) },
+        },
+        // Reserva feita no totem público só libera a ficha perto do horário: qualquer pessoa com nome, telefone e
+        // CPF de alguém consegue reservar ali, e 7 dias de acesso seriam uma porta para a ficha de saúde
+        {
+          status: 'scheduled',
+          reservaOrigem: 'autoatendimento',
+          data: { gte: new Date(agora - 12 * 3_600_000), lte: new Date(agora + ACESSO_TOTEM_HORAS * 3_600_000) },
+        },
         { status: 'completed', data: { gte: new Date(agora - ACESSO_DEPOIS_DIAS * 86_400_000) } },
       ],
     },

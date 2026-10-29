@@ -5,7 +5,7 @@ import { config as ambiente } from '../env';
 import { usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { redisService } from '../services/redisService';
 import { communicationService } from '../services/communicationService';
-import { comDisponibilidadePagamento, getAutoatendimentoConfig, getEmpresaConfig, pagamentoOnlineDisponivel } from '../services/configService';
+import { comDisponibilidadePagamento, gatewayPagamento, getAutoatendimentoConfig, getEmpresaConfig, pagamentoOnlineDisponivel } from '../services/configService';
 import {
   agendamentosDoDia,
   blocosDoIntervalo,
@@ -100,8 +100,12 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
   // Rate limit por IP para as rotas públicas. O webhook fica fora: o gateway chama de poucos IPs fixos e um 429
   // faria confirmações de pagamento se perderem (ele é protegido pela assinatura HMAC com timestamp).
   router.use(async (req, res, next) => {
-    if (req.path === '/webhook-pagamento') return next();
     try {
+      // Webhook: limite próprio e folgado (o gateway chama de poucos IPs fixos; o do totem cortaria confirmações)
+      if (req.path === '/webhook-pagamento') {
+        const limite = await redisService.rateLimit(`ratelimit:webhook:${ipDoCliente(req)}`, 600, 60);
+        return limite.allowed ? next() : res.status(429).json({ erro: 'Muitas chamadas ao webhook.' });
+      }
       const ip = ipDoCliente(req);
       const check = await redisService.rateLimit(`ratelimit:autoatendimento:${ip}`, MAX_REQUISICOES_POR_MINUTO, 60);
       if (!check.allowed) {
@@ -334,6 +338,11 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         lockKeys,
         lockExpiresAt,
       };
+      // Com pagamento online, a cobrança (código Pix etc.) vem do gateway do banco; o totem nunca monta uma
+      if (cobraOnline && gatewayPagamento) {
+        const cobranca = await gatewayPagamento.criarCobranca({ sessionToken, valor: valorSinal, descricao: sessao.servicoNome });
+        Object.assign(sessao, cobranca);
+      }
       await redisService.setSession(`reserva:${sessionToken}`, sessao, ttlSegundos);
 
       eventos.avisarEquipe('slot_temporariamente_reservado', { data, horario });
@@ -496,24 +505,36 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         return res.status(422).json({ erro: 'Valor pago menor que o valor cobrado.' });
       }
 
-      // O filtro por status torna a confirmação idempotente: reenviar o mesmo evento não altera nada
+      const novoStatus = tipo === 'integral' ? 'integral_pago' : 'sinal_pago';
+      // Só confirma reserva ATIVA. O filtro por status torna a confirmação idempotente (reenvio não altera nada);
+      // integral depois do sinal completa o pagamento em vez de ser descartado.
       const atualizado = await prisma.agendamento.updateMany({
-        where: { id: agendamentoId, statusPagamento: 'aguardando_pagamento' },
-        data: { statusPagamento: tipo === 'integral' ? 'integral_pago' : 'sinal_pago' },
+        where: {
+          id: agendamentoId,
+          status: 'scheduled',
+          statusPagamento: tipo === 'integral' ? { in: ['aguardando_pagamento', 'sinal_pago'] } : 'aguardando_pagamento',
+        },
+        data: { statusPagamento: novoStatus },
       });
       if (atualizado.count > 0) {
         eventos.notificarMudanca(ESCOPOS.reservaTotem);
         return res.json({ received: true, atualizado: true });
       }
 
-      // Pagamento depois que a reserva expirou (ou foi cancelada): o cliente pagou e ficou sem horário. Marca o
-      // agendamento para a recepção ver e devolver/remarcar, em vez de responder 200 sem deixar rastro.
+      // Pagamento para reserva que expirou ou foi cancelada pela equipe: o cliente pagou e ficou sem horário.
+      // Marca o agendamento e avisa a equipe para devolver ou remarcar, em vez de responder 200 sem deixar rastro.
       const tardio = await prisma.agendamento.updateMany({
-        where: { id: agendamentoId, statusPagamento: 'expirado' },
+        where: {
+          id: agendamentoId,
+          OR: [
+            { statusPagamento: 'expirado' },
+            { status: { in: ['cancelled', 'no_show'] }, statusPagamento: { in: ['aguardando_pagamento', 'sinal_pago'] } },
+          ],
+        },
         data: { statusPagamento: 'pago_apos_expirar' },
       });
       if (tardio.count > 0) {
-        console.warn(`[PAGAMENTO] Pagamento recebido após a reserva expirar (agendamento ${agendamentoId}). Requer devolução ou remarcação.`);
+        console.warn(`[PAGAMENTO] Pagamento recebido para reserva expirada ou cancelada (agendamento ${agendamentoId}). Requer devolução ou remarcação.`);
         eventos.notificarMudanca(ESCOPOS.reservaTotem);
         eventos.avisarEquipe('pagamento_apos_expirar', { agendamentoId });
       }
