@@ -1,14 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Client, Service, Bloqueio } from '../../../types';
-import { getBrazilCurrentMinuteOfDay, getBrazilCurrentTimeString, getLocalTodayString } from '../../../features/appointments/utils/appointmentCore';
+import { getBrazilCurrentMinuteOfDay, getBrazilCurrentTimeString, getLocalTodayString, matchesAppointmentSearch, matchesResourceFilter, shiftDateString, type ResourceFilter } from '../../../features/appointments/utils/appointmentCore';
 import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { BlockModal, BookingModal, EditAppointmentModal, DeleteAppointmentModal } from '../../../features/appointments/components';
 import { useScheduleModals } from '../../../features/appointments/hooks';
 import { EmployeeScheduleColumn, ScheduleGridProvider, type ScheduleGridActions, type ScheduleGridContext } from '../../../components/ScheduleGridColumn';
 import { ScheduleRulerGrid } from '../../../components/ScheduleRulerGrid';
+import { isTeamMember } from '../../../utils/formatters';
+import { JANELA_AGENDA_DIAS } from '@shared/agendaJanela';
 
 const { START_HOUR, END_HOUR, HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
+// Referências fixas para listas vazias (um [] novo a cada render anularia os memos e o React.memo)
+const NO_APPOINTMENTS: Appointment[] = [];
+// Sentinela: fora de hoje o relógio não é lido (atraso e linha vermelha só existem na visão de hoje)
+const FROZEN_MINUTE = new Date(0);
+export const NO_SCALE_OVERRIDES: NonNullable<SupervisorEscalaTabProps['scaleOverrides']> = [];
 
 interface SupervisorEscalaTabProps {
   employees: Employee[];
@@ -43,12 +50,12 @@ type EmployeeDayStatus = {
   isAllDayUnavailable: boolean;
 };
 
-export function SupervisorEscalaTab({ employees, appointments, services, clients, scaleOverrides = [], onOpenUpcomingAppointments, onReassignAppointment, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onCompleteAppointment, onEditClient, onAddBloqueio, onDeleteBloqueio, setToastMessage, setErrorMessage, buildScaleForEmployee }: SupervisorEscalaTabProps) {
+export function SupervisorEscalaTab({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onOpenUpcomingAppointments, onReassignAppointment, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onCompleteAppointment, onEditClient, onAddBloqueio, onDeleteBloqueio, setToastMessage, setErrorMessage, buildScaleForEmployee }: SupervisorEscalaTabProps) {
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
   const [scheduleSearchTerm, setScheduleSearchTerm] = useState('');
   const [professionalFilter, setProfessionalFilter] = useState('all');
   const OFF_DAY_FILTER = '__off_today__';
-  const [resourceFilter, setResourceFilter] = useState<'all' | 'sala_massagem' | 'ofuro' | 'estetica'>('all');
+  const [resourceFilter, setResourceFilter] = useState<ResourceFilter>('all');
   const {
     state: {
       showNewBookingModal,
@@ -93,14 +100,21 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   const handleNextMonth = () => setCurrentMonthDate(new Date(year, month + 1, 1));
   const formatDayString = (d: number) => `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
+  // Overrides indexados por colaborador+dia: o calendário consulta todos os dias do mês para toda a equipe
+  const overrideByEmployeeDay = useMemo(() => {
+    const map = new Map<string, { tipo: 'trabalho' | 'folga' | 'fds' }>();
+    for (const override of scaleOverrides) map.set(`${override.colaboradorId}:${override.data}`, override);
+    return map;
+  }, [scaleOverrides]);
+
   const getDayCoverage = useCallback((dateStr: string) => {
-    const team = employees.filter((emp) => emp.id !== 'admin');
+    const team = employees.filter((emp) => isTeamMember(emp));
     const ideal = Math.max(1, Math.ceil(team.length * 0.7));
     const trabalhando: string[] = [];
     const folgas: string[] = [];
 
     for (const emp of team) {
-      const override = scaleOverrides.find((item) => item.colaboradorId === emp.id && item.data === dateStr);
+      const override = overrideByEmployeeDay.get(`${emp.id}:${dateStr}`);
       if (override && override.tipo !== 'trabalho') {
         folgas.push(emp.name.split(' ')[0] || emp.name);
         continue;
@@ -129,7 +143,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
       trabalhando,
       folgas,
     };
-  }, [employees, scaleOverrides]);
+  }, [employees, overrideByEmployeeDay]);
 
   const dayScaleOverrideByEmployee = useMemo(() => {
     const map = new Map<string, { tipo: 'trabalho' | 'folga' | 'fds'; descricao?: string }>();
@@ -224,6 +238,15 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     };
   }, [dayScaleOverrideByEmployee, receptionDate, isFeriasReason, buildScaleForEmployee]);
 
+  // Situação do dia de cada profissional, calculada uma vez por data (gerar a escala do mês é caro)
+  const dayStatusByEmployee = useMemo(() => {
+    const map = new Map<string, EmployeeDayStatus | null>();
+    for (const emp of employees) {
+      if (isTeamMember(emp)) map.set(emp.id, getEmployeeDayStatus(emp));
+    }
+    return map;
+  }, [employees, getEmployeeDayStatus]);
+
   // Lógica de Scroll e Interações Visuais
   const scrollHorizontally = (direction: 'left' | 'right') => {
     if (bodyScrollRef.current) bodyScrollRef.current.scrollBy({ left: direction === 'left' ? -300 : 300, behavior: 'smooth' });
@@ -250,7 +273,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     const selectedEmployee = employees.find((emp) => emp.id === empId);
     if (!selectedEmployee) return;
 
-    const dayStatus = getEmployeeDayStatus(selectedEmployee);
+    const dayStatus = dayStatusByEmployee.get(empId);
     if (dayStatus?.isAllDayUnavailable) {
       setErrorMessage(`Profissional indisponível: ${dayStatus.label}${dayStatus.reason ? ` (${dayStatus.reason})` : ''}.`);
       return;
@@ -279,52 +302,75 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
       }
     }
     openBookingModal(formattedTime, empId);
-  }, [employees, receptionDate, setErrorMessage, todayStr, getEmployeeDayStatus]);
+  }, [employees, receptionDate, setErrorMessage, todayStr, dayStatusByEmployee, openBookingModal]);
 
   const currentViewDateObj = new Date(`${receptionDate}T12:00:00Z`);
-  const activeEmployees = employees
-    .filter((emp) => emp.id !== 'admin')
+  const activeEmployees = useMemo(() => employees
+    .filter((emp) => isTeamMember(emp))
     .filter((emp) => {
       if (professionalFilter === 'all') return true;
       if (professionalFilter === OFF_DAY_FILTER) {
-        const status = getEmployeeDayStatus(emp);
+        const status = dayStatusByEmployee.get(emp.id);
         return Boolean(status?.isAllDayUnavailable && status.label !== 'Bloqueio');
       }
       return emp.id === professionalFilter;
-    });
+    }), [employees, professionalFilter, dayStatusByEmployee]);
 
   const employeeUnavailableReasons = useMemo(() => {
     const reasons: Record<string, string> = {};
     for (const emp of activeEmployees) {
-      const status = getEmployeeDayStatus(emp);
+      const status = dayStatusByEmployee.get(emp.id);
       if (status?.isAllDayUnavailable) {
         reasons[emp.id] = `${status.label}: ${status.reason}`;
       }
     }
     return reasons;
-  }, [activeEmployees, getEmployeeDayStatus]);
+  }, [activeEmployees, dayStatusByEmployee]);
 
   const isTodayView = receptionDate === todayStr;
+  // Mesma janela do servidor (GET /agendamentos devolve só o último ano)
+  const isOutsideLoadedWindow = receptionDate < shiftDateString(todayStr, -JANELA_AGENDA_DIAS);
   const currentMinuteTop = isTodayView ? (getBrazilCurrentMinuteOfDay() - START_HOUR * 60) * MINUTE_HEIGHT : -100;
   const timelineHeight = (END_HOUR - START_HOUR + 1) * HOUR_HEIGHT;
 
-  const scheduleGridContext: ScheduleGridContext = {
+  // Agendamentos do dia já filtrados e agrupados por profissional: cada coluna só lê a própria lista
+  // Listas sem mudança reaproveitam o array anterior (o React Query mantém os objetos inalterados),
+  // assim só a coluna do profissional afetado redesenha.
+  const previousDayAppointmentsRef = useRef(new Map<string, Appointment[]>());
+  const dayAppointmentsByEmployee = useMemo(() => {
+    const map = new Map<string, Appointment[]>();
+    for (const appointment of appointments) {
+      if (appointment.date !== receptionDate) continue;
+      if (!matchesAppointmentSearch(appointment, scheduleSearchTerm)) continue;
+      if (!matchesResourceFilter(appointment, resourceFilter)) continue;
+      const list = map.get(appointment.assignedEmployeeId);
+      if (list) list.push(appointment);
+      else map.set(appointment.assignedEmployeeId, [appointment]);
+    }
+    const previous = previousDayAppointmentsRef.current;
+    for (const [employeeId, list] of map) {
+      const old = previous.get(employeeId);
+      if (old && old.length === list.length && old.every((item, index) => item === list[index])) map.set(employeeId, old);
+    }
+    previousDayAppointmentsRef.current = map;
+    return map;
+  }, [appointments, receptionDate, scheduleSearchTerm, resourceFilter]);
+
+  const scheduleGridContext = useMemo<ScheduleGridContext>(() => ({
     receptionDate,
-    scheduleSearchTerm,
-    resourceFilter,
-    appointments,
     services,
     startHour: START_HOUR,
     endHour: END_HOUR,
     minuteHeight: MINUTE_HEIGHT,
     hourHeight: HOUR_HEIGHT,
     isTodayView,
-    currentMinute,
+    // Fora de hoje o relógio não é usado: um valor fixo evita redesenhar todas as colunas a cada minuto
+    currentMinute: isTodayView ? currentMinute : FROZEN_MINUTE,
     todayStr,
     employeeUnavailableReasons,
-  };
+  }), [receptionDate, services, isTodayView, currentMinute, todayStr, employeeUnavailableReasons]);
 
-  const scheduleGridActions: ScheduleGridActions = {
+  const scheduleGridActions = useMemo<ScheduleGridActions>(() => ({
     onGridClick: handleGridClick,
     onDeleteBloqueio,
     onReassignAppointment,
@@ -333,7 +379,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     onDeleteAppointmentClick: openDeleteAppointmentModal,
     setToastMessage,
     setErrorMessage,
-  };
+  }), [handleGridClick, onDeleteBloqueio, onReassignAppointment, onCompleteAppointment, openEditAppointmentModal, openDeleteAppointmentModal, setToastMessage, setErrorMessage]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col lg:flex-row gap-6">
@@ -438,13 +484,13 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
           >
             <option value="all">Profissional: Todos</option>
             <option value={OFF_DAY_FILTER}>Profissional: Somente de folga</option>
-            {employees.filter((employee) => employee.id !== 'admin').map((employee) => (
+            {employees.filter((employee) => isTeamMember(employee)).map((employee) => (
               <option key={employee.id} value={employee.id}>{employee.name}</option>
             ))}
           </select>
           <select
             value={resourceFilter}
-            onChange={(event) => setResourceFilter(event.target.value as 'all' | 'sala_massagem' | 'ofuro' | 'estetica')}
+            onChange={(event) => setResourceFilter(event.target.value as ResourceFilter)}
             className="md:w-56 bg-surface-container-low border border-outline-variant/30 text-sm rounded-xl px-3 py-2 focus:ring-1 focus:ring-primary text-on-surface"
           >
             <option value="all">Recurso: Todos</option>
@@ -454,6 +500,11 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
           </select>
         </div>
 
+        {isOutsideLoadedWindow && (
+          <p className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">
+            A agenda carrega só o último ano. Para atendimentos mais antigos, abra o histórico do cliente.
+          </p>
+        )}
         <div className="flex-1 bg-surface-container-lowest border border-outline-variant/20 rounded-2xl overflow-hidden flex flex-col relative shadow-sm h-full group">
           <button onClick={() => scrollHorizontally('left')} className="absolute left-2 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-surface shadow-md rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-surface-container border border-outline-variant/20 text-on-surface"><span className="material-symbols-outlined">chevron_left</span></button>
           <button onClick={() => scrollHorizontally('right')} className="absolute right-2 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-surface shadow-md rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-surface-container border border-outline-variant/20 text-on-surface"><span className="material-symbols-outlined">chevron_right</span></button>
@@ -469,7 +520,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
                   <h4 className="font-bold text-on-surface text-xs mt-1 truncate">{emp.name.split(' ')[0]}</h4>
                   <p className="text-[9px] text-on-surface-variant uppercase tracking-widest truncate">{emp.specialty}</p>
                         {(() => {
-                          const dayStatus = getEmployeeDayStatus(emp);
+                          const dayStatus = dayStatusByEmployee.get(emp.id);
                           if (!dayStatus) return null;
                           return (
                             <div className="mt-1 flex flex-col items-center gap-0.5">
@@ -487,7 +538,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
 
           {/* Área Deslizante da Timeline */}
           <div className="flex flex-1 overflow-y-auto overflow-x-auto relative custom-scrollbar" ref={bodyScrollRef} onScroll={(e) => { if (headerScrollRef.current) headerScrollRef.current.scrollLeft = e.currentTarget.scrollLeft; }}>
-            <div className="relative min-w-max flex">
+            <div className="relative min-w-full w-max shrink-0 flex">
               <ScheduleRulerGrid
                 startHour={START_HOUR}
                 endHour={END_HOUR}
@@ -501,7 +552,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
                   className="relative flex flex-1 z-10 min-w-max"
                 >
                   {activeEmployees.map(emp => (
-                    <EmployeeScheduleColumn key={emp.id} emp={emp} />
+                    <EmployeeScheduleColumn key={emp.id} emp={emp} appointments={dayAppointmentsByEmployee.get(emp.id) ?? NO_APPOINTMENTS} />
                   ))}
                 </div>
               </ScheduleGridProvider>

@@ -1,9 +1,9 @@
-import React, { StrictMode, Component, ErrorInfo, ReactNode } from 'react';
+import React, { StrictMode, Component, ErrorInfo, ReactNode, Suspense, lazy } from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App';
 import * as Sentry from '@sentry/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './AuthContext';
+import { isAutoatendimentoHost } from './config/hosts';
 import './index.css';
 
 const SENTRY_DSN = "SUA_DSN_DO_SENTRY_AQUI"; // Insira a chave fornecida pelo painel do Sentry
@@ -27,6 +27,13 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Portal e totem em chunks separados: o aparelho do totem não baixa o código do portal da equipe
+const App = lazy(() => import('./App'));
+
+// No subdomínio do totem o portal da equipe nem é carregado (sem botão de voltar ao login)
+const AutoatendimentoStandalone = lazy(() => import('./features/autoatendimento/components/AutoatendimentoView')
+  .then((module) => ({ default: module.AutoatendimentoView })));
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -91,9 +98,17 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <App />
-        </AuthProvider>
+        {isAutoatendimentoHost() ? (
+          <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm opacity-70">Carregando Totem de Autoatendimento...</div>}>
+            <AutoatendimentoStandalone />
+          </Suspense>
+        ) : (
+          <AuthProvider>
+            <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm opacity-70">Carregando...</div>}>
+              <App />
+            </Suspense>
+          </AuthProvider>
+        )}
       </QueryClientProvider>
     </ErrorBoundary>
   </StrictMode>,

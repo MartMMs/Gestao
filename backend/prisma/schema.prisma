@@ -22,6 +22,8 @@ model Colaborador {
   papel         String        @default("collaborator")
   ativo         Boolean       @default(true)
   diasTrabalho  String?       @default("1,2,3,4,5,6")
+  // Incrementada ao trocar senha/e-mail ou reativar a conta: tokens com versão antiga deixam de valer
+  versaoToken   Int           @default(0)
   agendamentos  Agendamento[]
   bloqueios     Bloqueio[]
   trocasTurno   SolicitacaoTroca[]
@@ -50,18 +52,43 @@ model Servico {
   modoElegibilidade    String        @default("livre")
   cargosPermitidos     String[]      @default([])
   habilidadesPermitidas String[]     @default([])
+  profissionaisPermitidos String[]   @default([])
   agendamentos         Agendamento[]
 }
 
+model Sala {
+  id           String        @id @default(uuid())
+  nome         String        @unique
+  numero       Int?
+  capacidade   Int           @default(1)
+  ativa        Boolean       @default(true)
+  descricao    String?
+  agendamentos Agendamento[]
+}
+
 model Agendamento {
-  id            String      @id @default(uuid())
-  data          DateTime
-  status        String?     @default("scheduled")
-  colaboradorId String
-  clienteId     String
-  
+  id               String      @id @default(uuid())
+  data             DateTime
+  status           String?     @default("scheduled")
+  colaboradorId    String
+  clienteId        String
+  salaId           String?
+  valorTotal       Float?
+  valorSinal       Float?
+  statusPagamento  String?     @default("pendente")
+  metodoPagamento  String?
+  pixQrCode        String?
+  pixCopiaECola    String?
+  lockExpiresAt    DateTime?
+  reservaOrigem    String?     @default("interno")
+  observacoesSaude String?
+  atualizadoEm     DateTime    @default(now()) @updatedAt
+  // Reserva do totem que originou o agendamento (garante uma confirmação por reserva)
+  reservaToken     String?     @unique
+
   colaborador   Colaborador @relation(fields: [colaboradorId], references: [id])
   cliente       Cliente     @relation(fields: [clienteId], references: [id])
+  sala          Sala?       @relation(fields: [salaId], references: [id])
   servicos      Servico[]
 }
 
@@ -107,4 +134,47 @@ model EscalaOverride {
 
   @@index([colaboradorId])
   @@index([data])
+}
+
+model ConfiguracaoAutoatendimento {
+  id                           String   @id @default("default")
+  ativo                        Boolean  @default(true)
+  exigirPagamento              Boolean  @default(true)
+  percentualSinal              Float    @default(40.0)
+  tempoLockMinutos             Int      @default(10)
+  permitirCancelamento         Boolean  @default(true)
+  tempoMinimoCancelamentoHoras Int      @default(4)
+  instrucoesCheckin            String?  @default("Chegue com 10 minutos de antecedência para recepção e confirmação do seu atendimento.")
+  mensagemBoasVindas           String?  @default("Bem-vindo ao nosso sistema de autoatendimento. Reserve seu horário com facilidade.")
+  atualizadoEm                 DateTime @updatedAt
+}
+
+model ConfiguracaoEmpresa {
+  id                   String   @id @default("default")
+  nomeEmpresa          String   @default("OmniGestão - Atendimentos & Agendamentos")
+  segmento             String   @default("geral") // 'geral', 'beleza_barbearia', 'clinica_saude', 'spa_bemestar', 'estudio_fitness'
+  slogan               String?  @default("Gestão inteligente e experiência de excelência para seus clientes.")
+  icone                String?  @default("storefront")
+  termoAtendimento     String?  @default("Atendimento")
+  termoProfissional    String?  @default("Profissional")
+  termoEspaco          String?  @default("Sala / Espaço")
+  termoServico         String?  @default("Serviço")
+  telefoneContato      String?  @default("(11) 99999-8888")
+  emailContato         String?  @default("contato@empresa.com")
+  endereco             String?  @default("Av. Principal, 1000 - Centro")
+  corTemaPrimaria      String?  @default("#0f766e")
+  atualizadoEm         DateTime @updatedAt
+}
+// Trilha de auditoria: cada abertura do histórico (com dados de saúde) de um cliente.
+// Sem chave estrangeira de propósito: o registro sobrevive à exclusão do cliente ou do colaborador.
+model AcessoHistoricoCliente {
+  id            String   @id @default(uuid())
+  colaboradorId String
+  clienteId     String
+  ip            String?
+  registros     Int
+  criadoEm      DateTime @default(now())
+
+  @@index([clienteId, criadoEm])
+  @@index([colaboradorId, criadoEm])
 }

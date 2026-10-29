@@ -64,14 +64,21 @@ describe('hasOverlap', () => {
     expect(overlap).toBe(false);
   });
 
-  it('ignora agendamento concluido ou outro profissional', () => {
+  it('ignora agendamento cancelado ou de outro profissional', () => {
     const appointments: Appointment[] = [
-      baseAppt({ id: 'x', time: '10:00', status: 'completed' }),
+      baseAppt({ id: 'x', time: '10:00', status: 'cancelled' }),
       baseAppt({ id: 'y', time: '10:00', assignedEmployeeId: 'outro' }),
     ];
     expect(
       hasOverlap('2026-06-15', '10:00', 'emp-1', ['Massagem relaxante'], appointments, services, null),
     ).toBe(false);
+  });
+
+  it('considera agendamento concluido como ocupado (igual ao backend)', () => {
+    const appointments: Appointment[] = [baseAppt({ id: 'x', time: '10:00', status: 'completed' })];
+    expect(
+      hasOverlap('2026-06-15', '10:00', 'emp-1', ['Massagem relaxante'], appointments, services, null),
+    ).toBe(true);
   });
 
   it('respeita ignoreAppointmentId na edicao', () => {

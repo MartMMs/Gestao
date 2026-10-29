@@ -1,11 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Appointment, Employee } from '../types';
+import { getLocalTodayString } from '../features/appointments/utils/appointmentCore';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface TVPanelViewProps {
   appointments: Appointment[];
   employees: Employee[];
   onExit: () => void;
+  companyName?: string;
+  companyIcon?: string;
 }
 
 const formatClientName = (fullName: string) => {
@@ -17,8 +20,17 @@ const formatClientName = (fullName: string) => {
   return `${first} ${initials}`;
 };
 
-export function TVPanelView({ appointments, employees, onExit }: TVPanelViewProps) {
+// Relógio isolado: o tique de 1 s redesenha só ele, não o painel inteiro
+function TVClock() {
   const [currentTime, setCurrentTime] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return <h2 className="text-6xl font-light tabular-nums">{currentTime.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</h2>;
+}
+
+export function TVPanelView({ appointments, employees, onExit, companyName, companyIcon }: TVPanelViewProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [weather, setWeather] = useState<{ temp: number; description: string; icon: string } | null>(null);
   const [tvConfig, setTvConfig] = useState(() => {
@@ -32,18 +44,14 @@ export function TVPanelView({ appointments, employees, onExit }: TVPanelViewProp
     };
   });
 
-  // Relógio em tempo real
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  
+  // Data no fuso de Brasília (toISOString usaria UTC e viraria o dia às 21h)
+  const todayStr = getLocalTodayString();
+
   // Filtra e organiza os agendamentos de hoje
-  const upcoming = appointments
+  const upcoming = useMemo(() => appointments
     .filter(a => a.date === todayStr && a.status === 'scheduled')
-    .sort((a, b) => a.time.localeCompare(b.time));
+    .sort((a, b) => a.time.localeCompare(b.time)), [appointments, todayStr]);
 
   // Busca o Clima automaticamente pela rede (Open-Meteo + IP-API)
   useEffect(() => {
@@ -157,8 +165,8 @@ export function TVPanelView({ appointments, employees, onExit }: TVPanelViewProp
     <div className="min-h-screen bg-[#001410] text-white p-8 md:p-16 flex flex-col fixed inset-0 z-200 antialiased">
       <div className="flex justify-between items-center mb-12 border-b border-white/10 pb-8">
         <div className="flex items-center gap-6">
-          <span className="material-symbols-outlined text-6xl text-[#afefdd]">spa</span>
-          <h1 className="text-5xl font-serif italic text-[#afefdd]">Serenidade Spa</h1>
+          <span className="material-symbols-outlined text-6xl text-[#afefdd]">{companyIcon || 'storefront'}</span>
+          <h1 className="text-5xl font-serif italic text-[#afefdd]">{companyName || 'Painel de Chamada'}</h1>
         </div>
         <div className="text-right flex items-center gap-6">
         {weather && (
@@ -172,7 +180,7 @@ export function TVPanelView({ appointments, employees, onExit }: TVPanelViewProp
         )}
         <button onClick={toggleFullscreen} className="opacity-20 hover:opacity-100 transition-opacity" title={isFullscreen ? "Sair da Tela Cheia" : "Tela Cheia"}><span className="material-symbols-outlined text-4xl">{isFullscreen ? 'fullscreen_exit' : 'fullscreen'}</span></button>
           <button onClick={onExit} className="opacity-20 hover:opacity-100 transition-opacity"><span className="material-symbols-outlined text-4xl">close</span></button>
-          <h2 className="text-6xl font-light tabular-nums">{currentTime.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</h2>
+          <TVClock />
         </div>
       </div>
       

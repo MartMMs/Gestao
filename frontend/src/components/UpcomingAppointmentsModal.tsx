@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Service } from '../types';
 import { getBrazilCurrentMinuteOfDay, getLocalTodayString } from '../features/appointments/utils/appointmentCore';
+import { isTeamMember } from '../utils/formatters';
 
 interface UpcomingAppointmentsModalProps {
   open: boolean;
@@ -139,7 +140,7 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
               className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary"
             >
               <option value="all">Todos os profissionais</option>
-              {employees.filter((employee) => employee.id !== 'admin').map((employee) => (
+              {employees.filter((employee) => isTeamMember(employee)).map((employee) => (
                 <option key={employee.id} value={employee.id}>{employee.name}</option>
               ))}
             </select>

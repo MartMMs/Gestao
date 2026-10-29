@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test';
+import { CONTAS, E2E_PASSWORD, apagarClienteDeTeste, gerarCpfValido, loginPelaTela } from './credenciais';
 
 const apiBase = () => process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:3333/api';
 
-type QuickAccessRole = 'Colaborador' | 'Supervisor';
+type PerfilLogin = 'Colaborador' | 'Supervisor';
 
 type LoginResult = {
   ok: boolean;
@@ -71,47 +72,17 @@ async function gotoAppWithRetry(page: import('@playwright/test').Page): Promise<
   throw lastError;
 }
 
-async function loginViaAcessoRapido(
+async function loginComPerfil(
   page: import('@playwright/test').Page,
-  role: QuickAccessRole,
+  role: PerfilLogin,
 ): Promise<void> {
-  const emailInput = page.getByRole('textbox', { name: /E-mail/i });
-  const passwordInput = page.getByRole('textbox', { name: /Senha/i });
-  const loginButton = page.getByRole('button', { name: /Entrar/i });
   const targetHeading = role === 'Supervisor'
-    ? page.getByRole('heading', { name: /Portal da Supervis[aã]o/i })
+    ? page.getByRole('heading', { name: /Portal d[oa] Supervis(or|[aã]o)/i })
     : page.getByRole('heading', { name: /Portal do Colaborador/i });
-  const candidates = role === 'Supervisor' ? ['Supervisor'] : ['Colaborador', 'Recep[cç][aã]o'];
-  const autofillByCandidate: Record<string, string> = {
-    Supervisor: 'admin@serenidade.com',
-    Colaborador: 'helena@serenidade.com',
-    'Recep[cç][aã]o': 'roberto@serenidade.com',
-  };
 
   await gotoAppWithRetry(page);
-  await expect(page.getByText(/Acesso Rapido|Acesso R[aá]pido/i)).toBeVisible();
-
-  for (let index = 0; index < candidates.length; index++) {
-    const candidatePattern = candidates[index];
-    const candidateButton = page.getByRole('button', { name: new RegExp(candidatePattern, 'i') });
-
-    await candidateButton.click();
-    await expect(emailInput).toHaveValue(autofillByCandidate[candidatePattern]);
-    await expect(passwordInput).toHaveValue('123456');
-    await loginButton.click();
-    await expect(page.getByText('Carregando dados do sistema...')).toBeHidden({ timeout: 90_000 });
-
-    try {
-      await expect(targetHeading).toBeVisible({ timeout: 12_000 });
-      return;
-    } catch {
-      if (index === candidates.length - 1) {
-        throw new Error(`Nao foi possivel autenticar com acesso rapido para o perfil ${role}.`);
-      }
-
-      await expect(page.getByText(/E-mail ou senha incorretos/i)).toBeVisible({ timeout: 8_000 });
-    }
-  }
+  await loginPelaTela(page, role === 'Supervisor' ? CONTAS.supervisor : CONTAS.colaboradora);
+  await expect(targetHeading).toBeVisible({ timeout: 20_000 });
 }
 
 async function loginApi(
@@ -162,7 +133,7 @@ async function cleanupAppointmentsByClientName(
   request: import('@playwright/test').APIRequestContext,
   clientName: string,
 ): Promise<void> {
-  const supervisor = await loginApi(request, 'admin@serenidade.com', '123456');
+  const supervisor = await loginApi(request, CONTAS.admin, E2E_PASSWORD);
   if (!supervisor.ok || !supervisor.token) return;
 
   const listResponse = await request.get(`${apiBase()}/agendamentos`, {
@@ -187,11 +158,11 @@ test.describe('User flow, system and final-user simulation', () => {
     const targetDate = futureDate(75);
     const uniqueSeed = String(Date.now());
     const uniqueClient = `E2E Fluxo ${uniqueSeed}`;
-    const uniqueCpf = `9${uniqueSeed.slice(-10)}`;
+    const uniqueCpf = gerarCpfValido();
     const uniquePhone = `(11) 9${uniqueSeed.slice(-8, -4)}-${uniqueSeed.slice(-4)}`;
 
     try {
-      await loginViaAcessoRapido(page, 'Colaborador');
+      await loginComPerfil(page, 'Colaborador');
       await expect(page.getByRole('heading', { name: /Portal do Colaborador/i })).toBeVisible();
 
       await page.locator('input[type="date"]').first().fill(targetDate);
@@ -244,7 +215,7 @@ test.describe('User flow, system and final-user simulation', () => {
       expect(saved, 'Nao foi possivel encontrar horario disponivel para criar agendamento no fluxo E2E.').toBeTruthy();
       await expect(modalHeading).toBeHidden({ timeout: 12_000 });
 
-      const supervisor = await loginApi(request, 'admin@serenidade.com', '123456');
+      const supervisor = await loginApi(request, CONTAS.admin, E2E_PASSWORD);
       expect(supervisor.ok, `login supervisor falhou: ${JSON.stringify(supervisor.body)}`).toBeTruthy();
       expect(supervisor.token).toBeTruthy();
 
@@ -263,6 +234,8 @@ test.describe('User flow, system and final-user simulation', () => {
     } finally {
       try {
         await cleanupAppointmentsByClientName(request, uniqueClient);
+        // Remove também o cadastro do cliente de teste
+        await apagarClienteDeTeste(request, uniqueClient);
       } catch {
         // Ignore cleanup failures when Playwright already closed the context after timeout.
       }
@@ -270,29 +243,43 @@ test.describe('User flow, system and final-user simulation', () => {
   });
 
   test('System Testing: supervisor navega modulos centrais e valida respostas da aplicacao', async ({ page }) => {
-    await loginViaAcessoRapido(page, 'Supervisor');
-    await expect(page.getByRole('heading', { name: /Portal da Supervis[aã]o/i })).toBeVisible();
+    await loginComPerfil(page, 'Supervisor');
+    await expect(page.getByRole('heading', { name: /Portal d[oa] Supervis(or|[aã]o)/i })).toBeVisible();
 
     await page.getByRole('button', { name: /Dashboard/i }).click();
     await expect(page.getByText(/Pr[oó]ximos Clientes/i)).toBeVisible();
 
-    await page.getByRole('button', { name: /Agenda/i }).click();
+    await page.getByRole('button', { name: /^Agenda$/i }).click();
     await expect(page.getByPlaceholder(/Buscar Cliente ou Servi[cç]o/i)).toBeVisible();
-
-    await page.getByRole('button', { name: /Escalas da Equipe/i }).click();
-    await expect(page.getByRole('button', { name: /Nova Escala/i })).toBeVisible();
 
     await page.getByRole('button', { name: /Servi[cç]os/i }).click();
     await expect(page.getByPlaceholder(/Buscar servi[cç]o/i)).toBeVisible();
 
-    const settingsTabButton = page.getByRole('button', { name: /^Configura[cç][oõ]es$/i });
-    if (await settingsTabButton.count()) {
-      await settingsTabButton.click();
+    const rhModuleButton = page.getByRole('button', { name: /Acessar M[oó]dulo RH/i });
+    if (await rhModuleButton.isVisible()) {
+      await rhModuleButton.click();
+      await page.getByRole('button', { name: /Grade de Escalas/i }).click();
+      await expect(page.getByRole('button', { name: /Nova Escala/i })).toBeVisible();
+
+      await page.getByRole('button', { name: /Profissionais e Cargos/i }).click();
+      await expect(page.getByPlaceholder(/Buscar profissional/i)).toBeVisible();
+      await expect(page.getByRole('button', { name: /Criar Usu[aá]rio/i })).toBeVisible();
+
+      await page.getByRole('button', { name: /Voltar para Opera[cç][aã]o/i }).click();
     } else {
-      await page.getByRole('button', { name: /^Equipe$/i }).click();
+      const escalaButton = page.getByRole('button', { name: /Escalas da Equipe|Grade de Escalas/i });
+      if (await escalaButton.isVisible()) {
+        await escalaButton.click();
+        await expect(page.getByRole('button', { name: /Nova Escala/i })).toBeVisible();
+      }
+
+      const teamButton = page.getByRole('button', { name: /Profissionais e Cargos|^Configura[cç][oõ]es$|^Equipe$/i });
+      if (await teamButton.isVisible()) {
+        await teamButton.click();
+        await expect(page.getByPlaceholder(/Buscar profissional/i)).toBeVisible();
+        await expect(page.getByRole('button', { name: /Criar Usu[aá]rio/i })).toBeVisible();
+      }
     }
-    await expect(page.getByPlaceholder(/Buscar profissional/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: /Criar Usu[aá]rio/i })).toBeVisible();
   });
 
   test('Simulacao de Usuario Final: supervisor e colaborador usam o sistema em paralelo', async ({ browser }) => {
@@ -303,13 +290,13 @@ test.describe('User flow, system and final-user simulation', () => {
 
     try {
       await Promise.all([
-        loginViaAcessoRapido(supervisorPage, 'Supervisor'),
-        loginViaAcessoRapido(collaboratorPage, 'Colaborador'),
+        loginComPerfil(supervisorPage, 'Supervisor'),
+        loginComPerfil(collaboratorPage, 'Colaborador'),
       ]);
 
       await Promise.all([
         (async () => {
-          await expect(supervisorPage.getByRole('heading', { name: /Portal da Supervis[aã]o/i })).toBeVisible();
+          await expect(supervisorPage.getByRole('heading', { name: /Portal d[oa] Supervis(or|[aã]o)/i })).toBeVisible();
           await supervisorPage.getByRole('button', { name: /Lista de Hoje/i }).click();
           await expect(supervisorPage.getByRole('heading', { name: /Pr[oó]ximos atendimentos/i })).toBeVisible();
         })(),

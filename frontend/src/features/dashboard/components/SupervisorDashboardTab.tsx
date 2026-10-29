@@ -35,16 +35,15 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
     const currentYear = new Date().getFullYear();
     const todayStrLocal = getLocalTodayString();
     
-    let top: (Employee & { monthlyCount: number }) | null = null;
     const monthlyCompleted = appointments.filter(a => {
       if (a.status !== 'completed') return false;
       const d = new Date(`${a.date}T12:00:00`);
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
-    employees.forEach(emp => {
+    const top = employees.reduce<(Employee & { monthlyCount: number }) | null>((melhor, emp) => {
       const count = monthlyCompleted.filter(a => a.assignedEmployeeId === emp.id).length;
-      if (count > 0 && (!top || count > top.monthlyCount)) top = { ...emp, monthlyCount: count };
-    });
+      return count > 0 && (!melhor || count > melhor.monthlyCount) ? { ...emp, monthlyCount: count } : melhor;
+    }, null);
 
     const noShows = appointments.filter(a => a.status === 'scheduled' && a.date < todayStrLocal && new Date(`${a.date}T12:00:00`).getMonth() === currentMonth).length;
 

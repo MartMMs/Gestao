@@ -36,7 +36,15 @@ export const getBrazilCurrentMinuteOfDay = () => {
   return hours * 60 + minutes;
 };
 
-const normalizeKey = (value: string) => value
+// Data AAAA-MM-DD deslocada em dias (aritmética em UTC ao meio-dia: imune a horário de verão)
+export const shiftDateString = (date: string, days: number) => {
+  const base = new Date(`${date}T12:00:00Z`);
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString().slice(0, 10);
+};
+
+// Sem acentos, minúsculo e sem espaços nas pontas: base de todas as comparações de texto daqui
+export const normalizeKey = (value: string) => value
   .normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '')
   .toLowerCase()
@@ -52,22 +60,31 @@ export const getDuration = (serviceNames: string[] = [], services: ServiceLike[]
   return sum + (Number(srv?.duracao) || 60) + (Number(srv?.tempoHigienizacaoMin) || 0);
 }, 0);
 
-const normalizeSearch = (value: string) => value
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .toLowerCase()
-  .trim();
-
 export const matchesAppointmentSearch = (appointment: Appointment, searchTerm: string): boolean => {
-  const query = normalizeSearch(searchTerm);
+  const query = normalizeKey(searchTerm);
   if (!query) return true;
 
   return [
     appointment.clientName,
     appointment.contact,
     appointment.observation || '',
-    ...appointment.services,
-  ].some(value => normalizeSearch(value).includes(query));
+    ...(appointment.services || []),
+  ].some(value => normalizeKey(value || '').includes(query));
+};
+
+export type ResourceFilter = 'all' | 'sala_massagem' | 'ofuro' | 'estetica';
+
+// Palavras (já sem acento) que identificam cada recurso na observação ou nos serviços do agendamento
+const RESOURCE_KEYWORDS: Record<Exclude<ResourceFilter, 'all'>, string[]> = {
+  sala_massagem: ['massagem'],
+  ofuro: ['ofuro'],
+  estetica: ['estetica', 'limpeza de pele'],
+};
+
+export const matchesResourceFilter = (appointment: Appointment, resourceFilter: ResourceFilter): boolean => {
+  if (resourceFilter === 'all') return true;
+  const haystack = normalizeKey(`${appointment.observation || ''} ${(appointment.services || []).join(' ')}`);
+  return RESOURCE_KEYWORDS[resourceFilter].some((keyword) => haystack.includes(keyword));
 };
 
 export const hasOverlap = (targetDate: string, targetTime: string, empId: string, serviceNames: string[] = [], appointments: Appointment[], services: ServiceLike[] = [], ignoreAppId: string | null = null) => {
@@ -75,12 +92,22 @@ export const hasOverlap = (targetDate: string, targetTime: string, empId: string
   const newEnd = newStart + getDuration(serviceNames, services);
 
   return appointments.some(a => {
-    if (a.id === ignoreAppId || a.date !== targetDate || a.assignedEmployeeId !== empId || a.status !== 'scheduled' || !a.time) return false;
+    // Atendimentos concluídos continuam ocupando o horário (o backend também os considera)
+    if (a.id === ignoreAppId || a.date !== targetDate || a.assignedEmployeeId !== empId || !a.time) return false;
+    if (a.status !== 'scheduled' && a.status !== 'completed') return false;
     const existStart = parseInt(a.time.split(':')[0]) * 60 + parseInt(a.time.split(':')[1]);
     const existEnd = existStart + getDuration(a.services, services);
     return newStart < existEnd && newEnd > existStart;
   });
 };
+
+// Escapa texto vindo do usuário antes de escrevê-lo como HTML (evita XSS na janela de impressão)
+export const escapeHtml = (value: unknown) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 
 export const handlePrintAppointment = (app: Appointment, empName: string, services: ServiceLike[], printType: 'a4' | 'thermal' = 'a4') => {
   const servicesWithPrices = app.services.map(sName => {
@@ -143,7 +170,7 @@ export const handlePrintAppointment = (app: Appointment, empName: string, servic
     ? 'https://ui-avatars.com/api/?name=Serenidade+Spa&background=000&color=fff&rounded=true&size=150'
     : 'https://ui-avatars.com/api/?name=Serenidade+Spa&background=0D9488&color=fff&rounded=true&size=150';
 
-  printWindow.document.write(`<html><head><title>Comprovante - ${app.clientName}</title><style>${printType === 'a4' ? a4Styles : thermalStyles}</style></head><body><div class="receipt-container"><div class="header"><img src="${logoSrc}" alt="Logo" /><h1>Serenidade Spa</h1><p>Comprovante de Agendamento</p></div><div class="info-row"><span class="label">Cliente:</span> <span class="value">${app.clientName}</span></div><div class="info-row"><span class="label">Contato:</span> <span class="value">${contactDisplay}</span></div><div class="info-row"><span class="label">Data:</span> <span class="value">${app.date.split('-').reverse().join('/')}</span></div><div class="info-row"><span class="label">Horário:</span> <span class="value">${app.time}</span></div><div class="info-row"><span class="label">Profissional:</span> <span class="value">${empName}</span></div><div class="divider"></div><div class="services-list"><div style="font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; font-weight: bold;">Serviços Solicitados</div>${servicesWithPrices.map(s => `<div class="service-item"><span class="s-name">${s.name}</span><span class="s-price">R$ ${s.price.toFixed(2)}</span></div>`).join('')}</div><div class="total-row"><span>Total Estimado</span><span>R$ ${totalPrice.toFixed(2)}</span></div>${(app.specialNeeds && app.specialNeeds.length > 0) || app.observation ? `<div class="alert-box">${app.specialNeeds && app.specialNeeds.length > 0 ? `<strong>⚠️ Atenção: ${app.specialNeeds.join(', ')}</strong>` : ''}${app.observation ? `<p><i>"${app.observation}"</i></p>` : ''}</div>` : ''}<div class="footer">Gerado em ${new Date().toLocaleString('pt-BR')}</div></div><script>window.onload = function() { window.print(); window.close(); }</script></body></html>`);
+  printWindow.document.write(`<html><head><title>Comprovante - ${escapeHtml(app.clientName)}</title><style>${printType === 'a4' ? a4Styles : thermalStyles}</style></head><body><div class="receipt-container"><div class="header"><img src="${logoSrc}" alt="Logo" /><h1>Serenidade Spa</h1><p>Comprovante de Agendamento</p></div><div class="info-row"><span class="label">Cliente:</span> <span class="value">${escapeHtml(app.clientName)}</span></div><div class="info-row"><span class="label">Contato:</span> <span class="value">${escapeHtml(contactDisplay)}</span></div><div class="info-row"><span class="label">Data:</span> <span class="value">${escapeHtml(app.date.split('-').reverse().join('/'))}</span></div><div class="info-row"><span class="label">Horário:</span> <span class="value">${escapeHtml(app.time)}</span></div><div class="info-row"><span class="label">Profissional:</span> <span class="value">${escapeHtml(empName)}</span></div><div class="divider"></div><div class="services-list"><div style="font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; font-weight: bold;">Serviços Solicitados</div>${servicesWithPrices.map(s => `<div class="service-item"><span class="s-name">${escapeHtml(s.name)}</span><span class="s-price">R$ ${s.price.toFixed(2)}</span></div>`).join('')}</div><div class="total-row"><span>Total Estimado</span><span>R$ ${totalPrice.toFixed(2)}</span></div>${(app.specialNeeds && app.specialNeeds.length > 0) || app.observation ? `<div class="alert-box">${app.specialNeeds && app.specialNeeds.length > 0 ? `<strong>⚠️ Atenção: ${escapeHtml(app.specialNeeds.join(', '))}</strong>` : ''}${app.observation ? `<p><i>"${escapeHtml(app.observation)}"</i></p>` : ''}</div>` : ''}<div class="footer">Gerado em ${new Date().toLocaleString('pt-BR')}</div></div><script>window.onload = function() { window.print(); window.close(); }</script></body></html>`);
   printWindow.document.close();
 };
 

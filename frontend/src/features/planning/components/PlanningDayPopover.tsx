@@ -59,7 +59,7 @@ export function PlanningDayPopover({ isOpen, dia, onClose, onSave }: PlanningDay
       );
       onClose();
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Falha ao salvar alteracao do dia.');
+      setSaveError(error instanceof Error ? error.message : 'Falha ao salvar a alteração do dia.');
     } finally {
       setIsSaving(false);
     }

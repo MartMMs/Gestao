@@ -10,9 +10,10 @@ import { getSocketUrl } from './config/api';
 import { gerarEscalaComRegras, type DiaEscala } from './utils/escalaCalculator';
 import { analisarConformidadeCLT } from './utils/cltValidator';
 import { AuditorModal } from './components/AuditorModal';
-import { Employee, Appointment, Service, Client, TurnoSwapRequest, TurnoSwapStatus, ServiceEligibilityMode } from './types'; // Tipos mais fortes
+import { Employee, Appointment, Service, Client, Role, TurnoSwapRequest, TurnoSwapStatus, ServiceEligibilityMode, EmployeeUpdate } from './types'; // Tipos mais fortes
 import {
-  useAppointments, useAddAppointment, useCompleteAppointment, useReassignAppointment, useEditAppointment, useDeleteAppointment,
+  useAppointments, useAddAppointment, useCompleteAppointment,
+  useCancelAppointment, useReassignAppointment, useEditAppointment, useDeleteAppointment,
   useEmployees, useAddEmployee, useDeleteEmployee, useEditEmployee,
   useServices, useAddService, useEditService, useDeleteService,
   useClients, useEditClient, useDeleteClient,
@@ -20,14 +21,20 @@ import {
   useScaleOverrides,
   useTurnoSwapRequests, useAddTurnoSwapRequest, useUpdateTurnoSwapRequestStatus,
   useSaveScaleOverride, useSwapScaleDays, useReplicateScaleDays,
+  useCompanyConfig,
   isApiError,
   type ScaleOverridePayload, type ScaleSwapPayload, type ScaleReplicatePayload,
 } from './api'; // Importando os novos hooks
 
+const AdminViewLazy = lazy(() => import('./components/AdminView').then((module) => ({ default: module.AdminView })));
+import { isTeamMember } from './utils/formatters';
+import { getAutoatendimentoUrl } from './config/hosts';
+import { DEPENDENCIAS_ESCOPO, ESCOPOS_MUDANCA, ehEscopoMudanca } from '@shared/escopos';
 const SupervisorViewLazy = lazy(() => import('./components/SupervisorView').then((module) => ({ default: module.SupervisorView })));
 const CollaboratorViewLazy = lazy(() => import('./components/CollaboratorView').then((module) => ({ default: module.CollaboratorView })));
 const TVPanelViewLazy = lazy(() => import('./components/TVPanelView').then((module) => ({ default: module.TVPanelView })));
 const UpcomingAppointmentsModalLazy = lazy(() => import('./components/UpcomingAppointmentsModal').then((module) => ({ default: module.UpcomingAppointmentsModal })));
+const AutoatendimentoViewLazy = lazy(() => import('./features/autoatendimento/components/AutoatendimentoView').then((module) => ({ default: module.AutoatendimentoView })));
 
 const ModuleLoading = ({ label = 'Carregando módulo...' }: { label?: string }) => (
   <div className="min-h-60 flex flex-col items-center justify-center gap-2 text-on-surface-variant">
@@ -145,25 +152,15 @@ const normalizeServicePayload = (service: ServicePayload): { data?: Omit<Service
   };
 };
 
-const ADMIN_USER: Employee = {
-  id: 'admin',
-  name: 'Diretoria',
-  email: 'admin@serenidade.com',
-  role: 'supervisor',
-  specialty: 'Gestão',
-  avatar: 'https://api.dicebear.com/7.x/notionists/svg?seed=Diretoria',
-  rating: 5.0,
-  completedServices: 0,
-  diasTrabalho: '1,2,3,4,5,6',
-  bloqueios: []
-};
 
 export default function App() {
   const { currentUser, token, loginError, handleLogin, handleLogout } = useAuth();
   const queryClient = useQueryClient();
-  const [activeRoleView, setActiveRoleView] = useState<'supervisor' | 'collaborator' | 'tv'>(() => currentUser?.role ?? 'collaborator');
+  const { data: companyConfig } = useCompanyConfig(token);
+  const [activeRoleView, setActiveRoleView] = useState<Role | 'tv' | 'autoatendimento'>(() => currentUser?.role ?? 'collaborator');
   const [isPublicTVMode, setIsPublicTVMode] = useState(false);
-  const shouldLoadSupervisorDatasets = Boolean(token) && currentUser?.role === 'supervisor' && activeRoleView === 'supervisor';
+  const [isPublicAutoatendimentoMode, setIsPublicAutoatendimentoMode] = useState(false);
+  const shouldLoadSupervisorDatasets = Boolean(token) && (currentUser?.role === 'supervisor' || currentUser?.role === 'admin') && (activeRoleView === 'supervisor' || activeRoleView === 'admin');
 
   // 1. SUBSTITUIÇÃO DOS ESTADOS MANUAIS PELOS HOOKS DO REACT QUERY
   // Os dados, loading e erros agora são gerenciados automaticamente.
@@ -174,8 +171,7 @@ export default function App() {
   const { data: scaleOverridesData, isLoading: loadingScaleOverrides } = useScaleOverrides(token, undefined, { enabled: shouldLoadSupervisorDatasets });
   const { data: turnoSwapRequestsData, isLoading: loadingTurnoSwaps } = useTurnoSwapRequests(token, { enabled: shouldLoadSupervisorDatasets });
 
-  // Adicionamos o usuário admin manualmente à lista vinda da API
-  const employees = useMemo(() => (employeesData ? [ADMIN_USER, ...employeesData] : [ADMIN_USER]), [employeesData]);
+  const employees = useMemo(() => employeesData || [], [employeesData]);
   const appointments = useMemo(() => appointmentsData || [], [appointmentsData]);
   const scaleOverrides = useMemo(() => scaleOverridesData || [], [scaleOverridesData]);
   const turnoSwapRequests = useMemo(() => turnoSwapRequestsData || [], [turnoSwapRequestsData]);
@@ -274,7 +270,7 @@ export default function App() {
   useEffect(() => {
     if (!token || !hasUnauthorizedBootstrapError) return;
 
-    console.warn('[FRONTEND][AUTH] Sessao expirada ou token invalido. Redirecionando para login.');
+    console.warn('[FRONTEND][AUTH] Sessão expirada ou token invalido. Redirecionando para login.');
     queryClient.clear();
     handleLogout();
   }, [token, hasUnauthorizedBootstrapError, queryClient, handleLogout]);
@@ -284,22 +280,24 @@ export default function App() {
     // Só conecta o socket e busca dados caso o usuário tenha um token (esteja logado)
     if (!token) return;
 
-    const socket = io(getSocketUrl());
+    const socket = io(getSocketUrl(), { auth: { token } });
     let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
-    // Evita tempestade de refetch: invalida apenas chaves relevantes e de forma agrupada.
-    socket.on('db_updated', () => {
+    // Evita tempestade de refetch: agrupa os avisos e recarrega só as listas que o servidor disse que mudaram.
+    const pendentes = new Set<string>();
+    socket.on('db_updated', (payload?: { escopos?: unknown[] }) => {
+      // Sem escopo (ou só escopos desconhecidos) = recarrega tudo: na dúvida, nunca deixa a tela desatualizada
+      const conhecidos = Array.isArray(payload?.escopos) ? payload.escopos.filter(ehEscopoMudanca) : [];
+      (conhecidos.length > 0 ? conhecidos : ESCOPOS_MUDANCA).forEach((escopo) => {
+        pendentes.add(escopo);
+        DEPENDENCIAS_ESCOPO[escopo]?.forEach((dependente) => pendentes.add(dependente));
+      });
       if (invalidateTimer) clearTimeout(invalidateTimer);
       invalidateTimer = setTimeout(() => {
-        console.log('🔄 WebSocket: atualização recebida, sincronizando caches ativos.');
-        queryClient.invalidateQueries({ queryKey: ['appointments'], refetchType: 'active' });
-        queryClient.invalidateQueries({ queryKey: ['employees'], refetchType: 'active' });
-        queryClient.invalidateQueries({ queryKey: ['services'], refetchType: 'active' });
-        queryClient.invalidateQueries({ queryKey: ['clients'], refetchType: 'active' });
-        queryClient.invalidateQueries({ queryKey: ['scale-overrides'], refetchType: 'active' });
-        queryClient.invalidateQueries({ queryKey: ['turno-swaps'], refetchType: 'active' });
+        pendentes.forEach((escopo) => queryClient.invalidateQueries({ queryKey: [escopo], refetchType: 'active' }));
+        pendentes.clear();
       }, 250);
-    }); 
-    
+    });
+
     return () => {
       if (invalidateTimer) clearTimeout(invalidateTimer);
       socket.disconnect();
@@ -314,13 +312,15 @@ export default function App() {
         completedCounts.set(app.assignedEmployeeId, (completedCounts.get(app.assignedEmployeeId) || 0) + 1);
       }
     }
-    return employees.filter(e => e.id !== 'admin').map(emp => ({
+    return employees.filter(e => isTeamMember(e)).map(emp => ({
       ...emp,
       completedServices: completedCounts.get(emp.id) || 0
     }));
   }, [employees, appointments]);
 
   // Calcula alertas CLT globais para o sino no header
+  // Os alertas só dependem da equipe e da escala: não recalcula a cada agendamento novo (como "staff" faria)
+  const teamMembers = useMemo(() => employees.filter((e) => isTeamMember(e)), [employees]);
   const cltRealtimeAlerts = useMemo(() => {
     if (currentUser?.role !== 'supervisor') return [];
 
@@ -377,7 +377,7 @@ export default function App() {
       };
     };
 
-    return staff
+    return teamMembers
       .map((emp) => {
         const diasComRegras = gerarEscalaComRegras(
           {
@@ -399,13 +399,14 @@ export default function App() {
         };
       })
       .filter((item) => !item.conforme);
-  }, [staff, scaleOverrides, currentUser]);
+  }, [teamMembers, scaleOverrides, currentUser]);
 
   // 2. SUBSTITUIÇÃO DAS FUNÇÕES DE CALLBACK PELAS MUTAÇÕES DO REACT QUERY
   // A lógica de 'fetch', 'try/catch', e 'setEstado' é abstraída para dentro dos hooks.
   // O componente apenas chama a função 'mutateAsync'. O 'onSuccess' nos hooks cuida da atualização da UI.
   const { mutateAsync: addAppointment, isPending: isAddingAppointment } = useAddAppointment(token);
   const { mutateAsync: completeAppointment } = useCompleteAppointment(token);
+  const { mutateAsync: cancelAppointment } = useCancelAppointment(token);
   const { mutateAsync: reassignAppointment } = useReassignAppointment(token);
   const { mutateAsync: editAppointment } = useEditAppointment(token);
   const { mutateAsync: deleteAppointment } = useDeleteAppointment(token);
@@ -425,15 +426,16 @@ export default function App() {
   const { mutateAsync: swapScaleDays } = useSwapScaleDays(token);
   const { mutateAsync: replicateScaleDays } = useReplicateScaleDays(token);
 
-  const handleReassign = (appointmentId: string, newEmployeeId: string) => {
+  // Estável entre renders: a agenda repassa este callback às colunas memoizadas
+  const handleReassign = useCallback((appointmentId: string, newEmployeeId: string) => {
     return reassignAppointment({ id: appointmentId, newEmployeeId });
-  };
+  }, [reassignAppointment]);
 
   const handleDeleteEmployee = (id: string, reallocateToId?: string) => {
     return deleteEmployee({ id, reallocateToId });
   };
 
-  const handleEditEmployee = (id: string, employee: Partial<Employee>) => {
+  const handleEditEmployee = (id: string, employee: EmployeeUpdate) => {
     return editEmployee({ id, ...employee });
   };
 
@@ -504,8 +506,31 @@ export default function App() {
     );
   }
 
+  if (isPublicAutoatendimentoMode) {
+    return (
+      <Suspense fallback={<ModuleLoading label="Carregando Totem de Autoatendimento..." />}>
+        <AutoatendimentoViewLazy onExitToPortal={() => setIsPublicAutoatendimentoMode(false)} />
+      </Suspense>
+    );
+  }
+
   if (!currentUser) {
-    return <LoginView onLogin={handleLogin} onOpenTVPanel={() => setIsPublicTVMode(true)} error={loginError} />;
+    return (
+      <LoginView 
+        onLogin={handleLogin} 
+        onOpenTVPanel={() => setIsPublicTVMode(true)} 
+        onOpenAutoatendimento={() => {
+          // Em produção o totem vive no próprio subdomínio; sem URL configurada abre aqui mesmo
+          const url = getAutoatendimentoUrl();
+          if (url) window.location.assign(url);
+          else setIsPublicAutoatendimentoMode(true);
+        }}
+        error={loginError} 
+        companyName={companyConfig?.nomeEmpresa}
+        companySlogan={companyConfig?.slogan}
+        companyIcon={companyConfig?.icone}
+      />
+    );
   }
 
   // 3. ESTADOS GLOBAIS DE CARREGAMENTO E ERRO
@@ -532,7 +557,7 @@ export default function App() {
       <div className="min-h-screen flex flex-col items-center justify-center bg-surface p-4">
         <div className="bg-surface-container p-8 rounded-3xl max-w-md text-center shadow-lg border border-outline-variant">
           <span className="material-symbols-outlined text-5xl text-primary mb-4">lock_clock</span>
-          <h2 className="text-2xl font-bold text-on-surface mb-2">Sessao expirada</h2>
+          <h2 className="text-2xl font-bold text-on-surface mb-2">Sessão expirada</h2>
           <p className="text-on-surface-variant opacity-80">Estamos redirecionando para o login...</p>
         </div>
       </div>
@@ -545,7 +570,7 @@ export default function App() {
         <div className="bg-error-container p-8 rounded-3xl max-w-md text-center shadow-lg border border-error">
           <span className="material-symbols-outlined text-5xl text-on-error-container mb-4">cloud_off</span>
           <h2 className="text-2xl font-bold text-on-error-container mb-2">Falha na Conexão</h2>
-          <p className="text-on-error-container opacity-80 mb-6">Nao foi possivel carregar as informacoes essenciais. Verifique sua conexao com o servidor.</p>
+          <p className="text-on-error-container opacity-80 mb-6">Não foi possível carregar as informações essenciais. Verifique sua conexão com o servidor.</p>
           <button onClick={() => window.location.reload()} className="bg-error text-on-error px-6 py-2 rounded-xl font-bold uppercase tracking-wider transition-colors hover:bg-error-dim">Tentar Novamente</button>
         </div>
       </div>
@@ -561,26 +586,51 @@ export default function App() {
     );
   }
 
+  // Se a aba de Autoatendimento estiver ativa pelo Supervisor/Recepção
+  if (activeRoleView === 'autoatendimento') {
+    return (
+      <Suspense fallback={<ModuleLoading label="Carregando Totem de Autoatendimento..." />}>
+        <AutoatendimentoViewLazy onExitToPortal={() => setActiveRoleView(currentUser.role)} />
+      </Suspense>
+    );
+  }
+
   return (
     <Layout 
       userName={currentUser.name} 
       userRole={currentUser.role} 
       activeView={activeRoleView} 
+      companyName={companyConfig?.nomeEmpresa}
+      companyIcon={companyConfig?.icone}
       onViewChange={(view) => {
-        // Trava de segurança: impede mudança de estado se não for supervisor
-        if (currentUser.role === 'supervisor') setActiveRoleView(view);
+        if (currentUser.role === 'admin' || currentUser.role === 'supervisor') setActiveRoleView(view);
       }} 
       onLogout={handleLogout}
       isDarkMode={isDarkMode}
       toggleTheme={toggleTheme}
-      onOpenUpcomingAppointments={currentUser.role === 'supervisor' && activeRoleView === 'supervisor' ? () => setShowUpcomingAppointments(true) : undefined}
-      upcomingAppointmentsCount={currentUser.role === 'supervisor' && activeRoleView === 'supervisor' ? upcomingAppointmentsCount : 0}
-      cltAlertsCount={currentUser.role === 'supervisor' && activeRoleView === 'supervisor' ? cltRealtimeAlerts.length : 0}
+      onOpenUpcomingAppointments={(currentUser.role === 'supervisor' || currentUser.role === 'admin') && (activeRoleView === 'supervisor' || activeRoleView === 'admin') ? () => setShowUpcomingAppointments(true) : undefined}
+      upcomingAppointmentsCount={(currentUser.role === 'supervisor' || currentUser.role === 'admin') && (activeRoleView === 'supervisor' || activeRoleView === 'admin') ? upcomingAppointmentsCount : 0}
+      cltAlertsCount={(currentUser.role === 'supervisor' || currentUser.role === 'admin') && (activeRoleView === 'supervisor' || activeRoleView === 'admin') ? cltRealtimeAlerts.length : 0}
       onOpenCltAlerts={() => setShowAuditorModal(true)}
     >
-      {/* Trava de segurança final: exige que a função (role) real do banco seja supervisor */}
       <Suspense fallback={<ModuleLoading />}>
-        {currentUser.role === 'supervisor' && activeRoleView === 'supervisor' ? (
+        {activeRoleView === 'admin' && (currentUser.role === 'admin' || currentUser.role === 'supervisor') ? (
+          <AdminViewLazy
+            employees={staff}
+            appointments={appointments}
+            services={services || []}
+            clients={clients || []}
+            onAddEmployee={addEmployee}
+            onDeleteEmployee={handleDeleteEmployee}
+            onEditEmployee={handleEditEmployee}
+            onAddService={handleAddService}
+            onEditService={handleEditService}
+            onDeleteService={deleteService}
+            onEditClient={handleEditClient}
+            onDeleteClient={deleteClient}
+            token={token}
+          />
+        ) : (activeRoleView === 'supervisor' && (currentUser.role === 'supervisor' || currentUser.role === 'admin')) ? (
           <SupervisorViewLazy 
             employees={staff}
             appointments={appointments}
@@ -620,9 +670,8 @@ export default function App() {
             onAddAppointment={addAppointment}
             isAddingAppointment={isAddingAppointment}
             onEditAppointment={handleEditAppointment}
-            onDeleteAppointment={deleteAppointment}
+            onDeleteAppointment={cancelAppointment}
             onEditClient={handleEditClient}
-            onDeleteClient={deleteClient}
             onCompleteAppointment={completeAppointment}
             onAddBloqueio={addBloqueio}
             onDeleteBloqueio={deleteBloqueio}

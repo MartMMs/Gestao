@@ -1,115 +1,96 @@
+import { config, validarConfigProducao } from './env';
 import express, { Request, Response, NextFunction } from 'express';
-import cors from 'cors';
+import cors, { type CorsOptions } from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
 import { createRouter } from './routes';
-import { PrismaClient } from '@prisma/client';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { createAutoatendimentoRouter } from './routes/autoatendimentoRoutes';
+import { prisma } from './db';
+import { getJwtSecret } from './auth';
+import { configurarSocket, criarEventos } from './lib/eventos';
+import { responderErro } from './lib/http';
+import { redactSensitiveData } from '../shared/redact';
+import { ESCOPOS } from '../shared/escopos';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
+// Falha cedo: sem segredo JWT forte qualquer um poderia forjar tokens
+try {
+  getJwtSecret();
+  const errosConfig = validarConfigProducao();
+  if (errosConfig.length > 0) throw new Error(errosConfig.join(' '));
+} catch (error) {
+  console.error(`🚨 ${(error as Error).message}`);
+  process.exit(1);
+}
 
 const app = express();
 const server = http.createServer(app);
-const prisma = new PrismaClient();
 
-// Permite acesso de qualquer IP/origem, evitando erros de CORS em redes locais
-const io = new Server(server, { cors: { origin: '*' } });
-
-const SENSITIVE_LOG_KEYS = ['token', 'authorization', 'cpf', 'telefone', 'contact'];
-
-const sanitizeSensitiveString = (value: string) => value
-  .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]')
-  .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, '***.***.***-**')
-  .replace(/\(?\d{2}\)?\s?\d{4,5}-?\d{4}\b/g, '(**) *****-****');
-
-const redactSensitiveData = (value: unknown, seen = new WeakSet<object>()): unknown => {
-  if (typeof value === 'string') {
-    return sanitizeSensitiveString(value);
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => redactSensitiveData(item, seen));
-  }
-
-  if (value && typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    if (seen.has(obj)) return '[Circular]';
-    seen.add(obj);
-
-    if (value instanceof Error) {
-      const errObj = value as Error & Record<string, unknown>;
-      const next: Record<string, unknown> = {
-        name: errObj.name,
-        message: sanitizeSensitiveString(errObj.message || ''),
-      };
-
-      if (typeof errObj.stack === 'string') {
-        next.stack = sanitizeSensitiveString(errObj.stack);
-      }
-
-      for (const [key, nested] of Object.entries(errObj)) {
-        if (key in next) continue;
-        const normalizedKey = key.toLowerCase();
-        const shouldRedact = SENSITIVE_LOG_KEYS.some((sensitiveKey) => normalizedKey.includes(sensitiveKey));
-        next[key] = shouldRedact ? '[REDACTED]' : redactSensitiveData(nested, seen);
-      }
-
-      return next;
-    }
-
-    const next: Record<string, unknown> = {};
-    for (const [key, nested] of Object.entries(obj)) {
-      const normalizedKey = key.toLowerCase();
-      const shouldRedact = SENSITIVE_LOG_KEYS.some((sensitiveKey) => normalizedKey.includes(sensitiveKey));
-      next[key] = shouldRedact ? '[REDACTED]' : redactSensitiveData(nested, seen);
-    }
-
-    return next;
-  }
-
-  return value;
+// CORS_ORIGINS="https://app.exemplo.com,http://192.168.0.10:3000" define as origens aceitas (obrigatório em produção).
+// Sem a variável (só fora de produção), aceita a própria máquina e a rede local (totens, TVs, celulares da equipe).
+const origensPermitidas = config.corsOrigins;
+const REDE_LOCAL = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/;
+const corsOptions: CorsOptions = {
+  origin: origensPermitidas.length > 0
+    ? origensPermitidas
+    : (origem, callback) => callback(null, !origem || REDE_LOCAL.test(origem)),
 };
 
-// Middlewares
-app.use(cors({ origin: '*' })); // Libera o acesso de qualquer IP
-app.use(express.json()); // Ensina a API a ler arquivos JSON
+const io = new Server(server, { cors: corsOptions });
+configurarSocket(io);
+const eventos = criarEventos(io);
 
-app.use('/api', createRouter(io));
+// Atrás de proxy reverso (nginx, etc.), use TRUST_PROXY=1 para o rate limit enxergar o IP real
+if (config.trustProxy !== undefined) app.set('trust proxy', config.trustProxy);
 
-// Middleware Global de Tratamento de Erros
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('🚨 [ERRO CRÍTICO NO SERVIDOR]:', redactSensitiveData(err));
-  res.status(500).json({ erro: 'Ocorreu um erro interno no servidor.', detalhes: err.message });
+app.use(cors(corsOptions));
+// Guarda o corpo bruto para validar a assinatura do webhook de pagamento
+app.use(express.json({
+  limit: '100kb',
+  verify: (req, _res, buf) => {
+    (req as Request & { rawBody?: Buffer }).rawBody = buf;
+  },
+}));
+
+app.use('/api', createRouter(eventos));
+app.use('/api/autoatendimento', createAutoatendimentoRouter(eventos));
+
+// Middleware Global de Tratamento de Erros (mesma tradução erro -> HTTP das rotas)
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  responderErro(res, err, 'Ocorreu um erro interno no servidor.');
 });
 
-// Tarefa Automática de Limpeza de Agendamentos (Roda no Backend em lote)
-setInterval(async () => {
+// Manutenção periódica da agenda (com várias instâncias, ative LIMPEZA_AGENDAMENTOS_DIAS em apenas uma):
+// - reservas do totem sem confirmação de pagamento no prazo são canceladas e o horário volta para a grade;
+// - agendamentos antigos que nunca foram concluídos viram "no_show" (o histórico é preservado).
+const diasLimpeza = config.limpezaAgendamentosDias;
+const manutencaoAgenda = async () => {
   try {
-    const dataLimite = new Date();
-    dataLimite.setDate(dataLimite.getDate() - 30); // Calcula 30 dias atrás
-
-    const deletados = await prisma.agendamento.deleteMany({
-      where: {
-        status: 'scheduled',
-        data: { lt: dataLimite } // 'lt' = less than (menor/mais antigo que a data limite)
-      }
+    const expirados = await prisma.agendamento.updateMany({
+      where: { statusPagamento: 'aguardando_pagamento', status: 'scheduled', lockExpiresAt: { lt: new Date() } },
+      data: { status: 'cancelled', statusPagamento: 'expirado' },
     });
 
-    if (deletados.count > 0) {
-      console.log(`🧹 [CRON] Limpeza executada: ${deletados.count} agendamentos antigos excluídos.`);
-      io.emit('db_updated'); // Atualiza a tela dos usuários caso apague algo
+    let semConclusao = { count: 0 };
+    if (Number.isFinite(diasLimpeza) && diasLimpeza > 0) {
+      const dataLimite = new Date(Date.now() - diasLimpeza * 86_400_000);
+      semConclusao = await prisma.agendamento.updateMany({
+        where: { status: 'scheduled', data: { lt: dataLimite } },
+        data: { status: 'no_show' },
+      });
+    }
+
+    if (expirados.count + semConclusao.count > 0) {
+      console.log(`🧹 [AGENDA] ${expirados.count} reserva(s) sem pagamento cancelada(s); ${semConclusao.count} agendamento(s) antigo(s) marcado(s) como não comparecimento.`);
+      eventos.notificarMudanca(ESCOPOS.manutencao);
     }
   } catch (error) {
-    console.error('🚨 Erro ao limpar agendamentos antigos:', error);
+    console.error('🚨 Erro na manutenção da agenda:', redactSensitiveData(error));
   }
-}, 1000 * 60 * 60); // Executa a cada 1 Hora
+};
+setInterval(manutencaoAgenda, 5 * 60 * 1000);
 
-// Ligar o servidor na porta 3333
-const PORT = 3333;
+// Porta definida no .env (padrão 3333)
+const PORT = config.porta;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor escutando em todas as interfaces na porta ${PORT}`);
 });

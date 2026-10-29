@@ -7,6 +7,9 @@ import { useSearch } from '../../../hooks/useSearch';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { formatCpf, formatPhone } from '../../../utils/formatters';
 import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
+import { useAuth } from '../../../AuthContext';
+import { useClientAppointments } from '../../../api';
+import { LIMITE_HISTORICO_CLIENTE } from '@shared/agendaJanela';
 
 interface SupervisorClientesTabProps {
   clients: Client[];
@@ -14,12 +17,15 @@ interface SupervisorClientesTabProps {
   services: Service[];
   onEditClient?: (id: string, clientData: Partial<Client>) => Promise<boolean | void> | void;
   onDeleteClient?: (id: string) => Promise<boolean | void> | void;
+  // Colaboradores só editam a anamnese; dados cadastrais ficam com supervisores
+  somenteAnamnese?: boolean;
   setToastMessage?: (msg: string | null) => void;
 }
 
 const ITEMS_PER_PAGE = 10;
 
-export function SupervisorClientesTab({ clients, appointments, services, onEditClient, onDeleteClient, setToastMessage }: SupervisorClientesTabProps) {
+export function SupervisorClientesTab({ clients, appointments, services, onEditClient, onDeleteClient, somenteAnamnese = false, setToastMessage }: SupervisorClientesTabProps) {
+  const [isSaving, setIsSaving] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [editingClient, setEditingClient] = useState<Client | null>(null);
@@ -32,6 +38,10 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
   const [historyClient, setHistoryClient] = useState<Client | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | '7days' | 'month'>('all');
 
+  // A agenda carregada cobre só o último ano; o histórico aberto busca o período todo do cliente
+  const { token } = useAuth();
+  const { data: fullClientAppointments, isLoading: loadingClientHistory, isError: clientHistoryError } = useClientAppointments(token, historyClient?.id ?? null);
+
   const filteredClients = useSearch(clients, searchTerm, (client) => [client.nome, client.telefone, client.cpf]);
 
   const normalizeValue = (value?: string) => (value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -42,7 +52,11 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
     const clientPhone = digitsOnly(client.telefone);
     const clientCpf = digitsOnly(client.cpf);
 
-    return appointments
+    // Junta o histórico completo (vindo do servidor) com a agenda já carregada, sem repetir
+    const byId = new Map<string, Appointment>();
+    for (const appointment of [...(fullClientAppointments || []), ...appointments]) byId.set(appointment.id, appointment);
+
+    return Array.from(byId.values())
       .filter((appointment) => {
         if (appointment.clientId && appointment.clientId === client.id) return true;
 
@@ -96,35 +110,56 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
     setCurrentPage(1);
   };
 
-  const handleEditSubmit = (e: React.FormEvent) => {
+  const mostrarMensagem = (mensagem: string) => {
+    setToastMessage?.(mensagem);
+  };
+
+  const mensagemDeErro = (error: unknown, padrao: string) => (error instanceof Error && error.message ? error.message : padrao);
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingClient || !onEditClient) return;
+    if (!editingClient || !onEditClient || isSaving) return;
 
     const parsedCurrent = parseClientObservation(editingClient.observacao);
     const finalObservation = formatAnamneseStorage(editingClientNote, parsedCurrent.anamData);
 
-    onEditClient(editingClient.id, {
-      nome: editingClient.nome,
-      telefone: editingClient.telefone,
-      cpf: editingClient.cpf,
-      observacao: finalObservation,
-      alergias: editingClientAlergias.split(',').map(s => s.trim()).filter(Boolean),
-      preferencias: editingClientPreferencias.split(',').map(s => s.trim()).filter(Boolean),
-    });
-    setToastMessage?.('Cliente atualizado!');
-    setTimeout(() => setToastMessage?.(null), 3000);
-    setEditingClient(null);
-    setEditingClientNote('');
-    setEditingClientAlergias('');
-    setEditingClientPreferencias('');
+    setIsSaving(true);
+    try {
+      // Sem permissão de cadastro (colaborador), envia só a anamnese; telefone/CPF mascarados nunca voltam à API
+      const resultado = await onEditClient(editingClient.id, somenteAnamnese
+        ? { observacao: finalObservation }
+        : {
+          nome: editingClient.nome,
+          telefone: editingClient.telefone,
+          cpf: editingClient.cpf,
+          observacao: finalObservation,
+        });
+      if (resultado === false) throw new Error('Não foi possível atualizar o cliente.');
+      mostrarMensagem('Cliente atualizado!');
+      setEditingClient(null);
+      setEditingClientNote('');
+      setEditingClientAlergias('');
+      setEditingClientPreferencias('');
+    } catch (error) {
+      mostrarMensagem(mensagemDeErro(error, 'Não foi possível atualizar o cliente.'));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleDeleteConfirm = () => {
-    if (!clientToDelete || !onDeleteClient) return;
-    onDeleteClient(clientToDelete);
-    setToastMessage?.('Cliente excluido!');
-    setTimeout(() => setToastMessage?.(null), 3000);
-    setClientToDelete(null);
+  const handleDeleteConfirm = async () => {
+    if (!clientToDelete || !onDeleteClient || isSaving) return;
+    setIsSaving(true);
+    try {
+      const resultado = await onDeleteClient(clientToDelete);
+      if (resultado === false) throw new Error('Não foi possível excluir o cliente.');
+      mostrarMensagem('Cliente excluído!');
+      setClientToDelete(null);
+    } catch (error) {
+      mostrarMensagem(mensagemDeErro(error, 'Não foi possível excluir o cliente.'));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSaveAnamnese = async () => {
@@ -134,10 +169,17 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
     }
 
     const finalObservation = formatAnamneseStorage(editingAnamneseClient.note, editingAnamneseClient.data);
-    await onEditClient(editingAnamneseClient.id, { observacao: finalObservation });
-    setToastMessage?.('Ficha de anamnese atualizada!');
-    setTimeout(() => setToastMessage?.(null), 3000);
-    setEditingAnamneseClient(null);
+    setIsSaving(true);
+    try {
+      const resultado = await onEditClient(editingAnamneseClient.id, { observacao: finalObservation });
+      if (resultado === false) throw new Error('Não foi possível salvar a anamnese.');
+      mostrarMensagem('Ficha de anamnese atualizada!');
+      setEditingAnamneseClient(null);
+    } catch (error) {
+      mostrarMensagem(mensagemDeErro(error, 'Não foi possível salvar a anamnese.'));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -281,7 +323,7 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
                 <input
                   required
                   type="text"
-                  value={editingClient.nome}
+                  value={editingClient.nome} readOnly={somenteAnamnese}
                   onChange={e => setEditingClient({ ...editingClient, nome: e.target.value })}
                   className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface"
                 />
@@ -290,7 +332,7 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
                 <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Telefone</label>
                 <input
                   type="text"
-                  value={editingClient.telefone || ''}
+                  value={editingClient.telefone || ''} readOnly={somenteAnamnese}
                   onChange={e => setEditingClient({ ...editingClient, telefone: formatPhone(e.target.value) })}
                   maxLength={15}
                   placeholder="(00) 00000-0000"
@@ -301,7 +343,7 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
                 <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">CPF</label>
                 <input
                   type="text"
-                  value={editingClient.cpf || ''}
+                  value={editingClient.cpf || ''} readOnly={somenteAnamnese}
                   onChange={e => setEditingClient({ ...editingClient, cpf: formatCpf(e.target.value) })}
                   maxLength={14}
                   className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface"
@@ -335,7 +377,7 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
       <ConfirmDialog
         open={Boolean(clientToDelete)}
         title="Excluir Cliente?"
-        description="Esta acao removera o historico e nao pode ser desfeita."
+        description="Esta ação removerá o histórico e não pode ser desfeita."
         confirmLabel="Excluir"
         cancelLabel="Cancelar"
         icon="warning"
@@ -426,6 +468,19 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
               </button>
             </div>
 
+            {loadingClientHistory && (
+              <p className="text-xs text-on-surface-variant mb-3">Carregando histórico completo...</p>
+            )}
+            {fullClientAppointments && fullClientAppointments.length >= LIMITE_HISTORICO_CLIENTE && (
+              <p className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 mb-3">
+                Exibindo os {LIMITE_HISTORICO_CLIENTE} atendimentos mais recentes: totais e faltas consideram só esse período.
+              </p>
+            )}
+            {clientHistoryError && (
+              <p className="text-xs text-error bg-error/10 border border-error/20 rounded-xl px-3 py-2 mb-3">
+                Não foi possível carregar o histórico completo. Abaixo, só os atendimentos do último ano.
+              </p>
+            )}
             {(() => {
               const fullHistory = getClientHistory(historyClient);
               const filteredHistory = getFilteredHistory(fullHistory);
@@ -480,8 +535,8 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
                         <div key={appointment.id} className="bg-surface-container-low border border-outline-variant/20 rounded-xl p-4">
                           <div className="flex items-center justify-between gap-3 mb-2">
                             <p className="text-sm font-bold text-on-surface">{appointment.date.split('-').reverse().join('/')} {appointment.time}</p>
-                            <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full ${appointment.status === 'completed' ? 'bg-primary/15 text-primary' : 'bg-surface-container-high text-on-surface-variant'}`}>
-                              {appointment.status === 'completed' ? 'Concluído' : 'Agendado'}
+                            <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full ${appointment.status === 'completed' ? 'bg-primary/15 text-primary' : appointment.status === 'no_show' ? 'bg-error/10 text-error' : 'bg-surface-container-high text-on-surface-variant'}`}>
+                              {appointment.status === 'completed' ? 'Concluído' : appointment.status === 'no_show' ? 'Faltou' : 'Agendado'}
                             </span>
                           </div>
                           <p className="text-sm text-on-surface">{appointment.services.join(', ') || 'Sem serviço informado'}</p>

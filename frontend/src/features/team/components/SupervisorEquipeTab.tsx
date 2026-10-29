@@ -1,14 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'motion/react';
-import { Employee } from '../../../types';
+import { Employee, Role, EmployeeUpdate } from '../../../types';
+import { useAuth } from '../../../AuthContext';
+import { isApiError } from '../../../api';
 import { useSearch } from '../../../hooks/useSearch';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
+import { isTeamMember, gerarSenhaProvisoria, gerarEmailUnico } from '../../../utils/formatters';
 
 interface SupervisorEquipeTabProps {
   employees: Employee[];
-  onAddEmployee: (employee: Omit<Employee, 'id' | 'rating' | 'completedServices'>) => Promise<boolean | string | void> | void;
-  onDeleteEmployee: (id: string, reallocateToId?: string) => void;
-  onEditEmployee: (id: string, employee: Partial<Employee>) => Promise<boolean | string | void> | void;
+  onAddEmployee: (employee: Omit<Employee, 'id' | 'rating' | 'completedServices'> & { password: string }) => Promise<boolean | string | void> | void;
+  onDeleteEmployee: (id: string, reallocateToId?: string) => Promise<unknown> | void;
+  onEditEmployee: (id: string, employee: EmployeeUpdate) => Promise<boolean | string | void> | void;
   onSaveScaleOverride?: (payload: { colaboradorId: string; data: string; tipo: 'trabalho' | 'folga' | 'fds'; turno?: string; descricao?: string }) => Promise<boolean | string | void> | void;
   setToastMessage: (msg: string | null) => void;
   setErrorMessage: (msg: string | null) => void;
@@ -22,7 +25,6 @@ const getTodayLocalDate = () => {
 };
 
 export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee, onEditEmployee, onSaveScaleOverride, setToastMessage, setErrorMessage, onViewEmployee }: SupervisorEquipeTabProps) {
-  const DEFAULT_PASSWORD = '123456';
   const WEEK_DAYS = [
     { value: '0', label: 'DOM' },
     { value: '1', label: 'SEG' },
@@ -40,7 +42,9 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const [newEmpFolgasDomingoNoMes, setNewEmpFolgasDomingoNoMes] = useState(2);
   const [newEmpCargaHoraria, setNewEmpCargaHoraria] = useState(40);
   const [newEmpHabilidades, setNewEmpHabilidades] = useState<string[]>([]);
-  const [newEmpRole, setNewEmpRole] = useState<'supervisor' | 'collaborator'>('collaborator');
+  const [newEmpRole, setNewEmpRole] = useState<Role>('collaborator');
+  const { currentUser } = useAuth();
+  const podeGerenciarSupervisores = currentUser?.role === 'admin';
   const [newEmpDiasTrabalho, setNewEmpDiasTrabalho] = useState<string[]>(['1','2','3','4','5','6']);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
@@ -57,20 +61,18 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const [bulkShiftSelection, setBulkShiftSelection] = useState<'' | 'manha' | 'tarde' | 'folga'>('');
   const [bulkTargetDate, setBulkTargetDate] = useState(getTodayLocalDate());
   const [isApplyingBulkShift, setIsApplyingBulkShift] = useState(false);
-  const [createdCredentials, setCreatedCredentials] = useState<{ name: string; email: string; password: string } | null>(null);
+  const [createdCredentials, setCreatedCredentials] = useState<{ name: string; email: string; password: string; redefinida?: boolean } | null>(null);
+  const [employeeToResetPassword, setEmployeeToResetPassword] = useState<Employee | null>(null);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  // Própria senha não se redefine aqui (derrubaria a sessão antes de mostrar a nova); supervisor só redefine quem não é supervisor/admin
+  const podeRedefinirSenha = (emp: Employee) => emp.id !== currentUser?.id
+    && (podeGerenciarSupervisores || (emp.role !== 'supervisor' && emp.role !== 'admin'));
   const EMPLOYEES_PER_PAGE = 6;
   const SKILL_OPTIONS = ['Massagem', 'Acupuntura', 'Fisioterapia', 'Aromaterapia', 'Drenagem Linfática'];
-  const selectableEmployees = useMemo(() => employees.filter((emp) => emp.id !== 'admin'), [employees]);
+  const selectableEmployees = useMemo(() => employees.filter(isTeamMember), [employees]);
 
-  // --- NOVOS ESTADOS PARA GESTÃO (CARGOS E TURNOS) ---
+  // --- ESTADOS DA GESTÃO DE TURNOS ---
   const [activeSubTab, setActiveSubTab] = useState<'profissionais' | 'gestao'>('profissionais');
-  const [cargos, setCargos] = useState<{id: string, nome: string}[]>([
-    { id: '1', nome: 'Massoterapeuta' },
-    { id: '2', nome: 'Esteticista' },
-    { id: '3', nome: 'Recepcionista' },
-  ]);
-  const [novoCargo, setNovoCargo] = useState('');
-  
   const [turnos, setTurnos] = useState<{id: string, nome: string, inicio: string, fim: string}[]>([
     { id: '1', nome: 'Turno Manhã', inicio: '06:00', fim: '14:00' },
     { id: '2', nome: 'Turno Tarde', inicio: '14:00', fim: '22:00' },
@@ -81,50 +83,30 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const [novoTurnoInicio, setNovoTurnoInicio] = useState('08:00');
   const [novoTurnoFim, setNovoTurnoFim] = useState('18:00');
 
-  const handleAddCargo = (e: React.FormEvent) => {
-    e.preventDefault();
-    if(!novoCargo.trim()) return;
-    setCargos([...cargos, { id: Date.now().toString(), nome: novoCargo.trim() }]);
-    setNovoCargo('');
-    setToastMessage('Cargo adicionado.');
-    setTimeout(() => setToastMessage(null), 2000);
-  };
-
   const handleAddTurno = (e: React.FormEvent) => {
     e.preventDefault();
     if(!novoTurnoNome.trim() || !novoTurnoInicio || !novoTurnoFim) return;
     setTurnos([...turnos, { id: Date.now().toString(), nome: novoTurnoNome.trim(), inicio: novoTurnoInicio, fim: novoTurnoFim }]);
     setNovoTurnoNome('');
     setToastMessage('Turno adicionado.');
-    setTimeout(() => setToastMessage(null), 2000);
   };
 
-  const generateEmployeeEmail = (fullName: string) => {
-    const normalized = fullName
-      .trim()
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z\s]/g, ' ')
-      .replace(/\s+/g, ' ');
-
-    const parts = normalized.split(' ').filter(Boolean);
-    const firstName = parts[0] || 'usuario';
-    const lastName = parts.length > 1 ? parts[parts.length - 1] : parts[0] || 'usuario';
-    return `${firstName}.${lastName}@serenidade.com`;
-  };
+  const generateEmployeeEmail = (fullName: string) => gerarEmailUnico(fullName, employees.map((emp) => emp.email));
 
   const liveGeneratedEmail = generateEmployeeEmail(newEmpName);
 
   const filteredEmployees = useSearch(
-    employees.filter(emp => emp.id !== 'admin'),
+    employees,
     searchTerm,
     emp => [emp.name, emp.email, emp.specialty, emp.role]
   );
 
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newEmpName || !newEmpSpecialty) return;
+    if (!newEmpName.trim() || !newEmpSpecialty.trim()) {
+      setErrorMessage('Preencha o nome e a especialidade do profissional.');
+      return;
+    }
     
     setIsSubmitting(true);
     let success: boolean | string | void = false;
@@ -135,7 +117,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
           name: newEmpName,
           email: newEmpEmail,
           specialty: newEmpSpecialty,
-          cargo: newEmpCargo || newEmpSpecialty,
+          cargo: newEmpCargo.trim() || newEmpSpecialty.trim(),
           tipoEscala: newEmpTipoEscala,
           folgasDomingoNoMes: newEmpFolgasDomingoNoMes,
           cargaHorariaSemanal: newEmpCargaHoraria,
@@ -147,12 +129,14 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
         else if (success !== false) { setToastMessage('Colaborador atualizado com sucesso!'); }
       } else {
         const generatedEmail = generateEmployeeEmail(newEmpName);
+        const senhaProvisoria = gerarSenhaProvisoria();
         success = await onAddEmployee({
           name: newEmpName,
           email: generatedEmail,
+          password: senhaProvisoria,
           role: newEmpRole,
           specialty: newEmpSpecialty,
-          cargo: newEmpCargo || newEmpSpecialty,
+          cargo: newEmpCargo.trim() || newEmpSpecialty.trim(),
           tipoEscala: newEmpTipoEscala,
           folgasDomingoNoMes: newEmpFolgasDomingoNoMes,
           cargaHorariaSemanal: newEmpCargaHoraria,
@@ -163,11 +147,11 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
         if (typeof success === 'string') { setErrorMessage(success); success = false; }
         else if (success !== false) {
           setToastMessage('Colaborador adicionado com sucesso!');
-          setCreatedCredentials({ name: newEmpName, email: generatedEmail, password: DEFAULT_PASSWORD });
+          setCreatedCredentials({ name: newEmpName, email: generatedEmail, password: senhaProvisoria });
         }
       }
 
-      if (success !== false) { cancelEdit(); setTimeout(() => setToastMessage(null), 3000); }
+      if (success !== false) { cancelEdit(); }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao salvar colaborador.';
       setErrorMessage(message);
@@ -347,14 +331,12 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
         setErrorMessage(firstFailureMessage || 'Parte da aplicação em lote falhou.');
         if (successCount > 0) {
           setToastMessage(`Lote parcial: ${successCount} aplicado(s), ${failedCount} com falha.`);
-          setTimeout(() => setToastMessage(null), 3500);
         }
         return;
       }
 
       const shiftLabel = bulkShiftSelection === 'folga' ? 'Folga' : bulkShiftSelection === 'manha' ? 'Manhã' : 'Tarde';
       setToastMessage(`Escala em lote aplicada (${shiftLabel}) para ${bulkSelectedEmployeeIds.length} colaborador(es).`);
-      setTimeout(() => setToastMessage(null), 3500);
       closeScheduleModal();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Erro ao aplicar turno em lote.');
@@ -378,7 +360,6 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
       } else if (success !== false) {
         setToastMessage('Escala atualizada com sucesso!');
         closeScheduleModal();
-        setTimeout(() => setToastMessage(null), 3000);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Erro ao salvar escala.');
@@ -456,6 +437,13 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                   >
                     <span className="material-symbols-outlined text-[20px]">schedule</span>
                   </button>
+                  {podeRedefinirSenha(emp) && <button
+                    onClick={() => setEmployeeToResetPassword(emp)}
+                    className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full"
+                    title="Redefinir senha"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">lock_reset</span>
+                  </button>}
                   <button
                     onClick={() => onViewEmployee?.(emp)}
                     className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full"
@@ -504,35 +492,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
           )}
         </>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* CARD GESTÃO DE CARGOS */}
-          <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm flex flex-col h-100">
-            <div className="flex items-center gap-3 mb-6 shrink-0">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                <span className="material-symbols-outlined">badge</span>
-              </div>
-              <div>
-                <h3 className="text-lg font-headline text-primary">Gestão de Cargos</h3>
-                <p className="text-xs text-on-surface-variant">Cargos disponíveis para a equipe</p>
-              </div>
-            </div>
-
-            <div className="space-y-2 flex-1 overflow-y-auto custom-scrollbar pr-2 mb-4">
-              {cargos.map(cargo => (
-                <div key={cargo.id} className="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-outline-variant/20 group">
-                  <span className="text-sm font-bold text-on-surface">{cargo.nome}</span>
-                  <button onClick={() => setCargos(cargos.filter(c => c.id !== cargo.id))} className="text-on-surface-variant hover:text-error transition-colors p-1 rounded-full opacity-0 group-hover:opacity-100"><span className="material-symbols-outlined text-[18px]">delete</span></button>
-                </div>
-              ))}
-              {cargos.length === 0 && <p className="text-xs text-center text-on-surface-variant pt-4">Nenhum cargo cadastrado.</p>}
-            </div>
-
-            <form onSubmit={handleAddCargo} className="flex gap-2 pt-4 border-t border-outline-variant/10 shrink-0">
-              <input type="text" value={novoCargo} onChange={e => setNovoCargo(e.target.value)} placeholder="Novo cargo..." className="flex-1 bg-surface-container-low border border-outline-variant/20 rounded-xl px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none" required />
-              <button type="submit" className="bg-primary text-on-primary px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider shadow-sm hover:bg-primary-dim transition-all whitespace-nowrap">Adicionar</button>
-            </form>
-          </div>
-
+        <div className="grid grid-cols-1 gap-6 max-w-2xl">
           {/* CARD GESTÃO DE TURNOS */}
           <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm flex flex-col h-100">
             <div className="flex items-center gap-3 mb-6 shrink-0">
@@ -601,14 +561,16 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                   </p>
                 )}
               </div>
-              <input required type="text" value={newEmpSpecialty} onChange={e => setNewEmpSpecialty(e.target.value)} placeholder="Especialidade" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
-              <select value={newEmpCargo} onChange={e => setNewEmpCargo(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm text-on-surface">
-                <option value="">Selecione o Cargo...</option>
-                {cargos.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
-              </select>
-              <select value={newEmpRole} onChange={e => setNewEmpRole(e.target.value as 'supervisor' | 'collaborator')} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm">
+              <input required type="text" value={newEmpSpecialty} onChange={e => setNewEmpSpecialty(e.target.value)} placeholder="Especialidade" maxLength={100} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              {/* Cargo é só o rótulo usado nas regras de serviço ("Somente cargos: ..."); vazio = a especialidade */}
+              <input type="text" value={newEmpCargo} onChange={e => setNewEmpCargo(e.target.value)} placeholder="Cargo (rótulo; vazio = especialidade)" aria-label="Cargo" maxLength={60} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              {/* A função de acesso define o que a pessoa pode fazer no sistema */}
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant -mb-2">Função de acesso</label>
+              <select aria-label="Função de acesso" value={newEmpRole} onChange={e => setNewEmpRole(e.target.value as Role)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm">
                 <option value="collaborator">Colaborador</option>
-                <option value="supervisor">Supervisor</option>
+                <option value="receptionist">Recepção</option>
+                {/* Só administradores criam ou promovem supervisores (a API recusa os demais) */}
+                {(podeGerenciarSupervisores || newEmpRole === 'supervisor') && <option value="supervisor">Supervisor</option>}
               </select>
               <select value={newEmpTipoEscala || '6x1'} onChange={e => setNewEmpTipoEscala(e.target.value as Employee['tipoEscala'])} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm">
                 <option value="6x1">6x1 (6 dias trab, 1 folga)</option>
@@ -667,7 +629,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-60 p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreatedCredentials(null); }}>
           <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-headline text-primary">Credenciais Criadas</h3>
+              <h3 className="text-lg font-headline text-primary">{createdCredentials.redefinida ? 'Senha Redefinida' : 'Credenciais Criadas'}</h3>
               <button type="button" onClick={() => setCreatedCredentials(null)} className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant"><span className="material-symbols-outlined">close</span></button>
             </div>
             <div className="space-y-3">
@@ -680,11 +642,13 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                 <p className="text-sm font-bold text-on-surface break-all">{createdCredentials.email}</p>
               </div>
               <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Senha padrão</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Senha provisória (anote agora: não será exibida de novo)</p>
                 <p className="text-sm font-bold text-on-surface">{createdCredentials.password}</p>
               </div>
               <p className="text-xs text-on-surface-variant">
-                Guarde essas credenciais para acesso do novo usuário.
+                {createdCredentials.redefinida
+                  ? 'A senha anterior deixou de valer e as sessões abertas desse usuário foram encerradas. Entregue a nova senha a ele.'
+                  : 'Guarde essas credenciais para acesso do novo usuário.'}
               </p>
             </div>
             <button type="button" onClick={() => setCreatedCredentials(null)} className="w-full mt-5 bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim transition-all">
@@ -695,19 +659,57 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
       )}
 
       <ConfirmDialog
+        open={Boolean(employeeToResetPassword)}
+        title="Redefinir senha?"
+        description={`Uma senha provisória nova será gerada para ${employeeToResetPassword?.name ?? 'o profissional'}. A senha atual deixa de valer e as sessões abertas são encerradas.`}
+        confirmLabel="Redefinir"
+        cancelLabel="Cancelar"
+        icon="lock_reset"
+        isSubmitting={isResettingPassword}
+        confirmingLabel="Redefinindo..."
+        onClose={() => { if (!isResettingPassword) setEmployeeToResetPassword(null); }}
+        onConfirm={async () => {
+          const alvo = employeeToResetPassword;
+          if (!alvo || isResettingPassword) return;
+          setIsResettingPassword(true);
+          const senhaProvisoria = gerarSenhaProvisoria();
+          try {
+            const resultado = await onEditEmployee(alvo.id, { password: senhaProvisoria });
+            if (typeof resultado === 'string') { setErrorMessage(resultado); return; }
+            if (resultado === false) return;
+            setCreatedCredentials({ name: alvo.name, email: alvo.email, password: senhaProvisoria, redefinida: true });
+          } catch (error) {
+            const detalhe = error instanceof Error ? error.message : 'Não foi possível redefinir a senha.';
+            // Erro respondido pela API = nada mudou; sem resposta (rede) não dá para saber se o servidor aplicou
+            const semResposta = !isApiError(error) || error.code === 'NETWORK_ERROR';
+            setErrorMessage(!semResposta
+              ? detalhe
+              : `${detalhe} A senha pode ter sido alterada mesmo assim: redefina de novo para obter uma senha visível.`);
+          } finally {
+            setIsResettingPassword(false);
+            setEmployeeToResetPassword(null);
+          }
+        }}
+      />
+
+      <ConfirmDialog
         open={Boolean(employeeToDelete)}
         title="Excluir Colaborador?"
-        description="Os agendamentos podem ser removidos se não houver realocação."
+        description="Atendimentos futuros serão cancelados. Quem já tem histórico é apenas removido da equipe, e os atendimentos passados são preservados."
         confirmLabel="Excluir"
         cancelLabel="Cancelar"
         icon="person_remove"
         onClose={() => setEmployeeToDelete(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!employeeToDelete) return;
-          onDeleteEmployee(employeeToDelete);
-          setEmployeeToDelete(null);
-          setToastMessage('Colaborador excluído.');
-          setTimeout(() => setToastMessage(null), 3000);
+          try {
+            const resposta = await onDeleteEmployee(employeeToDelete) as { mensagem?: string } | undefined;
+            setEmployeeToDelete(null);
+            setToastMessage(resposta?.mensagem || 'Colaborador removido.');
+          } catch (error) {
+            setEmployeeToDelete(null);
+            setErrorMessage(error instanceof Error ? error.message : 'Não foi possível remover o colaborador.');
+          }
         }}
       />
 

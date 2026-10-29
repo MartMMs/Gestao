@@ -1,4 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
+import dotenv from 'dotenv';
+
+// Carrega E2E_PASSWORD e demais variáveis do .env local (no CI elas vêm do ambiente)
+dotenv.config({ quiet: true });
+
+if (!process.env.PLAYWRIGHT_HOST_PLATFORM_OVERRIDE) {
+  process.env.PLAYWRIGHT_HOST_PLATFORM_OVERRIDE = 'ubuntu24.04-x64';
+}
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:3000';
 

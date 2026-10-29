@@ -27,7 +27,7 @@ describe('validateAppointmentScheduling', () => {
       appointments: [],
       services,
     });
-    expect(err).toMatch(/horario comercial/i);
+    expect(err).toMatch(/só podem começar entre/i);
   });
 
   it('rejeita agendamento no passado (mesmo dia)', () => {

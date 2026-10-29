@@ -6,8 +6,8 @@ interface LayoutProps {
   children: React.ReactNode;
   userName: string;
   userRole: Role;
-  activeView?: Role | 'tv';
-  onViewChange?: (view: Role | 'tv') => void;
+  activeView?: Role | 'tv' | 'autoatendimento';
+  onViewChange?: (view: Role | 'tv' | 'autoatendimento') => void;
   onOpenUpcomingAppointments?: () => void;
   upcomingAppointmentsCount?: number;
   cltAlertsCount?: number;
@@ -15,9 +15,11 @@ interface LayoutProps {
   onLogout: () => void;
   isDarkMode?: boolean;
   toggleTheme?: () => void;
+  companyName?: string;
+  companyIcon?: string;
 }
 
-export function Layout({ children, userName, userRole, activeView, onViewChange, onOpenUpcomingAppointments, upcomingAppointmentsCount = 0, cltAlertsCount = 0, onOpenCltAlerts, onLogout, isDarkMode, toggleTheme }: LayoutProps) {
+export function Layout({ children, userName, userRole, activeView, onViewChange, onOpenUpcomingAppointments, upcomingAppointmentsCount = 0, cltAlertsCount = 0, onOpenCltAlerts, onLogout, isDarkMode, toggleTheme, companyName, companyIcon }: LayoutProps) {
   const [showSettings, setShowSettings] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -50,32 +52,51 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
   return (
     <div className="min-h-screen flex flex-col bg-surface text-on-surface font-body antialiased transition-colors duration-300">
       {/* TopAppBar */}
-      <header className="bg-surface/80 backdrop-blur-md font-headline text-on-surface sticky top-0 z-50 shadow-sm flex justify-between items-center w-full px-8 py-4 max-w-full">
-        <div className="flex items-center gap-4">
-          {/* Espaço para a sua Logo. Basta trocar o src pela sua imagem (ex: src="/logo.png") */}
-          <div className="w-10 h-10 bg-primary-container rounded-xl flex items-center justify-center overflow-hidden border border-primary/20 shrink-0 shadow-sm">
-            {/* <img src="/logo.png" alt="Logo da Clínica" className="w-full h-full object-cover" /> */}
-            <span className="material-symbols-outlined text-primary text-2xl">spa</span>
+      <header className="bg-surface/80 backdrop-blur-md font-headline text-on-surface sticky top-0 z-50 shadow-sm flex justify-between items-center w-full px-4 sm:px-8 py-3 sm:py-4 max-w-full">
+        <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
+          {/* Espaço para a sua Logo */}
+          <div className="w-10 h-10 sm:w-11 sm:h-11 bg-primary-container rounded-xl flex items-center justify-center overflow-hidden border border-primary/20 shrink-0 shadow-sm">
+            <span className="material-symbols-outlined text-primary text-2xl">{companyIcon || 'storefront'}</span>
           </div>
-          <span className="text-2xl font-serif italic text-primary hidden sm:block">Serenidade Spa</span>
+          <span className="text-base sm:text-2xl font-serif italic text-primary truncate max-w-[150px] sm:max-w-none">
+            {companyName || 'OmniGestão'}
+          </span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
           <div className="hidden lg:flex items-center gap-2 px-4 py-1 bg-surface-container rounded-full border border-outline-variant/30">
             <span className="material-symbols-outlined text-primary scale-75">badge</span>
-            {userRole === 'supervisor' ? (
+            {userRole === 'admin' ? (
               <select 
                 value={activeView} 
-                onChange={(e) => onViewChange?.(e.target.value as Role | 'tv')}
+                onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
+                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-tighter font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
+              >
+                <option value="admin">Painel Administrador</option>
+                <option value="supervisor">Visão Operacional (Supervisor)</option>
+                <option value="collaborator">Portal do Colaborador</option>
+                <option value="tv">Painel de TV (Recepção)</option>
+                <option value="autoatendimento">Autoatendimento (Totem)</option>
+              </select>
+            ) : userRole === 'supervisor' ? (
+              <select 
+                value={activeView} 
+                onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
                 className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-tighter font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
               >
                 <option value="supervisor">Portal do Supervisor</option>
                 <option value="collaborator">Portal do Colaborador</option>
                 <option value="tv">Painel de TV (Recepção)</option>
+                <option value="autoatendimento">Autoatendimento (Totem)</option>
               </select>
             ) : (
-              <span className="text-xs font-semibold text-on-surface-variant uppercase tracking-tighter font-body">
-                Portal do Colaborador
-              </span>
+              <select 
+                value={activeView} 
+                onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
+                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-tighter font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
+              >
+                <option value="collaborator">Portal do Colaborador</option>
+                <option value="autoatendimento">Autoatendimento (Totem)</option>
+              </select>
             )}
           </div>
           {activeView === 'supervisor' && onOpenUpcomingAppointments && (
@@ -89,7 +110,7 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
               <span className="rounded-full bg-primary/15 text-primary text-[10px] font-bold px-2 py-0.5">{upcomingAppointmentsCount}</span>
             </button>
           )}
-          <div className="flex items-center gap-3 ml-2 pl-4 border-l border-outline-variant/30">
+          <div className="flex items-center gap-1.5 sm:gap-3 ml-1 sm:ml-2 pl-2 sm:pl-4 border-l border-outline-variant/30">
             {toggleTheme && (
               <button 
                 onClick={toggleTheme} 

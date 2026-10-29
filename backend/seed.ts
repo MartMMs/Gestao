@@ -1,16 +1,41 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { config } from './env';
+import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
+import { prisma } from './db';
+import { validarSenha } from './lib/usuarios';
 
 async function main() {
+  // O seed APAGA todos os dados: nunca roda em produção
+  if (config.producao) throw new Error('O seed de demonstração apaga o banco e não pode rodar com NODE_ENV=production.');
+
+  // Senha comum dos profissionais de demonstração, definida no .env (nunca fixa no código)
+  const senhaDemo = process.env.SEED_PASSWORD;
+  const erroSenha = validarSenha(senhaDemo);
+  if (erroSenha) throw new Error(`SEED_PASSWORD: ${erroSenha}`);
+  const senha = await bcrypt.hash(senhaDemo!, 10);
+
+  // Contas privilegiadas ganham senhas próprias e aleatórias, mostradas uma vez no fim
+  const senhaAdmin = crypto.randomBytes(12).toString('base64url');
+  const senhaSupervisor = crypto.randomBytes(12).toString('base64url');
+
   console.log('🧹 Limpando dados antigos do banco...');
   // Deletar na ordem inversa das dependências para evitar erros de chave estrangeira
   await prisma.agendamento.deleteMany();
+  await prisma.bloqueio.deleteMany();
+  await prisma.escalaOverride.deleteMany();
+  await prisma.solicitacaoTroca.deleteMany();
   await prisma.cliente.deleteMany();
   await prisma.servico.deleteMany();
   await prisma.colaborador.deleteMany();
 
   console.log('🌱 Semeando o banco de dados...');
+
+  await prisma.colaborador.create({
+    data: { nome: 'Administrador', email: 'admin@serenidade.com', especialidade: 'Gestão', papel: 'admin', ativo: true, senha: await bcrypt.hash(senhaAdmin, 10) },
+  });
+  await prisma.colaborador.create({
+    data: { nome: 'Supervisor Operacional', email: 'supervisor@serenidade.com', especialidade: 'Coordenação', papel: 'supervisor', ativo: true, senha: await bcrypt.hash(senhaSupervisor, 10) },
+  });
 
   const helena = await prisma.colaborador.create({
     data: {
@@ -18,7 +43,8 @@ async function main() {
       email: 'helena@serenidade.com',
       especialidade: 'Massoterapia',
       ativo: true,
-      papel: 'collaborator'
+      papel: 'collaborator',
+      senha,
     },
   });
 
@@ -28,7 +54,8 @@ async function main() {
       email: 'marcos@serenidade.com',
       especialidade: 'Estética',
       ativo: true,
-      papel: 'collaborator'
+      papel: 'collaborator',
+      senha,
     },
   });
 
@@ -38,7 +65,8 @@ async function main() {
       email: 'ana@serenidade.com',
       especialidade: 'Yoga & Meditação',
       ativo: true,
-      papel: 'collaborator'
+      papel: 'collaborator',
+      senha,
     },
   });
 
@@ -48,7 +76,8 @@ async function main() {
       email: 'roberto@serenidade.com',
       especialidade: 'Recepção',
       ativo: true,
-      papel: 'receptionist'
+      papel: 'receptionist',
+      senha,
     },
   });
 
@@ -116,6 +145,9 @@ async function main() {
 
   console.log('✅ Banco populado com sucesso!');
   console.log('Profissionais criados:', { helena: helena.nome, marcos: marcos.nome, ana: ana.nome, roberto: roberto.nome });
+  console.log('🔑 Senhas das contas de gestão (anote agora, não serão mostradas de novo):');
+  console.log(`   admin@serenidade.com: ${senhaAdmin}`);
+  console.log(`   supervisor@serenidade.com: ${senhaSupervisor}`);
 }
 
 main()

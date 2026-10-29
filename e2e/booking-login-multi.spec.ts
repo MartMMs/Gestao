@@ -1,19 +1,17 @@
 import { test, expect } from '@playwright/test';
+import { CONTAS, loginPelaTela } from './credenciais';
 
-async function loginViaAcessoRapido(
+async function loginComPerfil(
   page: import('@playwright/test').Page,
   perfil: 'Colaborador' | 'Supervisor',
 ) {
   await page.goto('/');
-  await expect(page.getByText(/Acesso Rapido|Acesso Rápido/i)).toBeVisible();
-  await page.getByRole('button', { name: new RegExp(perfil, 'i') }).click();
-  await page.getByRole('button', { name: /Entrar/i }).click();
-  await expect(page.getByText('Carregando dados do sistema...')).toBeHidden({ timeout: 90_000 });
+  await loginPelaTela(page, perfil === 'Supervisor' ? CONTAS.supervisor : CONTAS.colaboradora);
 }
 
 test.describe('UI — login e multi-contexto', () => {
-  test('acesso rapido Colaborador abre portal apos carregar dados', async ({ page }) => {
-    await loginViaAcessoRapido(page, 'Colaborador');
+  test('login de colaborador abre portal apos carregar dados', async ({ page }) => {
+    await loginComPerfil(page, 'Colaborador');
     await expect(page.getByRole('heading', { name: /Portal do Colaborador/i })).toBeVisible();
   });
 
@@ -26,11 +24,11 @@ test.describe('UI — login e multi-contexto', () => {
     try {
       await Promise.all([
         (async () => {
-          await loginViaAcessoRapido(p1, 'Colaborador');
+          await loginComPerfil(p1, 'Colaborador');
           await expect(p1.getByRole('heading', { name: /Portal do Colaborador/i })).toBeVisible();
         })(),
         (async () => {
-          await loginViaAcessoRapido(p2, 'Colaborador');
+          await loginComPerfil(p2, 'Colaborador');
           await expect(p2.getByRole('heading', { name: /Portal do Colaborador/i })).toBeVisible();
         })(),
       ]);
@@ -40,7 +38,7 @@ test.describe('UI — login e multi-contexto', () => {
   });
 
   test('supervisor ve seletor de portal na barra', async ({ page }) => {
-    await loginViaAcessoRapido(page, 'Supervisor');
-    await expect(page.getByRole('heading', { name: /Portal da Supervis[aã]o/i })).toBeVisible();
+    await loginComPerfil(page, 'Supervisor');
+    await expect(page.getByRole('heading', { name: /Portal d[oa] Supervis(or|[aã]o)/i })).toBeVisible();
   });
 });

@@ -1,6 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Appointment } from '../types';
+import { getLocalTodayString } from '../features/appointments/utils/appointmentCore';
+
+// Mesmo limite do servidor (escalaRoutes)
+const LIMITE_MOTIVO = 500;
 
 export interface TrocaTurnoPayload {
   colaboradorId: string;
@@ -41,6 +45,8 @@ export function SolicitarTroca({
 
   if (!open) return null;
 
+  const hoje = getLocalTodayString();
+
   const resetAndClose = () => {
     setDataOriginal('');
     setDataSolicitada('');
@@ -49,6 +55,7 @@ export function SolicitarTroca({
   };
 
   const handleSubmit = async () => {
+    if (isSubmitting) return;
     if (!dataOriginal || !dataSolicitada || !motivo.trim()) {
       setErrorMessage('Preencha data original, data solicitada e motivo da troca.');
       return;
@@ -56,6 +63,11 @@ export function SolicitarTroca({
 
     if (dataSolicitada === dataOriginal) {
       setErrorMessage('A data solicitada deve ser diferente da data original.');
+      return;
+    }
+
+    if (dataOriginal < hoje || dataSolicitada < hoje) {
+      setErrorMessage('Escolha datas a partir de hoje.');
       return;
     }
 
@@ -73,23 +85,30 @@ export function SolicitarTroca({
       if (onSubmitTroca) {
         const result = await onSubmitTroca(payload);
         if (result === false) {
-          setErrorMessage('Nao foi possivel enviar a solicitacao de troca.');
+          setErrorMessage('Não foi possível enviar a solicitação de troca.');
           return;
         }
       }
 
-      setToastMessage('Solicitacao de troca enviada com sucesso.');
-      setTimeout(() => setToastMessage(null), 3000);
+      setToastMessage('Solicitação de troca enviada com sucesso.');
       resetAndClose();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Erro ao enviar solicitacao de troca.');
+      setErrorMessage(error instanceof Error ? error.message : 'Erro ao enviar a solicitação de troca.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // X ou clique fora: não fecha durante o envio e não descarta o que foi digitado sem perguntar
+  const fecharComConfirmacao = () => {
+    if (isSubmitting) return;
+    const temConteudo = Boolean(dataOriginal || dataSolicitada || motivo.trim());
+    if (temConteudo && !window.confirm('Descartar a solicitação de troca que você estava preenchendo?')) return;
+    resetAndClose();
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-[90] p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) resetAndClose(); }}>
+    <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-[90] p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) fecharComConfirmacao(); }}>
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -98,7 +117,7 @@ export function SolicitarTroca({
       >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-headline text-primary">Solicitar Troca de Turno</h3>
-          <button type="button" onClick={resetAndClose} className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant">
+          <button type="button" onClick={fecharComConfirmacao} disabled={isSubmitting} aria-label="Fechar" className="p-2 rounded-full disabled:opacity-40 hover:bg-surface-container text-on-surface-variant">
             <span className="material-symbols-outlined">close</span>
           </button>
         </div>
@@ -106,7 +125,7 @@ export function SolicitarTroca({
         <div className="space-y-4">
           <div>
             <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Data original</label>
-            <input type="date" value={dataOriginal} onChange={(event) => setDataOriginal(event.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+            <input type="date" min={hoje} value={dataOriginal} onChange={(event) => setDataOriginal(event.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
           </div>
 
           {turnoOriginal && (
@@ -118,7 +137,7 @@ export function SolicitarTroca({
 
           <div>
             <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Data solicitada</label>
-            <input type="date" value={dataSolicitada} onChange={(event) => setDataSolicitada(event.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+            <input type="date" min={hoje} value={dataSolicitada} onChange={(event) => setDataSolicitada(event.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
           </div>
 
           <div>
@@ -127,8 +146,10 @@ export function SolicitarTroca({
               value={motivo}
               onChange={(event) => setMotivo(event.target.value)}
               placeholder="Descreva o motivo da troca"
+              maxLength={LIMITE_MOTIVO}
               className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm min-h-[96px] resize-none"
             />
+            <p className="text-[10px] text-on-surface-variant text-right mt-1">{motivo.length}/{LIMITE_MOTIVO}</p>
           </div>
 
           <button

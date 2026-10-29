@@ -41,6 +41,8 @@ export interface ViolacaoSetimoDia {
 }
 
 export const INTERJORNADA_MINIMA_HORAS = 11;
+// Limite constitucional da jornada semanal (CF, art. 7º, XIII)
+export const CARGA_SEMANAL_MAXIMA_HORAS = 44;
 export const LIMITE_DIAS_CONSECUTIVOS_TRABALHO = 6; // violacao no 7o dia
 
 const HOUR_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -136,12 +138,12 @@ export function calcularDiferencaInterjornada(
   fimTurnoAnterior: Date,
   inicioTurnoAtual: Date,
 ): { conforme: boolean; horasDescanso: number } {
-  const diffMs = inicioTurnoAtual.getTime() - fimTurnoAnterior.getTime();
-  const horasDescanso = roundHour(diffMs / 3_600_000);
+  const horasExatas = (inicioTurnoAtual.getTime() - fimTurnoAnterior.getTime()) / 3_600_000;
 
+  // Compara o valor exato: arredondar antes deixaria 10h58 passar como 11h
   return {
-    conforme: horasDescanso >= INTERJORNADA_MINIMA_HORAS,
-    horasDescanso,
+    conforme: horasExatas >= INTERJORNADA_MINIMA_HORAS,
+    horasDescanso: roundHour(horasExatas),
   };
 }
 
@@ -217,7 +219,13 @@ export function analisarSetimoDiaConsecutivo(diasEscala: DiaEscala[]): {
   ultimaFolga: string | null;
   alertas: string[];
 } {
-  const ordered = [...diasEscala].sort((a, b) => a.data.localeCompare(b.data));
+  // Uma entrada por data; se houver duplicidade, prevalece "trabalho" (não pode esconder dias trabalhados)
+  const porData = new Map<string, DiaEscala>();
+  for (const dia of diasEscala) {
+    const existente = porData.get(dia.data);
+    if (!existente || dia.tipo === 'trabalho') porData.set(dia.data, dia);
+  }
+  const ordered = [...porData.values()].sort((a, b) => a.data.localeCompare(b.data));
 
   let sequenciaAtual = 0;
   let maiorSequencia = 0;
@@ -311,13 +319,19 @@ export function analisarConformidadeCLT(diasEscala: DiaEscala[]): AnaliseConform
     ? `${diasEscala[0].data.slice(0, 7)} (média)`
     : 'N/A';
 
+  const cargaConforme = cargaTotal <= CARGA_SEMANAL_MAXIMA_HORAS;
+  const alertasCarga = cargaConforme
+    ? []
+    : [`⚠️ Carga semanal média de ${cargaTotal}h excede o limite legal de ${CARGA_SEMANAL_MAXIMA_HORAS}h.`];
+
   const resumo = [
     ...interjornada.alertas,
     ...setimoDia.alertas,
+    ...alertasCarga,
   ];
 
   if (resumo.length === 0) {
-    resumo.push('✅ Escala em conformidade com as regras de interjornada e DSR.');
+    resumo.push('✅ Escala em conformidade com as regras de interjornada, DSR e carga semanal.');
   }
 
   return {
@@ -327,10 +341,10 @@ export function analisarConformidadeCLT(diasEscala: DiaEscala[]): AnaliseConform
       alertas: interjornada.alertas,
     },
     cargaSemanal: {
-      conforme: true,
+      conforme: cargaConforme,
       cargaTotal,
       semanaAnalisada,
-      alertas: [],
+      alertas: alertasCarga,
     },
     descansoRemunerado: {
       conforme: setimoDia.conforme,
@@ -338,7 +352,7 @@ export function analisarConformidadeCLT(diasEscala: DiaEscala[]): AnaliseConform
       diasSemFolga: setimoDia.sequenciaAtual,
       alertas: setimoDia.alertas,
     },
-    statusGeral: interjornada.conforme && setimoDia.conforme,
+    statusGeral: interjornada.conforme && setimoDia.conforme && cargaConforme,
     resumo,
   };
 }
