@@ -101,11 +101,9 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
   // faria confirmações de pagamento se perderem (ele é protegido pela assinatura HMAC com timestamp).
   router.use(async (req, res, next) => {
     try {
-      // Webhook: limite próprio e folgado (o gateway chama de poucos IPs fixos; o do totem cortaria confirmações)
-      if (req.path === '/webhook-pagamento') {
-        const limite = await redisService.rateLimit(`ratelimit:webhook:${ipDoCliente(req)}`, 600, 60);
-        return limite.allowed ? next() : res.status(429).json({ erro: 'Muitas chamadas ao webhook.' });
-      }
+      // Webhook: só as chamadas com assinatura inválida contam no limite (ver a rota); chamadas legítimas do gateway
+      // nunca recebem 429 por causa de tráfego de terceiros
+      if (req.path === '/webhook-pagamento') return next();
       const ip = ipDoCliente(req);
       const check = await redisService.rateLimit(`ratelimit:autoatendimento:${ip}`, MAX_REQUISICOES_POR_MINUTO, 60);
       if (!check.allowed) {
@@ -487,7 +485,10 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
     try {
       const segredo = ambiente.pagamentoWebhookSecret;
       if (!segredo) return res.status(503).json({ erro: 'Webhook de pagamento não configurado.' });
-      if (!assinaturaValida(req, segredo)) return res.status(401).json({ erro: 'Assinatura inválida.' });
+      if (!assinaturaValida(req, segredo)) {
+        const limite = await redisService.rateLimit(`ratelimit:webhook-invalido:${ipDoCliente(req)}`, 60, 60);
+        return limite.allowed ? res.status(401).json({ erro: 'Assinatura inválida.' }) : res.status(429).json({ erro: 'Muitas chamadas ao webhook.' });
+      }
 
       const { event, agendamentoId, valorPago, tipo } = req.body ?? {};
       if (event !== 'payment.succeeded') return res.json({ received: true });

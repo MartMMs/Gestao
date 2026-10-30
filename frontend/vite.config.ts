@@ -12,6 +12,9 @@ const politicaDeSeguranca = (env: Record<string, string>): Plugin => {
   const api = [origem(env.VITE_API_URL), origem(env.VITE_SOCKET_URL)].filter(Boolean);
   const sockets = api.map((o) => o.replace(/^http/, 'ws'));
   // Sem URL configurada, a API fica na porta 3333 do mesmo host (ver config/api.ts): libera só essa porta
+  if (api.length === 0) {
+    console.warn('[CSP] VITE_API_URL não definida: a política libera a porta 3333 de qualquer host. Defina-a no build de produção.');
+  }
   const conexoes = api.length > 0
     ? [...api, ...sockets]
     : ['http://*:3333', 'https://*:3333', 'ws://*:3333', 'wss://*:3333'];

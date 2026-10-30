@@ -93,6 +93,27 @@ Veja `.env.example`. Principais:
 - `VITE_AUTOATENDIMENTO_HOST` opcional: host(s) do totem, separados por virgula (vazio = qualquer host que comece com `autoatendimento.`)
 - `VITE_AUTOATENDIMENTO_URL`: endereco do totem usado pelo botao da tela de login (sem ela, o totem abre dentro do portal, sem isolamento)
 
+## Migrations do banco
+
+Os comandos do Prisma rodam dentro de `backend/` (e onde fica `prisma/schema.prisma`):
+
+```bash
+cd backend && npx prisma migrate deploy
+```
+
+## Cabecalhos do servidor do frontend (producao)
+
+O build ja traz a CSP em `<meta>`, mas a protecao contra iframe (clickjacking) so funciona como cabecalho HTTP.
+No nginx que serve o `dist/`:
+
+```nginx
+add_header Content-Security-Policy "frame-ancestors 'none'" always;
+add_header X-Frame-Options DENY always;
+add_header X-Content-Type-Options nosniff always;
+```
+
+Defina `VITE_API_URL` no build de producao: sem ela, a CSP libera a porta 3333 de qualquer host.
+
 ## Totem em subdominio (producao)
 
 1. Aponte o DNS de `autoatendimento.<seu-dominio>` para o mesmo servidor do portal e sirva o mesmo build do frontend.
