@@ -39,3 +39,10 @@ describe('CLT na 12x36', () => {
     expect(analisarConformidadeCLT(dias).cargaSemanal.conforme).toBe(false);
   });
 });
+
+describe('CLT no rotativo', () => {
+  it('o padrão do rotativo fica dentro da CLT', () => {
+    const dias = gerarEscalaComRegras({ tipo: 'rotativo', dataInicio: '2026-11-01' }, 30);
+    expect(analisarConformidadeCLT(dias).statusGeral).toBe(true);
+  });
+});

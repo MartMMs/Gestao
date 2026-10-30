@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { getUsuario, usuarioEhSupervisor, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { HttpError, responderErro, type Notificar } from '../lib/http';
-import { clienteComMesmoNome, mensagemNomeDuplicado } from '../lib/clientes';
+import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, mensagemNomeDuplicado } from '../lib/clientes';
 import { clientesComAcessoSaude, prepararCliente } from '../lib/privacidade';
 import { LIMITE_OBSERVACAO, MENSAGEM_CPF_INVALIDO, MENSAGEM_TELEFONE_INVALIDO, apenasDigitos, cpfValido, normalizarTelefone, telefoneValido, valorMascarado } from '../../shared/validadores';
 
@@ -112,7 +112,7 @@ export function createClientesRouter(notificar: Notificar) {
         await tx.agendamento.updateMany({ where: { clienteId: id }, data: { observacoesSaude: null } });
         await tx.cliente.update({
           where: { id },
-          data: { nome: 'Cliente removido', telefone: null, cpf: null, observacao: null, removidoEm: new Date() },
+          data: { nome: NOME_CLIENTE_REMOVIDO, telefone: null, cpf: null, observacao: null, removidoEm: new Date() },
         });
         return { tipo: 'anonimizado' as const, historico };
       });

@@ -263,6 +263,11 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
                 </div>
               </div>
               <h5 className={`font-bold text-on-surface text-[11px] leading-tight mt-0.5 break-words ${height > 52 ? 'line-clamp-2' : 'truncate'}`} title={app.clientName}>{app.clientName}</h5>
+              {app.aguardandoCheckin && app.status === 'scheduled' && (
+                <span className="inline-block mt-0.5 rounded-full bg-amber-500/15 px-1.5 text-[9px] font-bold uppercase tracking-wide text-amber-700" title="Reserva do totem: abra o agendamento e confirme a chegada do cliente para liberar a ficha">
+                  Totem · confirmar chegada
+                </span>
+              )}
               {height > 40 && <p className="text-[9px] text-on-surface-variant leading-tight line-clamp-2 mt-0.5" title={app.services.join(', ')}>{app.services.join(', ')}</p>}
               {height > 60 && app.observation && <p className="text-[8px] text-on-surface-variant my-1 italic border-l-2 border-outline-variant/30 pl-1.5 line-clamp-1">{app.observation}</p>}
               {height > 50 && (

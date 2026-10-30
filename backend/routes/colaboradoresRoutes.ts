@@ -7,7 +7,7 @@ import { HttpError, responderErro } from '../lib/http';
 import type { Eventos } from '../lib/eventos';
 import { transacaoSerializavel, travarChave } from '../lib/transacao';
 import { prepararBloqueio } from '../lib/privacidade';
-import { INVALIDAR_SESSOES, validarSenha } from '../lib/usuarios';
+import { INVALIDAR_SESSOES, PAPEIS_ATENDIMENTO, validarSenha } from '../lib/usuarios';
 import { validarDisponibilidadeProfissional } from '../services/agendaService';
 import { partesNoFuso } from '../../shared/agenda';
 import { ESCOPOS } from '../../shared/escopos';
@@ -35,7 +35,7 @@ const garantirEmailLivre = async (email: string, ignorarId?: string) => {
 // Dois profissionais ativos com o mesmo nome confundem agenda, escala e comissões
 const garantirNomeLivre = async (nome: string, ignorarId?: string) => {
   const candidatos = await prisma.colaborador.findMany({
-    where: { ativo: true, nome: { contains: normalizarNome(nome).slice(0, 3), mode: 'insensitive' }, ...(ignorarId ? { id: { not: ignorarId } } : {}) },
+    where: { ativo: true, ...(ignorarId ? { id: { not: ignorarId } } : {}) },
     select: { nome: true },
   });
   const igual = candidatos.find((c) => normalizarNome(c.nome) === normalizarNome(nome));
@@ -229,7 +229,7 @@ export function createColaboradoresRouter(eventos: Eventos) {
       }
       if (alvo.id === getUsuario(req)?.id) return res.status(400).json({ erro: 'Você não pode excluir a própria conta.' });
       if (realocarPara === id) return res.status(400).json({ erro: 'Escolha outro profissional para receber os atendimentos.' });
-      if (realocarPara && !(await prisma.colaborador.findFirst({ where: { id: realocarPara, ativo: true } }))) {
+      if (realocarPara && !(await prisma.colaborador.findFirst({ where: { id: realocarPara, ativo: true, papel: { in: PAPEIS_ATENDIMENTO } } }))) {
         return res.status(400).json({ erro: 'Profissional de destino não encontrado.' });
       }
 

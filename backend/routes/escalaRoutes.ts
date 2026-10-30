@@ -79,17 +79,19 @@ const alertasCltDoMes = async (tx: Prisma.TransactionClient, colaboradorId: stri
   if (!TIPOS_CONTRATO.includes(colaborador.tipoEscala as TipoContrato)) return [];
   const mes = data.slice(0, 7);
   const [ano, numeroMes] = mes.split('-').map(Number);
-  // Inclui a última semana do mês anterior: descanso e 7º dia atravessam a virada do mês
-  const inicio = new Date(Date.UTC(ano, numeroMes - 1, 1 - 7));
-  const inicioIso = inicio.toISOString().slice(0, 10);
-  const totalDias = 7 + new Date(Date.UTC(ano, numeroMes, 0)).getUTCDate();
+  // Inclui a última semana do mês anterior: descanso e 7º dia atravessam a virada do mês. A malha é gerada desde o
+  // dia 1 do mês anterior e depois recortada, para as folgas de domingo daquele mês saírem iguais às da tela dele.
+  const inicioGeracao = new Date(Date.UTC(ano, numeroMes - 2, 1)).toISOString().slice(0, 10);
+  const inicioIso = new Date(Date.UTC(ano, numeroMes - 1, 1 - 7)).toISOString().slice(0, 10);
+  const fimIso = new Date(Date.UTC(ano, numeroMes, 0)).toISOString().slice(0, 10);
+  const totalDias = Math.round((Date.parse(fimIso) - Date.parse(inicioGeracao)) / 86_400_000) + 1;
   const base = gerarEscalaComRegras(
-    { tipo: colaborador.tipoEscala as TipoContrato, dataInicio: inicioIso },
+    { tipo: colaborador.tipoEscala as TipoContrato, dataInicio: inicioGeracao },
     totalDias,
     { folgasDomingoNoMes: colaborador.folgasDomingoNoMes ?? 2 },
-  );
+  ).filter((dia) => dia.data >= inicioIso);
   const ajustes = new Map(
-    (await tx.escalaOverride.findMany({ where: { colaboradorId, data: { gte: inicioIso, lte: `${mes}-31` } } })).map((o) => [o.data, o]),
+    (await tx.escalaOverride.findMany({ where: { colaboradorId, data: { gte: inicioIso, lte: fimIso } } })).map((o) => [o.data, o]),
   );
   const analise = analisarConformidadeCLT(
     base.map((dia) => aplicarAjusteEscala(dia, ajustes.get(dia.data))),

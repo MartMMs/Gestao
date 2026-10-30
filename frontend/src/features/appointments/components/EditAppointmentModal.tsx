@@ -123,7 +123,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
       isSubmitting={isSubmitting}
       submitDisabled={isSubmitting}
       submittingLabel="Salvando..."
-      alertBanner={conflictMessage ? (
+      alertBanner={<>{conflictMessage && (
         <div className="mb-4 rounded-2xl border border-error/30 bg-error/10 p-3 text-xs text-on-surface">
           <div className="flex items-start gap-2">
             <span className="material-symbols-outlined text-[16px] text-error mt-0.5">schedule</span>
@@ -134,24 +134,24 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
             </div>
           </div>
         </div>
-      ) : podeFazerCheckin ? (
+      )}{podeFazerCheckin && (
         <div className="mb-4 rounded-2xl border border-primary/30 bg-primary/10 p-3 text-xs text-on-surface flex gap-3 items-center justify-between">
           <span>Reserva feita no totem. A ficha de saúde só fica disponível ao profissional depois que a recepção confirmar a chegada do cliente.</span>
           <button type="button" onClick={confirmarChegada} disabled={checkin.isPending} className="shrink-0 rounded-full bg-primary px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-on-primary disabled:opacity-60">
             {checkin.isPending ? 'Confirmando...' : 'Confirmar chegada'}
           </button>
         </div>
-      ) : rascunhoDescartado ? (
+      )}{rascunhoDescartado && (
         <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-on-surface flex gap-2 items-center">
           <span className="material-symbols-outlined text-[16px] text-amber-600">history</span>
           <span>Suas alterações não salvas foram descartadas porque este agendamento foi modificado por outra pessoa. Confira os dados atuais.</span>
         </div>
-      ) : rascunhoRestaurado ? (
+      )}{rascunhoRestaurado && (
         <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-on-surface flex gap-2 items-center">
           <span className="material-symbols-outlined text-[16px] text-amber-600">history</span>
           <span>Rascunho restaurado: estas são as alterações que você não chegou a salvar. Cancele para descartá-las.</span>
         </div>
-      ) : undefined}
+      )}</>}
       infoBanner={isEditingCompleted ? (
         <div className="bg-secondary-container/50 text-on-secondary-container p-3 rounded-xl text-xs flex gap-2 items-center mb-4">
           <span className="material-symbols-outlined text-[16px]">info</span>

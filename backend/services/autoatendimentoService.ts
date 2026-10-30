@@ -258,13 +258,14 @@ export const criarAgendamentoTotem = async (
       throw new HttpError(429, `Este telefone já tem ${reservasAtivas} reserva(s) futura(s) pelo totem. Para marcar mais, fale com a recepção.`);
     }
 
-    const existente = cliente.cpf
-      ? (await tx.cliente.findMany({ where: { removidoEm: null, telefone: { in: variantesTelefone(cliente.telefone) } } }))
-        .find((c) => normalizarNome(c.nome) === normalizarNome(cliente.nome) && c.cpf && apenasDigitos(c.cpf) === cliente.cpf)
-      : undefined;
+    // Cliente que volta é reconhecida por nome + telefone; o CPF (opcional no totem) só desempata quando os dois
+    // lados o têm. Nada do cadastro existente é mostrado no totem, e a ficha só abre após o check-in na recepção.
+    const existente = (await tx.cliente.findMany({ where: { removidoEm: null, telefone: { in: variantesTelefone(cliente.telefone) } } }))
+      .find((c) => normalizarNome(c.nome) === normalizarNome(cliente.nome)
+        && (!c.cpf || !cliente.cpf || apenasDigitos(c.cpf) === cliente.cpf));
     if (!existente && await clienteComMesmoNome(tx, cliente.nome)) {
       // O totem não revela dados do outro cadastro: quem resolve é a recepção
-      throw new HttpError(409, 'Já existe um cadastro com esse nome e outros dados. Procure a recepção para concluir a reserva.');
+      throw new HttpError(409, 'Já existe um cadastro com esse nome e outro telefone. Use o telefone do seu cadastro ou procure a recepção para concluir a reserva.');
     }
     const dbCliente = existente
       ?? await tx.cliente.create({ data: { nome: cliente.nome, telefone: cliente.telefone, cpf: cliente.cpf, observacao } });

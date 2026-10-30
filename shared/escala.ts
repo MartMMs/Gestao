@@ -169,7 +169,9 @@ export function gerarEscalaRotativa(
     let tipo: 'trabalho' | 'folga' | 'fds' = 'trabalho';
     let dia: DiaEscala;
     
-    if (turnoIndex === turnos.length - 1) {
+    // Fim de semana de folga: 5 dias de 8h (40h) e DSR toda semana; antes rodava 7 dias seguidos (56h)
+    const fimDeSemana = data.getUTCDay() === 0 || data.getUTCDay() === 6;
+    if (turnoIndex === turnos.length - 1 || fimDeSemana) {
       // Última semana = folga
       tipo = 'folga';
       dia = {

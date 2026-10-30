@@ -4,7 +4,7 @@ import { prisma } from '../db';
 import { getUsuario, usuarioEhSupervisor, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { HttpError, ipDoCliente, responderErro, type Notificar } from '../lib/http';
 import { transacaoSerializavel, travarChave } from '../lib/transacao';
-import { clienteComMesmoNome, mensagemNomeDuplicado } from '../lib/clientes';
+import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, mensagemNomeDuplicado } from '../lib/clientes';
 import { ORIGEM_COLABORADOR, ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN, clientesComAcessoSaude, prepararAgendamento } from '../lib/privacidade';
 import { validarDisponibilidadeProfissional } from '../services/agendaService';
 import { buscarServicosPorNome } from '../services/servicoService';
@@ -151,8 +151,14 @@ const resolverCliente = async (
   if (!cliente) {
     validarContato();
     if (nome.length < 2) throw new HttpError(400, 'Informe o nome do cliente.');
+    if (normalizarNome(nome) === normalizarNome(NOME_CLIENTE_REMOVIDO)) throw new HttpError(400, 'Este nome é reservado para cadastros excluídos. Informe o nome do cliente.');
     const homonimo = await clienteComMesmoNome(tx, nome);
-    if (homonimo) throw new HttpError(409, mensagemNomeDuplicado(homonimo));
+    if (homonimo) {
+      // Quem não gerencia a agenda não vê a carteira toda: a mensagem não confirma nome nem código
+      throw new HttpError(409, gerenciaAgenda(req)
+        ? mensagemNomeDuplicado(homonimo)
+        : 'Já existe um cadastro com esse nome. Peça à recepção para vincular o cliente ao atendimento.');
+    }
     return tx.cliente.create({
       data: { nome: nome.slice(0, 120), telefone: telefone ?? null, cpf: cpf ?? null, observacao: observacao || null },
     });
@@ -170,7 +176,12 @@ const resolverCliente = async (
   if (nome.length >= 2 && normalizarNome(nome) !== normalizarNome(cliente.nome)) {
     if (!gerenciaAgenda(req)) throw new HttpError(403, 'Apenas a recepção ou supervisores podem alterar o nome do cliente.');
     const homonimo = await clienteComMesmoNome(tx, nome, cliente.id);
-    if (homonimo) throw new HttpError(409, mensagemNomeDuplicado(homonimo));
+    if (homonimo) {
+      // Quem não gerencia a agenda não vê a carteira toda: a mensagem não confirma nome nem código
+      throw new HttpError(409, gerenciaAgenda(req)
+        ? mensagemNomeDuplicado(homonimo)
+        : 'Já existe um cadastro com esse nome. Peça à recepção para vincular o cliente ao atendimento.');
+    }
     atualizacao.nome = nome.slice(0, 120);
   }
   if (!supervisor && ((telefone && telefone !== cliente.telefone) || (cpf && cpf !== cliente.cpf))) {
@@ -296,9 +307,11 @@ export function createAgendamentosRouter(notificar: Notificar) {
   router.put('/agendamentos/:id', verificarToken, async (req, res) => {
     try {
       const { id } = req.params;
-      const antigo = await prisma.agendamento.findUnique({ where: { id }, include: { servicos: true } });
+      const antigo = await prisma.agendamento.findUnique({ where: { id }, include: { servicos: true, cliente: { select: { removidoEm: true } } } });
       if (!antigo) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
       garantirPermissao(req, antigo.colaboradorId);
+      // Atendimento de cliente excluído é só histórico: não se edita
+      if (antigo.cliente?.removidoEm) return res.status(409).json({ erro: 'O cadastro deste cliente foi excluído; o atendimento fica apenas no histórico.' });
 
       const novoColaboradorId = req.body.colaboradorId || req.body.collaboratorId || req.body.assignedEmployeeId || antigo.colaboradorId;
       if (novoColaboradorId !== antigo.colaboradorId && !gerenciaAgenda(req)) {
