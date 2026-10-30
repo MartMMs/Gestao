@@ -90,7 +90,7 @@ async function loginApi(
   email: string,
   senha: string,
 ): Promise<LoginResult> {
-  const response = await request.post(`${apiBase()}/login`, { data: { email, senha } });
+  const response = await request.post(`${apiBase()}/login`, { data: { email, senha }, headers: { 'X-Auth-Mode': 'token' } });
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   return {
     ok: response.ok(),

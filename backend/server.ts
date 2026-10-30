@@ -30,14 +30,19 @@ const server = http.createServer(app);
 // inclusive subdomínios de localhost (ex.: autoatendimento.localhost para testar o totem sem DNS).
 const origensPermitidas = config.corsOrigins;
 const REDE_LOCAL = /^https?:\/\/((?:[a-z0-9-]+\.)?localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/;
+const origemPermitida = (origem: string | undefined) => (origensPermitidas.length > 0
+  ? Boolean(origem && origensPermitidas.includes(origem))
+  : !origem || REDE_LOCAL.test(origem));
 const corsOptions: CorsOptions = {
   origin: origensPermitidas.length > 0
     ? origensPermitidas
     : (origem, callback) => callback(null, !origem || REDE_LOCAL.test(origem)),
+  // Cookie de sessão nas chamadas do front (que fica em outra origem: porta ou subdomínio diferente)
+  credentials: true,
 };
 
 const io = new Server(server, { cors: corsOptions });
-configurarSocket(io);
+configurarSocket(io, origemPermitida);
 const eventos = criarEventos(io);
 
 // Atrás de proxy reverso (nginx, etc.), use TRUST_PROXY=1 para o rate limit enxergar o IP real

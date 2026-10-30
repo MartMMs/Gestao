@@ -280,7 +280,8 @@ export default function App() {
     // Só conecta o socket e busca dados caso o usuário tenha um token (esteja logado)
     if (!token) return;
 
-    const socket = io(getSocketUrl(), { auth: { token } });
+    // O cookie HttpOnly da sessão autentica o socket (o token não fica acessível ao JavaScript)
+    const socket = io(getSocketUrl(), { withCredentials: true });
     let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
     // Evita tempestade de refetch: agrupa os avisos e recarrega só as listas que o servidor disse que mudaram.
     const pendentes = new Set<string>();

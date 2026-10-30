@@ -1,4 +1,5 @@
 import { getApiUrl } from '../../../config/api';
+import { CABECALHO_CSRF } from '../../../api';
 import {
   Service,
   AutoatendimentoDisponibilidadeResponse,
@@ -40,12 +41,13 @@ export async function fetchAutoatendimentoConfig(): Promise<AutoatendimentoConfi
 export async function updateAutoatendimentoConfig(
   config: Partial<AutoatendimentoConfig>
 ): Promise<AutoatendimentoConfig> {
-  const token = localStorage.getItem('spa_token');
+  // Autenticado pelo cookie de sessão da equipe (o totem público nunca envia credenciais)
   const res = await fetchTotem(`${getBaseUrl()}/config`, {
     method: 'PUT',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...CABECALHO_CSRF,
     },
     body: JSON.stringify(config),
   });

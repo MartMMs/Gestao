@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 import { prisma } from './db';
 import { redisService } from './services/redisService';
+import { tokenDaRequisicao, violaCsrf } from './lib/cookies';
 
 import type { Papel } from './lib/usuarios';
 
@@ -86,8 +87,9 @@ export const validarSessao = async (token: string): Promise<UsuarioToken | null>
 };
 
 export const verificarToken = async (req: Request, res: Response, next: NextFunction) => {
-  const token = req.headers.authorization?.split(' ')[1];
+  const { token, viaCookie } = tokenDaRequisicao(req);
   if (!token) return res.status(401).json({ erro: 'Acesso negado. Token não fornecido.' });
+  if (violaCsrf(req, viaCookie)) return res.status(403).json({ erro: 'Requisição recusada (proteção CSRF).' });
 
   try {
     const usuario = await validarSessao(token);

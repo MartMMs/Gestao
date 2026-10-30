@@ -33,17 +33,27 @@ const logFrontendApiError = (context: {
   console.error('[FRONTEND][API_ERROR]', redactSensitiveData(context));
 };
 
+// Sessão do navegador: o token fica num cookie HttpOnly e o app só guarda este marcador de "logado"
+export const SESSAO_COOKIE = 'cookie';
+// Exigido pelo servidor em escritas autenticadas por cookie (proteção CSRF)
+export const CABECALHO_CSRF = { 'X-Requested-With': 'gestao' } as const;
+
+export const cabecalhosDeAutenticacao = (token: string | null): Record<string, string> => (
+  token && token !== SESSAO_COOKIE ? { Authorization: `Bearer ${token}` } : {}
+);
+
 const fetchApi = async (url: string, token: string | null, options: RequestInit = {}) => {
   const method = options.method || 'GET';
   const headers = {
     'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...CABECALHO_CSRF,
+    ...cabecalhosDeAutenticacao(token),
     ...options.headers,
   };
 
   let response: Response;
   try {
-    response = await fetch(`${getApiUrl()}${url}`, { ...options, headers });
+    response = await fetch(`${getApiUrl()}${url}`, { ...options, headers, credentials: 'include' });
   } catch (error) {
     logFrontendApiError({
       endpoint: url,

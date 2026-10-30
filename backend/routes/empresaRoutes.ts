@@ -9,6 +9,7 @@ import { redisService } from '../services/redisService';
 import { getEmpresaConfig } from '../services/configService';
 import { obterFeriadosNacionais } from '../../shared/feriadosBR';
 import { responderErro, ipDoCliente } from '../lib/http';
+import { apagarCookieSessao, gravarCookieSessao, tokenDaRequisicao } from '../lib/cookies';
 import type { Eventos } from '../lib/eventos';
 
 // Tentativas por janela: por e-mail+IP (quem erra a própria senha), por IP (força bruta de um ponto) e
@@ -93,7 +94,11 @@ export function createEmpresaRouter(eventos: Eventos) {
 
       const { senha: _hash, versaoToken: _versao, ...usuarioPublico } = usuario;
       const token = assinarToken({ id: usuario.id, papel: usuario.papel as Papel }, usuario.versaoToken, config.jwtExpiraEmSegundos);
-      res.json({ token, usuario: usuarioPublico });
+      gravarCookieSessao(res, token);
+      const expiraEm = Date.now() + config.jwtExpiraEmSegundos * 1000;
+      // O navegador usa só o cookie HttpOnly; o token no corpo é entregue apenas a quem pede (scripts e testes de API)
+      const querToken = req.headers['x-auth-mode'] === 'token';
+      res.json({ usuario: usuarioPublico, expiraEm, ...(querToken ? { token } : {}) });
     } catch (error) {
       responderErro(res, error, 'Erro interno no servidor');
     }
@@ -102,9 +107,10 @@ export function createEmpresaRouter(eventos: Eventos) {
   // Logout: o token deixa de valer imediatamente (mesmo que tenha sido copiado)
   router.post('/logout', async (req, res) => {
     try {
-      const token = req.headers.authorization?.split(' ')[1];
+      const { token } = tokenDaRequisicao(req);
       const jti = token ? await revogarToken(token) : null;
       if (jti) eventos.encerrarSessao(jti);
+      apagarCookieSessao(res);
       res.status(204).end();
     } catch (error) {
       responderErro(res, error, 'Erro ao encerrar a sessão.');

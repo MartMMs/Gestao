@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { Employee, Role } from './types';
 import { getApiUrl } from './config/api';
-import { SESSAO_EXPIRADA_EVENT } from './api';
+import { CABECALHO_CSRF, SESSAO_COOKIE, SESSAO_EXPIRADA_EVENT } from './api';
 import { existeRascunho, limparRascunhos } from './hooks/useFormDraft';
 
-const TOKEN_STORAGE_KEY = 'spa_token';
+// Formato antigo: o token ficava no localStorage. Agora a sessão vive num cookie HttpOnly (o JS não lê o token)
+const TOKEN_STORAGE_KEY_ANTIGO = 'spa_token';
 const USER_STORAGE_KEY = 'spa_user';
 const SESSION_STORAGE_KEY = 'spa_session_meta';
 
@@ -30,7 +31,7 @@ interface InitialAuthState {
 const RASCUNHO_DONO_KEY = 'rascunho-dono';
 
 const clearStoredAuth = ({ manterRascunhos = false } = {}) => {
-  localStorage.removeItem(TOKEN_STORAGE_KEY);
+  localStorage.removeItem(TOKEN_STORAGE_KEY_ANTIGO);
   localStorage.removeItem(USER_STORAGE_KEY);
   localStorage.removeItem(SESSION_STORAGE_KEY);
   if (!manterRascunhos) {
@@ -51,28 +52,6 @@ const registrarDonoRascunhos = (usuarioId: string) => {
   }
 };
 
-const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
-  try {
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-
-    const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padded = payloadBase64 + '='.repeat((4 - (payloadBase64.length % 4)) % 4);
-    const payload = JSON.parse(atob(padded));
-
-    if (!payload || typeof payload !== 'object') return null;
-    return payload as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-};
-
-const getTokenExpiresAt = (token: string | null): number | null => {
-  if (!token) return null;
-  const payload = decodeJwtPayload(token);
-  const exp = payload?.exp;
-  return typeof exp === 'number' ? exp * 1000 : null;
-};
 
 const parseStoredSessionMeta = (): SessionMeta | null => {
   try {
@@ -117,8 +96,8 @@ const isSessionExpired = (meta: SessionMeta, now: number): boolean => {
   return absoluteExpired || inactivityExpired || tokenExpired;
 };
 
-const buildSessionMeta = (token: string, now: number = Date.now()): SessionMeta => {
-  const tokenExpiresAt = getTokenExpiresAt(token);
+// tokenExpiresAt vem do login (expiraEm): o navegador não enxerga o token para ler a validade dele
+const buildSessionMeta = (tokenExpiresAt: number | null, now: number = Date.now()): SessionMeta => {
   const absoluteCap = now + SESSION_MAX_AGE_MS;
   const absoluteExpiresAt = typeof tokenExpiresAt === 'number'
     ? Math.min(absoluteCap, tokenExpiresAt)
@@ -135,8 +114,9 @@ const buildSessionMeta = (token: string, now: number = Date.now()): SessionMeta 
   };
 };
 
-const touchSession = (token: string, now: number = Date.now()): boolean => {
-  const currentMeta = parseStoredSessionMeta() ?? buildSessionMeta(token, now);
+const touchSession = (now: number = Date.now()): boolean => {
+  const currentMeta = parseStoredSessionMeta();
+  if (!currentMeta) return false;
 
   if (isSessionExpired(currentMeta, now)) {
     return false;
@@ -197,64 +177,24 @@ const parseStoredUser = (): Employee | null => {
   }
 };
 
-const decodeUserFromToken = (token: string | null): Employee | null => {
-  if (!token) return null;
-
-  try {
-    const payload = decodeJwtPayload(token);
-    if (!payload) return null;
-
-    const id = payload?.id ? String(payload.id) : '';
-    if (!id) return null;
-
-    const papel = typeof payload?.papel === 'string' ? payload.papel : '';
-    const role: Role = papel === 'admin' || papel === 'supervisor' || papel === 'receptionist' ? papel : 'collaborator';
-    const name = role === 'admin' ? 'Administrador' : role === 'supervisor' ? 'Supervisor' : role === 'receptionist' ? 'Recepção' : 'Colaborador';
-
-    return {
-      id,
-      name,
-      email: '',
-      role,
-      specialty: '',
-      avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(name)}`,
-      rating: 5,
-      completedServices: 0,
-      diasTrabalho: '1,2,3,4,5,6',
-      bloqueios: [],
-    };
-  } catch {
-    return null;
-  }
-};
 
 const hydrateInitialAuthState = (): InitialAuthState => {
-  const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-  if (!storedToken) {
-    return { currentUser: null, token: null };
-  }
-
-  const now = Date.now();
-  const tokenExpiresAt = getTokenExpiresAt(storedToken);
-  if (typeof tokenExpiresAt === 'number' && now >= tokenExpiresAt) {
+  // Sessões do formato antigo (token no localStorage) são descartadas: o próximo login usa o cookie
+  if (localStorage.getItem(TOKEN_STORAGE_KEY_ANTIGO)) {
     clearStoredAuth({ manterRascunhos: true });
     return { currentUser: null, token: null };
   }
 
-  const rebuiltMeta = buildSessionMeta(storedToken, now);
-  const storedMeta = parseStoredSessionMeta();
-  const activeMeta = storedMeta && storedMeta.tokenExpiresAt === rebuiltMeta.tokenExpiresAt
-    ? storedMeta
-    : rebuiltMeta;
-
-  if (isSessionExpired(activeMeta, now)) {
+  const now = Date.now();
+  const activeMeta = parseStoredSessionMeta();
+  if (!activeMeta || isSessionExpired(activeMeta, now)) {
     clearStoredAuth({ manterRascunhos: true });
     return { currentUser: null, token: null };
   }
 
   persistSessionMeta(activeMeta);
 
-  const currentUser = parseStoredUser() ?? decodeUserFromToken(storedToken);
+  const currentUser = parseStoredUser();
   if (!currentUser) {
     clearStoredAuth();
     return { currentUser: null, token: null };
@@ -271,7 +211,8 @@ const hydrateInitialAuthState = (): InitialAuthState => {
 
   return {
     currentUser,
-    token: storedToken,
+    // Marcador de "logado": o token de verdade está no cookie HttpOnly, enviado pelo navegador
+    token: SESSAO_COOKIE,
   };
 };
 
@@ -300,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const response = await fetch(`${getApiUrl()}/login`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, senha: pass })
       });
@@ -311,9 +253,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const data = await response.json();
       
-      setToken(data.token);
-      localStorage.setItem(TOKEN_STORAGE_KEY, data.token); // Mantém logado ao dar F5
-      persistSessionMeta(buildSessionMeta(data.token));
+      // O servidor gravou o cookie de sessão; aqui fica só a validade, para avisar a expiração na hora
+      setToken(SESSAO_COOKIE);
+      persistSessionMeta(buildSessionMeta(typeof data.expiraEm === 'number' ? data.expiraEm : null));
       
       const loggedUser: Employee = {
         id: String(data.usuario.id),
@@ -348,10 +290,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const handleLogout = useCallback(() => {
     // Revoga o token no servidor; falha de rede não impede sair
-    const tokenAtual = localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (tokenAtual) {
-      fetch(`${getApiUrl()}/logout`, { method: 'POST', headers: { Authorization: `Bearer ${tokenAtual}` }, keepalive: true }).catch(() => {});
-    }
+    // O servidor revoga o token e apaga o cookie
+    fetch(`${getApiUrl()}/logout`, { method: 'POST', credentials: 'include', headers: CABECALHO_CSRF, keepalive: true }).catch(() => {});
     setCurrentUser(null);
     setToken(null);
     setLoginError(null);
@@ -376,7 +316,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!token) return;
 
-    if (!touchSession(token, Date.now())) {
+    if (!touchSession(Date.now())) {
       encerrarSessaoExpirada();
       return;
     }
@@ -386,7 +326,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const meta = parseStoredSessionMeta();
 
       if (!meta) {
-        persistSessionMeta(buildSessionMeta(token, now));
+        encerrarSessaoExpirada();
         return;
       }
 
@@ -400,7 +340,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (now - lastActivityRef.current < ACTIVITY_THROTTLE_MS) return;
 
       lastActivityRef.current = now;
-      touchSession(token, now);
+      touchSession(now);
     };
 
     const handleVisibilityChange = () => {
@@ -411,12 +351,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === TOKEN_STORAGE_KEY && !event.newValue) {
+      // Logout em outra aba apaga o usuário guardado: esta aba sai junto
+      if (event.key === USER_STORAGE_KEY && !event.newValue) {
         handleLogout();
         return;
       }
 
-      if (event.key === TOKEN_STORAGE_KEY || event.key === SESSION_STORAGE_KEY) {
+      if (event.key === SESSION_STORAGE_KEY) {
         checkSessionExpiry();
       }
     };

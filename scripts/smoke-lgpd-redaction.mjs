@@ -40,6 +40,8 @@ const request = async (path, options = {}, token) => {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      // Scripts recebem o token no corpo do login (o navegador usa o cookie HttpOnly)
+      'X-Auth-Mode': 'token',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },

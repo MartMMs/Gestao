@@ -48,7 +48,7 @@ export async function escolherDiaFuturoNoTotem(page: Page) {
 
 // Apaga (pela API de supervisão) os clientes de teste com esse nome e os agendamentos deles
 export async function apagarClienteDeTeste(request: APIRequestContext, nome: string) {
-  const login = await request.post(`${apiBase()}/login`, { data: { email: CONTAS.supervisor, senha: E2E_PASSWORD } });
+  const login = await request.post(`${apiBase()}/login`, { data: { email: CONTAS.supervisor, senha: E2E_PASSWORD }, headers: { 'X-Auth-Mode': 'token' } });
   const { token } = await login.json();
   const headers = { Authorization: `Bearer ${token}` };
   const clientes = (await (await request.get(`${apiBase()}/clientes`, { headers })).json()) as Array<{ id: string; nome: string }>;

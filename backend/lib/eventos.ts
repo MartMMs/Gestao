@@ -1,5 +1,6 @@
 import { Server } from 'socket.io';
 import { dadosDoToken, validarSessao } from '../auth';
+import { COOKIE_SESSAO, lerCookie } from './cookies';
 import { ESCOPOS_PUBLICOS, type EscopoMudanca } from '../../shared/escopos';
 
 // Sala dos dispositivos logados (equipe). Totens e TVs conectam sem token e só recebem avisos públicos.
@@ -11,9 +12,14 @@ const salaSessao = (jti: string) => `sessao:${jti}`;
  * Autentica as conexões do socket. Token é opcional (o totem é público), mas se for enviado precisa ser válido.
  * Conexões autenticadas entram na sala da equipe.
  */
-export const configurarSocket = (io: Server) => {
+export const configurarSocket = (io: Server, origemPermitida: (origem: string | undefined) => boolean) => {
   io.use(async (socket, next) => {
-    const token = socket.handshake.auth?.token;
+    // Token explícito (scripts) ou o cookie HttpOnly da sessão do navegador. O CORS não vale para WebSocket:
+    // com cookie, a origem é conferida aqui (senão outro site abriria um socket com a sessão de quem o visita)
+    const tokenExplicito = socket.handshake.auth?.token;
+    const tokenCookie = tokenExplicito ? null : lerCookie(socket.handshake.headers.cookie, COOKIE_SESSAO);
+    if (tokenCookie && !origemPermitida(socket.handshake.headers.origin)) return next();
+    const token = tokenExplicito || tokenCookie;
     if (token === undefined || token === null || token === '') return next();
     try {
       const usuario = typeof token === 'string' ? await validarSessao(token) : null;

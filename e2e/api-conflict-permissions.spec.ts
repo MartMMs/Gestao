@@ -6,6 +6,8 @@ const apiBase = () => process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:3333/a
 async function login(request: import('@playwright/test').APIRequestContext, email: string, senha: string) {
   const res = await request.post(`${apiBase()}/login`, {
     data: { email, senha },
+    // Sem este cabeçalho o token vai só no cookie HttpOnly (fluxo do navegador)
+    headers: { 'X-Auth-Mode': 'token' },
   });
   const body = await res.json().catch(() => ({}));
   return { ok: res.ok(), status: res.status(), token: body.token as string | undefined, body };
