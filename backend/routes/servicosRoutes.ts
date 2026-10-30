@@ -47,6 +47,9 @@ const validarServico = (entrada: unknown) => {
   if (!Number.isInteger(tempoHigienizacaoMin) || tempoHigienizacaoMin < 0 || tempoHigienizacaoMin > 120) {
     return { erro: 'O tempo de higienização deve ser um número inteiro entre 0 e 120 minutos.' };
   }
+  const ordem = payload?.ordem === undefined || payload?.ordem === '' ? 0 : Number(payload.ordem);
+  if (!Number.isInteger(ordem) || ordem < 0 || ordem > 999) return { erro: 'A ordem no catálogo deve ser um número inteiro entre 0 e 999.' };
+  if (categoria.length > 60) return { erro: 'A categoria deve ter no máximo 60 caracteres.' };
   if (comissaoPercentual !== null && (!Number.isFinite(comissaoPercentual) || comissaoPercentual < 0 || comissaoPercentual > 100)) {
     return { erro: 'A comissão deve ser um valor entre 0 e 100%.' };
   }
@@ -62,7 +65,7 @@ const validarServico = (entrada: unknown) => {
 
   return {
     data: {
-      nome, preco, duracao, icone: icone || 'spa', descricao, categoria, tempoHigienizacaoMin, comissaoPercentual,
+      nome, preco, duracao, icone: icone || 'spa', descricao, categoria, tempoHigienizacaoMin, comissaoPercentual, ordem,
       modoElegibilidade, cargosPermitidos, habilidadesPermitidas, profissionaisPermitidos,
     },
   };
@@ -75,7 +78,7 @@ export function createServicosRouter(notificar: Notificar) {
 
   router.get('/servicos', verificarToken, async (_req, res) => {
     try {
-      res.json(await prisma.servico.findMany({ orderBy: { nome: 'asc' } }));
+      res.json(await prisma.servico.findMany({ orderBy: [{ ordem: 'asc' }, { nome: 'asc' }] }));
     } catch (error) {
       responderErro(res, error, 'Erro ao buscar serviços');
     }
@@ -117,12 +120,25 @@ export function createServicosRouter(notificar: Notificar) {
     }
   });
 
+  // Tira de linha ou volta a oferecer: o histórico continua apontando para o serviço
+  router.patch('/servicos/:id/ativo', verificarSupervisorToken, async (req, res) => {
+    try {
+      if (typeof req.body?.ativo !== 'boolean') return res.status(400).json({ erro: 'Informe ativo: true ou false.' });
+      const atualizado = await prisma.servico.updateMany({ where: { id: req.params.id }, data: { ativo: req.body.ativo } });
+      if (atualizado.count === 0) return res.status(404).json({ erro: 'Serviço não encontrado.' });
+      notificar();
+      res.json({ mensagem: req.body.ativo ? 'Serviço voltou ao catálogo.' : 'Serviço tirado de linha. Ele continua no histórico.' });
+    } catch (error) {
+      responderErro(res, error, 'Erro ao alterar o serviço');
+    }
+  });
+
   router.delete('/servicos/:id', verificarSupervisorToken, async (req, res) => {
     try {
       const { id } = req.params;
       const emUso = await prisma.agendamento.count({ where: { servicos: { some: { id } } } });
       if (emUso > 0) {
-        return res.status(409).json({ erro: `Não é possível excluir: o serviço está vinculado a ${emUso} agendamento(s).` });
+        return res.status(409).json({ erro: `Este serviço já foi usado em ${emUso} atendimento(s) e não pode ser apagado sem perder o histórico. Use "Tirar de linha" para escondê-lo do catálogo.` });
       }
       const removido = await prisma.servico.deleteMany({ where: { id } });
       if (removido.count === 0) return res.status(404).json({ erro: 'Serviço não encontrado.' });

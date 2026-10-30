@@ -17,6 +17,8 @@ export interface ConfiguracaoEmpresa {
   emailContato?: string;
   endereco?: string;
   corTemaPrimaria?: string;
+  // Desligado: a empresa não trabalha com comissão (campo some dos serviços)
+  usarComissao?: boolean;
   atualizadoEm?: string;
 }
 
@@ -66,6 +68,8 @@ export interface Appointment {
   status: 'scheduled' | 'completed' | 'cancelled' | 'no_show';
   // Reserva feita no totem que ainda aguarda o check-in da recepção (só então libera a ficha de saúde)
   aguardandoCheckin?: boolean;
+  // Valor gravado no dia do atendimento (o preço do serviço pode mudar depois)
+  valorTotal?: number;
   clientCode?: number;
   // Versão do registro no servidor (detecta edição simultânea)
   version?: string;
@@ -73,6 +77,9 @@ export interface Appointment {
 
 export interface Service {
   id: string;
+  // false = fora de linha: não aparece para novos agendamentos nem no totem
+  ativo?: boolean;
+  ordem?: number;
   nome: string;
   preco: number;
   duracao: number;

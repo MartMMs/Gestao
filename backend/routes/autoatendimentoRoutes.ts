@@ -2,7 +2,7 @@ import { Router, Request } from 'express';
 import crypto from 'node:crypto';
 import { prisma } from '../db';
 import { config as ambiente } from '../env';
-import { usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
+import { usuarioEhAdmin, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { redisService } from '../services/redisService';
 import { communicationService } from '../services/communicationService';
 import { comDisponibilidadePagamento, gatewayPagamento, getAutoatendimentoConfig, getEmpresaConfig, pagamentoOnlineDisponivel } from '../services/configService';
@@ -134,7 +134,13 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
   router.put('/config', verificarSupervisorToken, async (req, res) => {
     try {
       const dados = validarConfigAutoatendimento(req.body ?? {});
-      await getAutoatendimentoConfig();
+      const atual = await getAutoatendimentoConfig();
+      // Cobrança online (ligar/desligar e percentual do sinal) é decisão do administrador
+      const mexeNoPagamento = (dados.exigirPagamento !== undefined && dados.exigirPagamento !== atual.exigirPagamento)
+        || (dados.percentualSinal !== undefined && dados.percentualSinal !== atual.percentualSinal);
+      if (mexeNoPagamento && !usuarioEhAdmin(req)) {
+        return res.status(403).json({ erro: 'Apenas o administrador pode alterar a cobrança de pagamento do totem.' });
+      }
       const config = await prisma.configuracaoAutoatendimento.update({ where: { id: 'default' }, data: dados });
       eventos.emitirConfigAutoatendimento(comDisponibilidadePagamento(config));
       eventos.notificarMudanca();
@@ -146,7 +152,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
 
   router.get('/servicos', async (_req, res) => {
     try {
-      const servicos = await prisma.servico.findMany({ orderBy: { nome: 'asc' } });
+      const servicos = await prisma.servico.findMany({ where: { ativo: true }, orderBy: [{ ordem: 'asc' }, { nome: 'asc' }] });
       // Lista de profissionais exclusivos é interna; o catálogo público não precisa dela
       res.json(servicos.map(({ profissionaisPermitidos: _ids, ...s }) => s));
     } catch (error) {

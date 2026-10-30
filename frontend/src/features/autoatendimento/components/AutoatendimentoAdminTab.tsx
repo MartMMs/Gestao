@@ -7,8 +7,12 @@ import {
 } from '../services/autoatendimentoService';
 import { AutoatendimentoView } from './AutoatendimentoView';
 import { mensagemDeErro } from '../utils/erros';
+import { useAuth } from '../../../AuthContext';
 
 export function AutoatendimentoAdminTab() {
+  // Cobrança online é decisão do administrador; o supervisor vê, mas não altera (a API também recusa)
+  const { currentUser } = useAuth();
+  const podeAlterarPagamento = currentUser?.role === 'admin';
   const [config, setConfig] = useState<AutoatendimentoConfig>({
     id: 'default',
     ativo: true,
@@ -268,13 +272,17 @@ export function AutoatendimentoAdminTab() {
                 <p className="text-xs text-on-surface-variant">
                   Controla se o cliente precisa pagar sinal online ou se agenda sem custo.
                 </p>
+                {!podeAlterarPagamento && (
+                  <p className="text-[11px] font-bold text-on-surface-variant mt-1">Somente o administrador altera a cobrança.</p>
+                )}
               </div>
             </div>
 
             {/* Toggle Switch */}
-            <label className="relative inline-flex items-center cursor-pointer">
+            <label className={`relative inline-flex items-center ${podeAlterarPagamento ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
               <input
                 type="checkbox"
+                disabled={!podeAlterarPagamento}
                 checked={config.exigirPagamento}
                 onChange={(e) => setConfig({ ...config, exigirPagamento: e.target.checked })}
                 className="sr-only peer"
@@ -343,6 +351,7 @@ export function AutoatendimentoAdminTab() {
                 max="100"
                 step="5"
                 value={config.percentualSinal}
+                disabled={!podeAlterarPagamento}
                 onChange={(e) => setConfig({ ...config, percentualSinal: Number(e.target.value) })}
                 className="w-full accent-primary cursor-pointer"
               />

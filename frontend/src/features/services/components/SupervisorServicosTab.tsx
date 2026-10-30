@@ -2,6 +2,10 @@ import React, { useState } from 'react';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { motion } from 'motion/react';
 import { Service, ServiceEligibilityMode } from '../../../types';
+import { isApiError, useCompanyConfig, useToggleServiceActive } from '../../../api';
+import { useAuth } from '../../../AuthContext';
+
+const CATEGORIAS_SUGERIDAS = ['Massagens', 'Estética Facial', 'Estética Corporal', 'Banhos e Ofurô', 'Day Spa', 'Terapias Holísticas', 'Outros'];
 
 interface SupervisorServicosTabProps {
   services: Service[];
@@ -92,6 +96,21 @@ export function SupervisorServicosTab({
   setNewServiceDescription,
 }: SupervisorServicosTabProps) {
   const [servicoParaExcluir, setServicoParaExcluir] = useState<Service | null>(null);
+  const { token } = useAuth();
+  const { data: empresa } = useCompanyConfig(token);
+  const usarComissao = empresa?.usarComissao !== false;
+  const alternarAtivo = useToggleServiceActive(token);
+  const [avisoAtivo, setAvisoAtivo] = useState<string | null>(null);
+  const trocarAtivo = async (srv: Service) => {
+    try {
+      const resposta = await alternarAtivo.mutateAsync({ id: srv.id, ativo: srv.ativo === false }) as { mensagem?: string };
+      setAvisoAtivo(resposta?.mensagem ?? null);
+    } catch (error) {
+      setAvisoAtivo(isApiError(error) ? error.message : 'Não foi possível alterar o serviço.');
+    }
+  };
+  // Categorias livres: as sugeridas mais as que já existem nos serviços
+  const categorias = Array.from(new Set([...CATEGORIAS_SUGERIDAS, ...services.map((s) => s.categoria).filter((c): c is string => Boolean(c))]));
   const [excluindo, setExcluindo] = useState(false);
   const [erroExclusao, setErroExclusao] = useState<string | null>(null);
 
@@ -143,6 +162,12 @@ export function SupervisorServicosTab({
           </div>
         </div>
 
+        {avisoAtivo && (
+          <div role="status" className="mb-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-on-surface flex justify-between gap-2">
+            <span>{avisoAtivo}</span>
+            <button type="button" onClick={() => setAvisoAtivo(null)} aria-label="Fechar aviso" className="text-on-surface-variant">✕</button>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-4">
           {filteredServices.map((srv) => {
             const eligibilityModeLabel = srv.modoElegibilidade === 'cargo'
@@ -157,7 +182,7 @@ export function SupervisorServicosTab({
               <div 
                 key={srv.id} 
                 onClick={() => onEditServiceCard(srv)}
-                className="bg-surface-container-lowest p-5 rounded-3xl flex flex-col gap-4 transition-all hover:bg-surface-container-low hover:border-primary/30 group relative overflow-hidden border border-outline-variant/10 shadow-sm cursor-pointer"
+                className={`bg-surface-container-lowest p-5 rounded-3xl flex flex-col gap-4 transition-all ${srv.ativo === false ? 'opacity-60' : ''} hover:bg-surface-container-low hover:border-primary/30 group relative overflow-hidden border border-outline-variant/10 shadow-sm cursor-pointer`}
               >
                 <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-primary/80"></div>
                 <div className="flex items-center gap-4 pl-2 min-w-0">
@@ -167,6 +192,7 @@ export function SupervisorServicosTab({
                   <div className="min-w-0 flex-1">
                     <div className="flex justify-between items-start gap-2">
                       <h4 className="font-headline text-lg text-on-surface truncate">{srv.nome}</h4>
+                      {srv.ativo === false && <span className="shrink-0 text-[9px] uppercase tracking-widest font-bold text-on-surface-variant bg-surface-container px-2 py-1 rounded-full">Fora de linha</span>}
                       {srv.categoria && <span className="shrink-0 text-[9px] uppercase tracking-widest font-bold text-primary bg-primary/10 px-2 py-1 rounded-full">{srv.categoria}</span>}
                     </div>
                     <div className="flex flex-wrap gap-2 mt-2 text-sm text-on-surface-variant">
@@ -178,7 +204,7 @@ export function SupervisorServicosTab({
                       <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-1 rounded-lg text-xs">
                         <span className="material-symbols-outlined text-[14px]">payments</span> R$ {Number(srv.preco).toFixed(2)}
                       </span>
-                      {Boolean(srv.comissaoPercentual) && Number(srv.comissaoPercentual) > 0 && (
+                      {usarComissao && Boolean(srv.comissaoPercentual) && Number(srv.comissaoPercentual) > 0 && (
                         <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-1 rounded-lg text-xs text-secondary">
                           <span className="material-symbols-outlined text-[14px]">percent</span> {srv.comissaoPercentual}%
                         </span>
@@ -200,6 +226,7 @@ export function SupervisorServicosTab({
                 </div>
                 <div className="flex gap-2 justify-end border-t border-outline-variant/10 pt-3 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                   <button onClick={(e) => { e.stopPropagation(); onEditServiceCard(srv); }} className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full transition-colors" title="Editar"><span className="material-symbols-outlined text-[22px]">edit</span></button>
+                  <button onClick={(e) => { e.stopPropagation(); trocarAtivo(srv); }} disabled={alternarAtivo.isPending} className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full transition-colors" title={srv.ativo === false ? 'Voltar ao catálogo' : 'Tirar de linha (some do totem e de novos agendamentos)'}><span className="material-symbols-outlined text-[22px]">{srv.ativo === false ? 'visibility' : 'visibility_off'}</span></button>
                   <button onClick={(e) => { e.stopPropagation(); if (confirmarExclusao) setServicoParaExcluir(srv); else onDeleteServiceCard(srv.id); }} className="p-2 text-on-surface-variant hover:bg-error-container/20 hover:text-error rounded-full transition-colors" title="Excluir"><span className="material-symbols-outlined text-[22px]">delete</span></button>
                 </div>
               </div>
@@ -240,25 +267,19 @@ export function SupervisorServicosTab({
             </div>
             <div className="md:col-span-2">
               <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Categoria do Serviço</label>
-              <select value={newServiceCategoria} onChange={e => setNewServiceCategoria(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all text-on-surface">
-                <option value="">Sem categoria</option>
-                <option value="Massagens">Massagens</option>
-                <option value="Estética Facial">Estética Facial</option>
-                <option value="Estética Corporal">Estética Corporal</option>
-                <option value="Banhos e Ofurô">Banhos e Ofurô</option>
-                <option value="Day Spa">Day Spa</option>
-                <option value="Terapias Holísticas">Terapias Holísticas</option>
-                <option value="Outros">Outros</option>
-              </select>
+              <input list="categorias-servico" maxLength={60} value={newServiceCategoria} onChange={e => setNewServiceCategoria(e.target.value)} placeholder="Escolha ou digite uma nova" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all text-on-surface" />
+              <datalist id="categorias-servico">
+                {categorias.map((c) => <option key={c} value={c} />)}
+              </datalist>
             </div>
             <div>
               <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Preço (R$)</label>
               <input required type="number" step="0.01" min="0" value={newServicePrice} onChange={e => setNewServicePrice(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all" placeholder="Ex: 150.00" />
             </div>
-            <div>
+            {usarComissao && <div>
               <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Comissão (%) - Opcional</label>
               <input type="number" step="0.1" min="0" max="100" value={newServiceComissao} onChange={e => setNewServiceComissao(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all" placeholder="Deixe em branco se não houver" />
-            </div>
+            </div>}
             <div>
               <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Duração (Min)</label>
               <input required type="number" min="5" step="5" value={newServiceDuration} onChange={e => setNewServiceDuration(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all" placeholder="Ex: 60" />
@@ -377,7 +398,7 @@ export function SupervisorServicosTab({
       <ConfirmDialog
         open={Boolean(servicoParaExcluir)}
         title={`Excluir o serviço ${servicoParaExcluir?.nome ?? ''}?`}
-        description={erroExclusao ?? 'O serviço sairá do catálogo. Serviços com agendamentos vinculados não podem ser excluídos.'}
+        description={erroExclusao ?? 'O serviço será apagado. Se ele já foi usado em atendimentos, use "Tirar de linha" (ícone de olho) para escondê-lo sem perder o histórico.'}
         confirmLabel="Sim, excluir"
         confirmingLabel="Excluindo..."
         cancelLabel="Manter serviço"

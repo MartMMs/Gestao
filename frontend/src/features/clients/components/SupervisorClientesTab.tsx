@@ -11,6 +11,7 @@ import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import { useAuth } from '../../../AuthContext';
 import { useClientAppointments } from '../../../api';
 import { LIMITE_HISTORICO_CLIENTE } from '@shared/agendaJanela';
+import { valorDoAtendimento } from '../../../utils/valorAtendimento';
 
 interface SupervisorClientesTabProps {
   clients: Client[];
@@ -95,12 +96,7 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
     });
   };
 
-  const getAppointmentValue = (appointment: Appointment) => {
-    return appointment.services.reduce((total, serviceName) => {
-      const service = services.find((srv) => srv.nome === serviceName);
-      return total + (Number(service?.preco) || 0);
-    }, 0);
-  };
+  const getAppointmentValue = (appointment: Appointment) => valorDoAtendimento(appointment, services);
 
   const totalClients = filteredClients.length;
   const totalPages = Math.max(1, Math.ceil(totalClients / ITEMS_PER_PAGE));

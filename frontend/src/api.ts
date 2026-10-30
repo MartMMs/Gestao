@@ -95,6 +95,7 @@ interface BackendAppointment {
   servicos?: Array<string | { nome?: string }>;
   cliente?: { id?: string | number; codigo?: number; nome?: string; telefone?: string; cpf?: string };
   reservaOrigem?: string | null;
+  valorTotal?: number | null;
   clientName?: string;
   contact?: string;
   cpf?: string;
@@ -131,6 +132,8 @@ interface BackendEmployee {
 
 interface BackendService {
   id: string | number;
+  ativo?: boolean;
+  ordem?: number;
   nome?: string;
   preco?: number | string;
   duracao?: number | string | null;
@@ -203,6 +206,7 @@ const normalizeAppointment = (appointment: BackendAppointment): Appointment => {
     assignedEmployeeId: appointment.assignedEmployeeId || appointment.colaboradorId || '',
     status: appointment.status || 'scheduled',
     aguardandoCheckin: appointment.reservaOrigem === 'autoatendimento',
+    valorTotal: typeof appointment.valorTotal === 'number' ? appointment.valorTotal : undefined,
     clientCode: typeof appointment.cliente?.codigo === 'number' ? appointment.cliente.codigo : undefined,
     version: appointment.atualizadoEm,
   };
@@ -247,6 +251,8 @@ const normalizeService = (service: BackendService): Service => {
 
   return {
     id: String(service.id),
+    ativo: service.ativo !== false,
+    ordem: Number.isInteger(service.ordem) ? Number(service.ordem) : 0,
     nome: typeof service.nome === 'string' ? service.nome : 'Serviço',
     preco: Number.isFinite(parsedPrice) && parsedPrice >= 0 ? parsedPrice : 0,
     duracao: Number.isFinite(parsedDuration) && parsedDuration > 0 ? parsedDuration : 60,
@@ -339,6 +345,15 @@ const normalizeScaleOverridePayload = (value: unknown): ScaleOverridePayload | n
     turno,
     descricao,
   };
+};
+
+export const useToggleServiceActive = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ativo }: { id: string; ativo: boolean }) =>
+      fetchApi(`/servicos/${id}/ativo`, token, { method: 'PATCH', body: JSON.stringify({ ativo }) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services'] })
+  });
 };
 
 // =======================

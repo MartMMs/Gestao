@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { prisma } from '../db';
@@ -25,7 +26,11 @@ const CAMPOS_EMPRESA = [
 ] as const;
 
 const validarConfigEmpresa = (body: Record<string, unknown>) => {
-  const dados: Record<string, string | null> = {};
+  const dados: Record<string, string | boolean | null> = {};
+  if (body.usarComissao !== undefined) {
+    if (typeof body.usarComissao !== 'boolean') return { erro: 'Campo usarComissao inválido.' };
+    dados.usarComissao = body.usarComissao;
+  }
   for (const campo of CAMPOS_EMPRESA) {
     const valor = body[campo];
     if (valor === undefined) continue;
@@ -36,10 +41,10 @@ const validarConfigEmpresa = (body: Record<string, unknown>) => {
   }
   if (dados.nomeEmpresa === null) return { erro: 'O nome da empresa é obrigatório.' };
   if (dados.segmento === null) delete dados.segmento;
-  if (dados.corTemaPrimaria && !/^#[0-9a-fA-F]{6}$/.test(dados.corTemaPrimaria)) {
+  if (typeof dados.corTemaPrimaria === 'string' && !/^#[0-9a-fA-F]{6}$/.test(dados.corTemaPrimaria)) {
     return { erro: 'A cor do tema deve estar no formato #RRGGBB.' };
   }
-  if (dados.emailContato && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dados.emailContato)) {
+  if (typeof dados.emailContato === 'string' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dados.emailContato)) {
     return { erro: 'Informe um e-mail de contato válido.' };
   }
   return { dados };
@@ -140,7 +145,7 @@ export function createEmpresaRouter(eventos: Eventos) {
       await getEmpresaConfig();
       const configAtualizada = await prisma.configuracaoEmpresa.update({
         where: { id: 'default' },
-        data: validacao.dados as Record<string, string>,
+        data: validacao.dados as Prisma.ConfiguracaoEmpresaUpdateInput,
       });
 
       eventos.emitirConfigEmpresa(configAtualizada);

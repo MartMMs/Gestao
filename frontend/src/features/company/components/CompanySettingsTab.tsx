@@ -122,6 +122,7 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
   });
 
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (config) {
@@ -145,12 +146,13 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSaveError(null);
     try {
       await updateMutation.mutateAsync(form);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3500);
     } catch (err) {
-      console.error('Erro ao salvar dados da empresa:', err);
+      setSaveError(err instanceof Error ? err.message : 'Não foi possível salvar as configurações.');
     }
   };
 
@@ -402,6 +404,24 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
               </div>
             </div>
           </div>
+
+          {/* Comissão é opcional: desligada, o campo some do cadastro de serviços */}
+          <label className="flex items-start gap-3 bg-surface-container-low border border-outline-variant/30 rounded-2xl p-4 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.usarComissao !== false}
+              onChange={(e) => setForm({ ...form, usarComissao: e.target.checked })}
+              className="mt-1 accent-primary"
+            />
+            <span>
+              <span className="block text-sm font-bold text-on-surface">Trabalhar com comissão dos profissionais</span>
+              <span className="block text-xs text-on-surface-variant">Desligado, o percentual de comissão deixa de aparecer nos serviços.</span>
+            </span>
+          </label>
+
+          {saveError && (
+            <p role="alert" className="rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{saveError}</p>
+          )}
 
           {/* Cartão de Pré-visualização do Header */}
           <div className="bg-surface-container-low border border-outline-variant/30 rounded-2xl p-5 space-y-3">

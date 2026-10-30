@@ -292,6 +292,8 @@ export function createAgendamentosRouter(notificar: Notificar) {
             colaborador: { connect: { id: colaboradorId } },
             cliente: { connect: { id: cliente.id } },
             servicos: { connect: servicos.map((s) => ({ id: s.id })) },
+            // Preço do dia gravado: mudar o preço do serviço depois não reescreve o faturamento
+            valorTotal: servicos.reduce((soma, s) => soma + s.preco, 0),
           },
           include: INCLUDE_COMPLETO,
         });
@@ -344,7 +346,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
         }
 
         const nomesServicos = req.body.serviceNames ?? req.body.services ?? antigo.servicos.map((s) => s.nome);
-        const servicos = await buscarServicosPorNome(tx, nomesServicos);
+        const servicos = await buscarServicosPorNome(tx, nomesServicos, { jaVinculados: antigo.servicos.map((s) => s.id) });
         const duracao = duracaoTotal(servicos);
         if (mudouHorario && inicio.getTime() !== antigo.data.getTime()) {
           const erroHorario = validarHorarioAgendamento(data, horario, duracao, { agora: new Date() });
@@ -362,6 +364,9 @@ export function createAgendamentosRouter(notificar: Notificar) {
           colaboradorId: novoColaboradorId,
           servicos: { set: servicos.map((s) => ({ id: s.id })) },
         };
+        // Valor só é recalculado quando a lista de serviços muda (com o preço de hoje dos serviços novos)
+        const mesmosServicos = servicos.length === antigo.servicos.length && servicos.every((s) => antigo.servicos.some((a) => a.id === s.id));
+        if (!mesmosServicos || antigo.valorTotal === null) dados.valorTotal = servicos.reduce((soma, s) => soma + s.preco, 0);
         // Observações ficam sob a regra da ficha de saúde: quem recebe o campo mascarado não pode sobrescrevê-lo
         if (req.body.observation !== undefined && (usuarioEhSupervisor(req) || acessoSaude.has(antigo.clienteId))) {
           dados.observacoesSaude = lerObservacao(req.body.observation);

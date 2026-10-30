@@ -467,7 +467,7 @@ export function AdminView({
           onEditEmployee={onEditEmployee}
           onSaveScaleOverride={() => {}}
           setToastMessage={showToast}
-          setErrorMessage={() => {}}
+          setErrorMessage={(msg) => { if (msg) showToast(msg); }}
           onViewEmployee={() => {}}
         />
       )}

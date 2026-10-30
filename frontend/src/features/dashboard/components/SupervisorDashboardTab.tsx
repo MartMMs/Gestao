@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Service } from '../../../types';
 import { getBrazilCurrentTimeString, getLocalTodayString } from '../../../features/appointments/utils/appointmentCore';
+import { valorDoAtendimento } from '../../../utils/valorAtendimento';
 
 interface SupervisorDashboardTabProps {
   appointments: Appointment[];
@@ -47,14 +48,14 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
 
     const noShows = appointments.filter(a => a.status === 'scheduled' && a.date < todayStrLocal && new Date(`${a.date}T12:00:00`).getMonth() === currentMonth).length;
 
-    const revenue = appointments.filter(a => a.status === 'completed' && (revenueFilter === 'all' || new Date(`${a.date}T12:00:00`).getMonth() === currentMonth)).reduce((acc, app) => acc + app.services.reduce((s, sName) => s + (Number(services.find(srv => srv.nome === sName)?.preco) || 0), 0), 0);
+    const revenue = appointments.filter(a => a.status === 'completed' && (revenueFilter === 'all' || new Date(`${a.date}T12:00:00`).getMonth() === currentMonth)).reduce((acc, app) => acc + valorDoAtendimento(app, services), 0);
 
     const chartDays = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      const dayRevenue = appointments.filter(a => a.date === dateStr && a.status === 'completed').reduce((acc, app) => acc + app.services.reduce((s, sName) => s + (Number(services.find(srv => srv.nome === sName)?.preco) || 0), 0), 0);
+      const dayRevenue = appointments.filter(a => a.date === dateStr && a.status === 'completed').reduce((acc, app) => acc + valorDoAtendimento(app, services), 0);
       chartDays.push({ dateStr, label: d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', ''), revenue: dayRevenue });
     }
     const maxRev = Math.max(...chartDays.map(d => d.revenue), 1);

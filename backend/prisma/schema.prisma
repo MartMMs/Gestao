@@ -57,6 +57,10 @@ model Servico {
   cargosPermitidos     String[]      @default([])
   habilidadesPermitidas String[]     @default([])
   profissionaisPermitidos String[]   @default([])
+  // Inativo: some do totem e de novos agendamentos, mas continua no histórico
+  ativo                Boolean       @default(true)
+  // Posição no catálogo (menor primeiro)
+  ordem                Int           @default(0)
   agendamentos         Agendamento[]
 }
 
@@ -167,6 +171,8 @@ model ConfiguracaoEmpresa {
   emailContato         String?  @default("contato@empresa.com")
   endereco             String?  @default("Av. Principal, 1000 - Centro")
   corTemaPrimaria      String?  @default("#0f766e")
+  // Desligado: comissão some dos serviços e dos relatórios
+  usarComissao         Boolean  @default(true)
   atualizadoEm         DateTime @updatedAt
 }
 // Trilha de auditoria: cada abertura do histórico (com dados de saúde) de um cliente.

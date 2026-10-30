@@ -111,7 +111,8 @@ export function AppointmentScheduleFields({
         )}
 
         <div className="grid grid-cols-1 gap-2 max-h-32 overflow-y-auto pr-2 custom-scrollbar">
-          {services.map((service) => {
+          {/* Serviço fora de linha só aparece se o atendimento já o tem */}
+          {services.filter((service) => service.ativo !== false || selectedServices.includes(service.nome)).map((service) => {
             const isSelected = selectedServices.includes(service.nome);
             return (
               <button
