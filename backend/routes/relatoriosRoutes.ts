@@ -3,6 +3,7 @@ import { prisma } from '../db';
 import { verificarSupervisorToken } from '../auth';
 import { HttpError, responderErro } from '../lib/http';
 import { getEmpresaConfig } from '../services/configService';
+import { comissaoDosServicos } from '../lib/valores';
 import { dataValida, instanteNoFuso, partesNoFuso } from '../../shared/agenda';
 
 const MAX_DIAS_RELATORIO = 366;
@@ -55,7 +56,7 @@ export function createRelatoriosRouter() {
         select: {
           status: true, valorTotal: true, valorComissao: true, colaboradorId: true,
           colaborador: { select: { nome: true, ativo: true } },
-          servicos: { select: { id: true, nome: true, preco: true } },
+          servicos: { select: { id: true, nome: true, preco: true, comissaoPercentual: true } },
         },
       });
 
@@ -72,7 +73,7 @@ export function createRelatoriosRouter() {
           const valor = ag.valorTotal ?? ag.servicos.reduce((soma, s) => soma + s.preco, 0);
           linha.concluidos += 1;
           linha.faturamento += valor;
-          linha.comissao += usarComissao ? ag.valorComissao ?? 0 : 0;
+          linha.comissao += usarComissao ? ag.valorComissao ?? comissaoDosServicos(ag.servicos) : 0;
           // Valor de cada serviço proporcional ao total gravado (o preço pode ter mudado depois)
           const somaPrecos = ag.servicos.reduce((soma, s) => soma + s.preco, 0);
           for (const s of ag.servicos) {

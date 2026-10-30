@@ -368,9 +368,18 @@ export function createAgendamentosRouter(notificar: Notificar) {
         };
         // Valor só é recalculado quando a lista de serviços muda (com o preço de hoje dos serviços novos)
         const mesmosServicos = servicos.length === antigo.servicos.length && servicos.every((s) => antigo.servicos.some((a) => a.id === s.id));
-        if (!mesmosServicos || antigo.valorTotal === null) {
+        if (antigo.valorTotal === null || antigo.valorComissao === null) {
           dados.valorTotal = valorDosServicos(servicos);
           dados.valorComissao = comissaoDosServicos(servicos);
+        } else if (!mesmosServicos) {
+          // Serviços que ficaram mantêm o valor do dia em que foram marcados (fatia proporcional ao preço da época);
+          // só os adicionados entram com o preço e a comissão de hoje
+          const ficaram = antigo.servicos.filter((a) => servicos.some((s) => s.id === a.id));
+          const novos = servicos.filter((s) => !antigo.servicos.some((a) => a.id === s.id));
+          const precoAntigo = valorDosServicos(antigo.servicos);
+          const fracao = precoAntigo > 0 ? valorDosServicos(ficaram) / precoAntigo : 0;
+          dados.valorTotal = Math.round((antigo.valorTotal * fracao + valorDosServicos(novos)) * 100) / 100;
+          dados.valorComissao = Math.round((antigo.valorComissao * fracao + comissaoDosServicos(novos)) * 100) / 100;
         }
         // Observações ficam sob a regra da ficha de saúde: quem recebe o campo mascarado não pode sobrescrevê-lo
         if (req.body.observation !== undefined && (usuarioEhSupervisor(req) || acessoSaude.has(antigo.clienteId))) {

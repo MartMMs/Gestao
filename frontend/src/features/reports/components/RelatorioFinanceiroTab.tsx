@@ -25,7 +25,8 @@ const periodoRapido = (tipo: 'mes' | 'mesPassado' | '30dias') => {
 // CSV com ponto e vírgula e vírgula decimal: abre direto no Excel em português
 const baixarCsv = (relatorio: RelatorioFinanceiro) => {
   const numero = (v: number) => v.toFixed(2).replace('.', ',');
-  const texto = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  // Campo começando com = + - @ vira fórmula no Excel: o apóstrofo força texto
+  const texto = (v: string) => `"${(/^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replace(/"/g, '""')}"`;
   const cabecalho = ['Profissional', 'Atendimentos concluídos', 'Faturamento', ...(relatorio.usarComissao ? ['Comissão'] : []), 'Ticket médio', 'Faltas', 'Cancelados'];
   const linhas = relatorio.profissionais.map((p) => [
     texto(p.nome + (p.ativo ? '' : ' (desligado)')), String(p.concluidos), numero(p.faturamento),
@@ -81,7 +82,7 @@ export function RelatorioFinanceiroTab() {
             Até
             <input type="date" value={periodo.ate} min={periodo.de} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, ate: e.target.value }))} className="block mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-2 text-sm normal-case" />
           </label>
-          <button type="button" disabled={!data} onClick={() => data && baixarCsv(data)} className="px-4 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wide bg-primary text-on-primary disabled:opacity-50 flex items-center gap-1">
+          <button type="button" disabled={!data || data.profissionais.length === 0} onClick={() => data && baixarCsv(data)} className="px-4 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wide bg-primary text-on-primary disabled:opacity-50 flex items-center gap-1">
             <span className="material-symbols-outlined text-[16px]">download</span> Exportar planilha
           </button>
         </div>

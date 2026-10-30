@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../../AuthContext';
 import { motion } from 'motion/react';
 import { ConfiguracaoEmpresa } from '../../../types';
 import { useCompanyConfig, useUpdateCompanyConfig } from '../../../api';
@@ -103,6 +104,7 @@ interface CompanySettingsTabProps {
 }
 
 export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
+  const { currentUser } = useAuth();
   const { data: config, isLoading } = useCompanyConfig(token);
   const updateMutation = useUpdateCompanyConfig(token);
 
@@ -410,12 +412,16 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
             <input
               type="checkbox"
               checked={form.usarComissao !== false}
+              disabled={currentUser?.role !== 'admin'}
               onChange={(e) => setForm({ ...form, usarComissao: e.target.checked })}
               className="mt-1 accent-primary"
             />
             <span>
               <span className="block text-sm font-bold text-on-surface">Trabalhar com comissão dos profissionais</span>
-              <span className="block text-xs text-on-surface-variant">Desligado, o percentual de comissão deixa de aparecer nos serviços.</span>
+              <span className="block text-xs text-on-surface-variant">
+                Ligado, o percentual aparece nos serviços e a comissão entra no relatório financeiro. Desligado, some dos dois;
+                os percentuais já cadastrados não são apagados.{currentUser?.role !== 'admin' ? ' Somente o administrador altera.' : ''}
+              </span>
             </span>
           </label>
 

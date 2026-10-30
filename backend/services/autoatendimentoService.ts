@@ -28,7 +28,7 @@ import {
 
 import { PAPEIS_ATENDIMENTO } from '../lib/usuarios';
 import { clienteComMesmoNome } from '../lib/clientes';
-import { comissaoDosServicos } from '../lib/valores';
+import { comissaoDosServicos, valorDosServicos } from '../lib/valores';
 import { ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN } from '../lib/privacidade';
 
 export { PAPEIS_ATENDIMENTO };
@@ -55,7 +55,7 @@ export const resumoServicos = (servicos: ServicoResumo[]) => {
     duracaoTotalProdutos,
     bufferHigienizacao: duracaoTotalSlot - duracaoTotalProdutos,
     duracaoTotalSlot,
-    valorTotal: servicos.reduce((soma, s) => soma + s.preco, 0),
+    valorTotal: valorDosServicos(servicos),
   };
 };
 
@@ -234,7 +234,8 @@ export const criarAgendamentoTotem = async (
   cliente: ClienteTotem,
   opcoes: { sessionToken: string; cobranca: Cobranca; metodoPagamento: string },
 ) => {
-  const servicos = await prisma.servico.findMany({ where: { id: { in: sessao.servicoIds } } });
+  const servicos = await prisma.servico.findMany({ where: { id: { in: sessao.servicoIds }, ativo: true } });
+  if (servicos.length !== sessao.servicoIds.length) throw new HttpError(409, 'Um dos serviços escolhidos saiu do catálogo. Escolha os serviços novamente.');
   const inicio = instanteNoFuso(sessao.data, sessao.horario);
   const observacao = cliente.observacoesSaude ? `[Anamnese Autoatendimento ${sessao.data}]: ${cliente.observacoesSaude}` : null;
 

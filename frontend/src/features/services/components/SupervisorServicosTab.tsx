@@ -136,7 +136,7 @@ export function SupervisorServicosTab({
             <h3 className="text-2xl font-headline text-primary">Menu de Serviços</h3>
             <p className="text-sm text-on-surface-variant">Gerencie tratamentos, durações, comissões e valores.</p>
             <p className="mt-1 text-xs text-on-surface-variant/80">
-              {filteredServices.length} de {services.length} serviços visíveis
+              {filteredServices.length} de {services.length} serviços · {services.filter((s) => s.ativo === false).length} fora de linha
             </p>
           </div>
           <div className="relative w-full md:max-w-xs">
@@ -169,7 +169,8 @@ export function SupervisorServicosTab({
           </div>
         )}
         <div className="grid grid-cols-1 gap-4">
-          {filteredServices.map((srv) => {
+          {/* Fora de linha vão para o fim da lista */}
+          {[...filteredServices].sort((a, b) => Number(a.ativo === false) - Number(b.ativo === false)).map((srv) => {
             const eligibilityModeLabel = srv.modoElegibilidade === 'cargo'
               ? 'Por cargo'
               : srv.modoElegibilidade === 'habilidade'

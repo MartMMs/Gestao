@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { prisma } from '../db';
 import { config } from '../env';
-import { assinarToken, revogarToken, verificarSupervisorToken, verificarToken, type Papel } from '../auth';
+import { assinarToken, revogarToken, usuarioEhAdmin, verificarSupervisorToken, verificarToken, type Papel } from '../auth';
 import { redisService } from '../services/redisService';
 import { getEmpresaConfig } from '../services/configService';
 import { obterFeriadosNacionais } from '../../shared/feriadosBR';
@@ -141,6 +141,11 @@ export function createEmpresaRouter(eventos: Eventos) {
     try {
       const validacao = validarConfigEmpresa(req.body || {});
       if (!validacao.dados) return res.status(400).json({ erro: validacao.erro });
+      // Ligar/desligar comissão muda o líquido dos relatórios: decisão do administrador
+      const atual = await getEmpresaConfig();
+      if (validacao.dados.usarComissao !== undefined && validacao.dados.usarComissao !== atual.usarComissao && !usuarioEhAdmin(req)) {
+        return res.status(403).json({ erro: 'Apenas o administrador pode ligar ou desligar a comissão.' });
+      }
 
       await getEmpresaConfig();
       const configAtualizada = await prisma.configuracaoEmpresa.update({

@@ -304,8 +304,8 @@ export function AdminView({
       )}
 
       {/* Top Banner do Painel Administrador */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-surface-container-low border border-outline-variant/25 p-6 rounded-3xl shadow-sm">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-4 bg-surface-container-low border border-outline-variant/25 p-6 rounded-3xl shadow-sm">
+        <div className="flex items-center gap-4 min-w-0">
           <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-sm shrink-0">
             <span className="material-symbols-outlined text-3xl">{companyConfig?.icone || 'admin_panel_settings'}</span>
           </div>
@@ -328,7 +328,7 @@ export function AdminView({
         </div>
 
         {/* Abas Administrativas */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full custom-scrollbar">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           <button
             type="button"
             onClick={() => setActiveTab('empresa')}

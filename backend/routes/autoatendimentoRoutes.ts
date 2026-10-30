@@ -583,7 +583,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         horario,
         terapeutaNome: ag.colaborador.nome,
         salaNome: ag.sala?.nome || 'Cabine Principal',
-        valorTotal: ag.valorTotal || ag.servicos.reduce((soma, s) => soma + s.preco, 0),
+        valorTotal: ag.valorTotal ?? ag.servicos.reduce((soma, s) => soma + s.preco, 0),
         valorSinal: ag.valorSinal || 0,
         statusPagamento: ag.statusPagamento || 'pendente',
       }));
