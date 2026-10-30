@@ -6,7 +6,8 @@ import { getBrazilCurrentMinuteOfDay, getBrazilCurrentTimeString, getLocalTodayS
 import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { BlockModal, BookingModal, EditAppointmentModal, DeleteAppointmentModal } from '../../../features/appointments/components';
 import { useScheduleModals } from '../../../features/appointments/hooks';
-import { EmployeeScheduleColumn, ScheduleGridProvider, type ScheduleGridActions, type ScheduleGridContext } from '../../../components/ScheduleGridColumn';
+import { EmployeeScheduleColumn, LegendaEstadosAgenda, ScheduleGridProvider, type ScheduleGridActions, type ScheduleGridContext } from '../../../components/ScheduleGridColumn';
+import { AgendaVisaoPeriodo, type VisaoAgenda } from './AgendaVisaoPeriodo';
 import { ScheduleRulerGrid } from '../../../components/ScheduleRulerGrid';
 import { isTeamMember } from '../../../utils/formatters';
 import { JANELA_AGENDA_DIAS } from '@shared/agendaJanela';
@@ -59,6 +60,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   const [professionalFilter, setProfessionalFilter] = useState('all');
   const OFF_DAY_FILTER = '__off_today__';
   const [resourceFilter, setResourceFilter] = useState<ResourceFilter>('all');
+  const [visao, setVisao] = useState<VisaoAgenda>('dia');
   const {
     state: {
       showNewBookingModal,
@@ -337,6 +339,13 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     return map;
   }, [appointments, receptionDate, scheduleSearchTerm, resourceFilter]);
 
+  // Semana e mês: mesmos filtros da grade (busca, profissional e recurso), sem limitar ao dia
+  const periodAppointments = useMemo(() => appointments.filter((appointment) => (
+    (professionalFilter === 'all' || professionalFilter === OFF_DAY_FILTER || appointment.assignedEmployeeId === professionalFilter)
+    && matchesAppointmentSearch(appointment, scheduleSearchTerm)
+    && matchesResourceFilter(appointment, resourceFilter)
+  )), [appointments, professionalFilter, scheduleSearchTerm, resourceFilter]);
+
   const scheduleGridContext = useMemo<ScheduleGridContext>(() => ({
     receptionDate,
     services,
@@ -351,16 +360,33 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     employeeUnavailableReasons,
   }), [receptionDate, services, isTodayView, currentMinute, todayStr, employeeUnavailableReasons]);
 
+  // Arrastar o card: muda profissional e horário juntos. Vai só o necessário (o servidor mantém cliente e serviços)
+  // e a versão do registro, para não sobrescrever uma edição feita por outra pessoa nesse meio tempo
+  const appointmentsRef = useRef(appointments);
+  appointmentsRef.current = appointments;
+  const handleMoveAppointment = useCallback(async (appointmentId: string, newEmployeeId: string, time: string) => {
+    const app = appointmentsRef.current.find((a) => a.id === appointmentId);
+    if (!app) throw new Error('Agendamento não encontrado. Atualize a agenda e tente novamente.');
+    const resultado = await onEditAppointment(appointmentId, {
+      date: app.date,
+      time,
+      assignedEmployeeId: newEmployeeId,
+      version: app.version,
+    });
+    if (resultado === false) throw new Error('Não foi possível mover o agendamento.');
+  }, [onEditAppointment]);
+
   const scheduleGridActions = useMemo<ScheduleGridActions>(() => ({
     onGridClick: handleGridClick,
     onDeleteBloqueio,
     onReassignAppointment,
+    onMoveAppointment: handleMoveAppointment,
     onCompleteAppointment,
     onEditAppointmentClick: openEditAppointmentModal,
     onDeleteAppointmentClick: openDeleteAppointmentModal,
     setToastMessage,
     setErrorMessage,
-  }), [handleGridClick, onDeleteBloqueio, onReassignAppointment, onCompleteAppointment, openEditAppointmentModal, openDeleteAppointmentModal, setToastMessage, setErrorMessage]);
+  }), [handleGridClick, onDeleteBloqueio, onReassignAppointment, handleMoveAppointment, onCompleteAppointment, openEditAppointmentModal, openDeleteAppointmentModal, setToastMessage, setErrorMessage]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col lg:flex-row gap-6">
@@ -438,7 +464,9 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 gap-4 shrink-0">
           <div>
             <h3 className="text-2xl font-headline text-primary">Agenda da Recepção</h3>
-            <p className="text-sm text-on-surface-variant">Controle do dia {receptionDate.split('-').reverse().join('/')}</p>
+            <p className="text-sm text-on-surface-variant">
+              {visao === 'dia' ? `Controle do dia ${receptionDate.split('-').reverse().join('/')}` : visao === 'semana' ? 'Visão da semana' : 'Visão do mês'}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2 w-full lg:w-auto">
             <button onClick={() => openBookingModal('', '')} className="px-5 py-3 bg-primary text-on-primary rounded-xl text-xs font-bold uppercase tracking-widest shadow-md hover:bg-primary-dim transition-all flex items-center gap-2">
@@ -481,11 +509,43 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
           </select>
         </div>
 
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4 shrink-0">
+          <div className="inline-flex rounded-xl bg-surface-container-low p-1 border border-outline-variant/20" role="group" aria-label="Visão da agenda">
+            {([['dia', 'Dia'], ['semana', 'Semana'], ['mes', 'Mês']] as const).map(([valor, rotulo]) => (
+              <button
+                key={valor}
+                type="button"
+                aria-pressed={visao === valor}
+                onClick={() => setVisao(valor)}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all ${visao === valor ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:text-primary'}`}
+              >
+                {rotulo}
+              </button>
+            ))}
+          </div>
+          <LegendaEstadosAgenda />
+        </div>
+        {visao === 'dia' && (
+          <p className="text-[11px] text-on-surface-variant mb-2 shrink-0">Arraste um atendimento para outro horário ou profissional para remarcar.</p>
+        )}
+
         {isOutsideLoadedWindow && (
           <p className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">
             A agenda carrega só o último ano. Para atendimentos mais antigos, abra o histórico do cliente.
           </p>
         )}
+        {visao !== 'dia' ? (
+          <AgendaVisaoPeriodo
+            visao={visao}
+            dataBase={receptionDate}
+            todayStr={todayStr}
+            appointments={periodAppointments}
+            employees={employees}
+            onMudarDataBase={setReceptionDate}
+            onAbrirDia={(dia) => { setReceptionDate(dia); setVisao('dia'); }}
+            onAbrirAtendimento={openEditAppointmentModal}
+          />
+        ) : (
         <div className="flex-1 bg-surface-container-lowest border border-outline-variant/20 rounded-2xl overflow-hidden flex flex-col relative shadow-sm h-full group">
           <button onClick={() => scrollHorizontally('left')} className="absolute left-2 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-surface shadow-md rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-surface-container border border-outline-variant/20 text-on-surface"><span className="material-symbols-outlined">chevron_left</span></button>
           <button onClick={() => scrollHorizontally('right')} className="absolute right-2 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-surface shadow-md rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-surface-container border border-outline-variant/20 text-on-surface"><span className="material-symbols-outlined">chevron_right</span></button>
@@ -547,6 +607,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* Injeção dos Modais Refatorados */}

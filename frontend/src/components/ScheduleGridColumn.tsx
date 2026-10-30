@@ -20,6 +20,8 @@ export interface ScheduleGridActions {
   onGridClick: (e: React.MouseEvent<HTMLDivElement>, empId: string) => void;
   onDeleteBloqueio?: (id: string) => Promise<boolean | void> | void;
   onReassignAppointment?: (appointmentId: string, newEmployeeId: string) => Promise<boolean | void> | void;
+  // Arrastar e soltar: novo profissional e novo horário (HH:MM) de uma vez; o servidor valida conflitos
+  onMoveAppointment?: (appointmentId: string, newEmployeeId: string, time: string) => Promise<boolean | void> | void;
   onCompleteAppointment: (id: string) => void;
   onEditAppointmentClick: (appointment: Appointment) => void;
   onDeleteAppointmentClick: (id: string) => void;
@@ -42,6 +44,45 @@ interface ScheduleGridProviderProps {
 
 // Profissional de origem do card arrastado
 const DRAG_SOURCE_EMPLOYEE = 'application/x-source-employee';
+const DRAG_SOURCE_TIME = 'application/x-source-time';
+// Distância entre o topo do card e o ponto onde ele foi agarrado: o card cai onde o usuário vê, não pelo cursor
+const DRAG_GRAB_OFFSET = 'application/x-grab-offset';
+const PASSO_ARRASTE_MIN = 15;
+
+type EstadoVisual = 'agendado' | 'totem' | 'aguardando' | 'em_atendimento' | 'finalizado' | 'falta';
+
+// Cor de cada estado do atendimento na grade (a legenda usa a mesma tabela)
+const ESTILO_ESTADO: Record<EstadoVisual, { card: string; side: string; text: string }> = {
+  agendado: { card: 'bg-amber-500/15 border-amber-400/45 shadow-sm', side: 'bg-amber-400', text: 'text-amber-700 dark:text-amber-300' },
+  totem: { card: 'bg-violet-500/15 border-violet-400/45 shadow-sm', side: 'bg-violet-500', text: 'text-violet-700 dark:text-violet-300' },
+  aguardando: { card: 'bg-sky-500/15 border-sky-400/45 shadow-sm', side: 'bg-sky-400', text: 'text-sky-700 dark:text-sky-300' },
+  em_atendimento: { card: 'bg-emerald-500/15 border-emerald-400/45 shadow-sm', side: 'bg-emerald-400', text: 'text-emerald-700 dark:text-emerald-300' },
+  finalizado: { card: 'bg-surface-container-low/80 border-outline-variant/30 opacity-75', side: 'bg-outline-variant/60', text: 'text-outline-variant line-through' },
+  falta: { card: 'bg-error-container/25 border-error/45 shadow-sm', side: 'bg-error', text: 'text-error' },
+};
+
+const ROTULO_ESTADO: Record<EstadoVisual, string> = {
+  agendado: 'Agendado',
+  totem: 'Totem · aguardando chegada',
+  aguardando: 'Chega em 15 min',
+  em_atendimento: 'Em atendimento',
+  finalizado: 'Concluído',
+  falta: 'Falta / atrasado',
+};
+
+// Legenda das cores da grade
+export function LegendaEstadosAgenda() {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1" aria-label="Legenda de cores da agenda">
+      {(Object.keys(ESTILO_ESTADO) as EstadoVisual[]).map((estado) => (
+        <span key={estado} className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">
+          <span className={`w-2.5 h-2.5 rounded-full ${ESTILO_ESTADO[estado].side}`} />
+          {ROTULO_ESTADO[estado]}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 const ScheduleGridContextInternal = createContext<{ schedule: ScheduleGridContext; actions: ScheduleGridActions } | null>(null);
 
@@ -77,6 +118,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
     onGridClick,
     onDeleteBloqueio,
     onReassignAppointment,
+    onMoveAppointment,
     onCompleteAppointment,
     onEditAppointmentClick,
     onDeleteAppointmentClick,
@@ -98,12 +140,26 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
     }
 
     const appointmentId = event.dataTransfer.getData('text/plain');
-    if (!appointmentId || !onReassignAppointment) return;
+    if (!appointmentId) return;
+    const mesmoProfissional = event.dataTransfer.getData(DRAG_SOURCE_EMPLOYEE) === emp.id;
 
-    // Soltar na própria coluna não muda nada (vale mesmo com busca/filtro ativos); o servidor valida o resto
-    if (event.dataTransfer.getData(DRAG_SOURCE_EMPLOYEE) === emp.id) return;
+    // Horário pela posição do topo do card, arredondado para 15 minutos e dentro do expediente da grade
+    const grade = event.currentTarget.getBoundingClientRect();
+    const offset = Number(event.dataTransfer.getData(DRAG_GRAB_OFFSET)) || 0;
+    const minutosBrutos = startHour * 60 + ((event.clientY - grade.top - offset) / hourHeight) * 60;
+    const minutos = Math.min(Math.max(Math.round(minutosBrutos / PASSO_ARRASTE_MIN) * PASSO_ARRASTE_MIN, startHour * 60), endHour * 60);
+    const horario = `${String(Math.floor(minutos / 60)).padStart(2, '0')}:${String(minutos % 60).padStart(2, '0')}`;
+    const mesmoHorario = event.dataTransfer.getData(DRAG_SOURCE_TIME) === horario;
+    if (mesmoProfissional && mesmoHorario) return;
 
     try {
+      if (onMoveAppointment) {
+        await onMoveAppointment(appointmentId, emp.id, horario);
+        setToastMessage(mesmoProfissional ? `Agendamento remarcado para ${horario}.` : `Agendamento movido para ${emp.name} às ${horario}.`);
+        return;
+      }
+      // Sem remarcação disponível (ex.: tela do colaborador), soltar só troca o profissional
+      if (!onReassignAppointment || mesmoProfissional) return;
       await onReassignAppointment(appointmentId, emp.id);
       setToastMessage(`Agendamento movido para ${emp.name}.`);
     } catch (error) {
@@ -180,7 +236,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
         const nowTime = currentMinute.getTime();
         const fifteenMinutes = 15 * 60 * 1000;
 
-        let visualStatus: 'agendado' | 'aguardando' | 'em_atendimento' | 'finalizado' | 'falta' = 'agendado';
+        let visualStatus: EstadoVisual = 'agendado';
         if (isCompleted) {
           visualStatus = 'finalizado';
         } else if (isNoShow) {
@@ -196,34 +252,12 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
             visualStatus = 'falta';
           }
         }
+        // Reserva do totem ainda sem check-in: cor própria até a recepção confirmar a chegada
+        if (app.aguardandoCheckin && app.status === 'scheduled' && (visualStatus === 'agendado' || visualStatus === 'aguardando')) {
+          visualStatus = 'totem';
+        }
 
-        const statusClassMap = {
-          agendado: {
-            card: 'bg-amber-500/15 border-amber-400/45 shadow-sm',
-            side: 'bg-amber-400',
-            text: 'text-amber-300',
-          },
-          aguardando: {
-            card: 'bg-sky-500/15 border-sky-400/45 shadow-sm',
-            side: 'bg-sky-400',
-            text: 'text-sky-300',
-          },
-          em_atendimento: {
-            card: 'bg-emerald-500/15 border-emerald-400/45 shadow-sm',
-            side: 'bg-emerald-400',
-            text: 'text-emerald-300',
-          },
-          finalizado: {
-            card: 'bg-surface-container-low/80 border-outline-variant/30 opacity-75',
-            side: 'bg-outline-variant/60',
-            text: 'text-outline-variant line-through',
-          },
-          falta: {
-            card: 'bg-error-container/25 border-error/45 shadow-sm',
-            side: 'bg-error',
-            text: 'text-error',
-          },
-        } as const;
+        const statusClassMap = ESTILO_ESTADO;
 
         const visualStyle = statusClassMap[visualStatus];
         const cardStatusClass = visualStyle.card;
@@ -232,11 +266,14 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
         return (
           <div
             key={app.id}
-            draggable
+            // Só atendimento marcado se move; concluído e falta são registro do que aconteceu
+            draggable={app.status === 'scheduled'}
             onDragStart={(event) => {
               event.dataTransfer.effectAllowed = 'move';
               event.dataTransfer.setData('text/plain', app.id);
               event.dataTransfer.setData(DRAG_SOURCE_EMPLOYEE, app.assignedEmployeeId);
+              event.dataTransfer.setData(DRAG_SOURCE_TIME, app.time);
+              event.dataTransfer.setData(DRAG_GRAB_OFFSET, String(event.clientY - event.currentTarget.getBoundingClientRect().top));
             }}
             className={`absolute left-1 right-1 rounded-xl border ${cardStatusClass} flex flex-col group overflow-hidden transition-all hover:z-20`}
             style={{ top, height }}
@@ -272,7 +309,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
               {height > 60 && app.observation && <p className="text-[8px] text-on-surface-variant my-1 italic border-l-2 border-outline-variant/30 pl-1.5 line-clamp-1">{app.observation}</p>}
               {height > 50 && (
                 <div className="mt-auto flex gap-1 pt-1 border-t border-outline-variant/10">
-                  <span className="bg-surface-container text-on-surface-variant text-[8px] px-1 rounded font-bold uppercase tracking-wide">{visualStatus.replace('_', ' ')}</span>
+                  <span className="bg-surface-container text-on-surface-variant text-[8px] px-1 rounded font-bold uppercase tracking-wide">{ROTULO_ESTADO[visualStatus]}</span>
                   {delayMinutes > 0 && <span className="bg-error/10 text-error text-[8px] px-1 rounded font-bold">{delayMinutes}m atraso</span>}
                   {isNoShow && <span className="bg-error/10 text-error text-[8px] px-1 rounded font-bold">Falta</span>}
                 </div>
