@@ -2,9 +2,14 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { getUsuario, usuarioEhSupervisor, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
-import { responderErro, type Notificar } from '../lib/http';
+import { HttpError, responderErro, type Notificar } from '../lib/http';
+import { clienteComMesmoNome, mensagemNomeDuplicado } from '../lib/clientes';
 import { clientesComAcessoSaude, prepararCliente } from '../lib/privacidade';
 import { LIMITE_OBSERVACAO, MENSAGEM_CPF_INVALIDO, MENSAGEM_TELEFONE_INVALIDO, apenasDigitos, cpfValido, normalizarTelefone, telefoneValido, valorMascarado } from '../../shared/validadores';
+
+const formatarDataHora = (data: Date) => new Intl.DateTimeFormat('pt-BR', {
+  timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+}).format(data);
 
 export function createClientesRouter(notificar: Notificar) {
   const router = Router();
@@ -69,7 +74,13 @@ export function createClientesRouter(notificar: Notificar) {
         dados.cpf = apenasDigitos(cpf) || null;
       }
 
-      const atualizado = await prisma.cliente.update({ where: { id }, data: dados });
+      const atualizado = await prisma.$transaction(async (tx) => {
+        if (dados.nome) {
+          const homonimo = await clienteComMesmoNome(tx, dados.nome as string, id);
+          if (homonimo) throw new HttpError(409, mensagemNomeDuplicado(homonimo));
+        }
+        return tx.cliente.update({ where: { id }, data: dados });
+      });
       notificar();
       res.json(prepararCliente(atualizado, req, true));
     } catch (error) {
@@ -87,8 +98,11 @@ export function createClientesRouter(notificar: Notificar) {
         if (!cliente || cliente.removidoEm) return { tipo: 'nao_encontrado' as const };
 
         // Inclui o que está em andamento ou ainda não foi fechado: anonimizar no meio do atendimento apagaria a ficha
-        const marcados = await tx.agendamento.count({ where: { clienteId: id, status: 'scheduled' } });
-        if (marcados > 0) return { tipo: 'com_marcados' as const, marcados };
+        const marcados = await tx.agendamento.findMany({
+          where: { clienteId: id, status: 'scheduled' }, orderBy: { data: 'asc' }, take: 5,
+          select: { data: true, colaborador: { select: { nome: true } } },
+        });
+        if (marcados.length > 0) return { tipo: 'com_marcados' as const, marcados };
 
         const historico = await tx.agendamento.count({ where: { clienteId: id } });
         if (historico === 0) {
@@ -106,7 +120,9 @@ export function createClientesRouter(notificar: Notificar) {
       if (resultado.tipo === 'nao_encontrado') return res.status(404).json({ erro: 'Cliente não encontrado. Ele pode já ter sido excluído.' });
       if (resultado.tipo === 'com_marcados') {
         return res.status(409).json({
-          erro: `Este cliente tem ${resultado.marcados} atendimento(s) marcado(s). Cancele ou conclua antes de excluir o cadastro.`,
+          erro: `Este cliente ainda tem atendimento(s) em aberto: ${resultado.marcados
+            .map((a) => `${formatarDataHora(a.data)} com ${a.colaborador?.nome ?? 'profissional removido'}`).join('; ')}. `
+            + 'Conclua, cancele ou marque falta na agenda antes de excluir o cadastro.',
         });
       }
       notificar();

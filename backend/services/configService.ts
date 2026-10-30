@@ -46,6 +46,8 @@ export const getAutoatendimentoConfig = () => prisma.configuracaoAutoatendimento
 // Integração com o banco: quem conectar a API implementa a criação da cobrança aqui (gera o Pix "copia e cola" e,
 // se houver, o checkout de cartão) e a registra em gatewayPagamento. Sem integração, nada é cobrado online.
 export type CobrancaGateway = { pixCopiaECola?: string; pixQrCode?: string; cartaoOnlineDisponivel?: boolean };
+// Na sessão do totem: a cobrança do sinal fica nos campos acima e a do valor integral aqui
+export type CobrancasDaReserva = CobrancaGateway & { pixCopiaEColaIntegral?: string; pixQrCodeIntegral?: string };
 export type GatewayPagamento = {
   criarCobranca: (reserva: { sessionToken: string; valor: number; descricao: string }) => Promise<CobrancaGateway>;
 };

@@ -305,20 +305,33 @@ export function calcularMaiorCargaSemanal(diasEscala: DiaEscala[]): { horas: num
 /**
  * Análise completa de conformidade CLT baseada na malha de escala.
  */
-export function analisarConformidadeCLT(diasEscala: DiaEscala[]): AnaliseConformidadeCLT {
+/**
+ * Média semanal do período. Usada na 12x36 (CLT art. 59-A): o regime alterna semanas de 36h e 48h e é legal desde que a
+ * média fique dentro do limite; cobrar 44h semana a semana marcaria toda 12x36 como irregular.
+ */
+export function calcularCargaSemanalMedia(diasEscala: DiaEscala[]): number {
+  if (diasEscala.length === 0) return 0;
+  const total = diasEscala.reduce((soma, dia) => soma + horasDoDia(dia), 0);
+  return Math.round((total / (diasEscala.length / 7)) * 10) / 10;
+}
+
+export function analisarConformidadeCLT(diasEscala: DiaEscala[], opcoes: { tipoEscala?: string } = {}): AnaliseConformidadeCLT {
   const interjornada = analisarInterjornadaEscala(diasEscala);
   const setimoDia = analisarSetimoDiaConsecutivo(diasEscala);
 
+  const regime12x36 = opcoes.tipoEscala === '12x36';
   const maiorSemana = calcularMaiorCargaSemanal(diasEscala);
-  const cargaTotal = maiorSemana.horas;
-  const semanaAnalisada = maiorSemana.inicioSemana
-    ? `semana de ${maiorSemana.inicioSemana.split('-').reverse().join('/')}`
-    : 'N/A';
+  const cargaTotal = regime12x36 ? calcularCargaSemanalMedia(diasEscala) : maiorSemana.horas;
+  const semanaAnalisada = regime12x36
+    ? 'média do período (12x36)'
+    : maiorSemana.inicioSemana ? `semana de ${maiorSemana.inicioSemana.split('-').reverse().join('/')}` : 'N/A';
 
   const cargaConforme = cargaTotal <= CARGA_SEMANAL_MAXIMA_HORAS;
   const alertasCarga = cargaConforme
     ? []
-    : [`⚠️ Carga de ${cargaTotal}h na ${semanaAnalisada} excede o limite legal de ${CARGA_SEMANAL_MAXIMA_HORAS}h semanais.`];
+    : [regime12x36
+      ? `⚠️ Média de ${cargaTotal}h semanais na 12x36 excede o limite legal de ${CARGA_SEMANAL_MAXIMA_HORAS}h.`
+      : `⚠️ Carga de ${cargaTotal}h na ${semanaAnalisada} excede o limite legal de ${CARGA_SEMANAL_MAXIMA_HORAS}h semanais.`];
 
   const resumo = [
     ...interjornada.alertas,

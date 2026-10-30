@@ -346,6 +346,11 @@ export function AutoatendimentoAdminTab() {
                 onChange={(e) => setConfig({ ...config, percentualSinal: Number(e.target.value) })}
                 className="w-full accent-primary cursor-pointer"
               />
+              {!config.pagamentoOnlineDisponivel && (
+                <p className="text-[11px] text-on-surface-variant">
+                  Fica guardado para quando o gateway for conectado. Até lá o totem não cobra sinal e o pagamento é feito na recepção.
+                </p>
+              )}
               <div className="flex justify-between text-[10px] text-outline-variant">
                 <span>10% (Sinal Leve)</span>
                 <span>40% (Recomendado)</span>

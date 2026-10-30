@@ -55,8 +55,6 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [selectedEmpForSchedule, setSelectedEmpForSchedule] = useState<Employee | null>(null);
-  const [scheduleHourStart, setScheduleHourStart] = useState('09:00');
-  const [scheduleHourEnd, setScheduleHourEnd] = useState('18:00');
   const [scheduleDays, setScheduleDays] = useState<string[]>(['1','2','3','4','5','6']);
   const [bulkSelectedEmployeeIds, setBulkSelectedEmployeeIds] = useState<string[]>([]);
   const [bulkShiftSelection, setBulkShiftSelection] = useState<'' | 'manha' | 'tarde' | 'folga'>('');
@@ -215,8 +213,6 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const openScheduleModal = (emp: Employee) => {
     setSelectedEmpForSchedule(emp);
     setScheduleDays((emp.diasTrabalho || '1,2,3,4,5,6').split(','));
-    setScheduleHourStart('09:00');
-    setScheduleHourEnd('18:00');
     setBulkSelectedEmployeeIds([emp.id]);
     setBulkShiftSelection('');
     setBulkTargetDate(getTodayLocalDate());
@@ -249,15 +245,11 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const handleBulkShiftChange = (value: '' | 'manha' | 'tarde' | 'folga') => {
     setBulkShiftSelection(value);
     if (value === 'manha') {
-      setScheduleHourStart('06:00');
-      setScheduleHourEnd('14:00');
       if (scheduleDays.length === 0) setScheduleDays(['1', '2', '3', '4', '5', '6']);
       return;
     }
 
     if (value === 'tarde') {
-      setScheduleHourStart('14:00');
-      setScheduleHourEnd('22:00');
       if (scheduleDays.length === 0) setScheduleDays(['1', '2', '3', '4', '5', '6']);
       return;
     }
@@ -355,8 +347,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   };
 
   const handleSaveSchedule = async () => {
-    if (!selectedEmpForSchedule || !scheduleHourStart || !scheduleHourEnd) {
-      setErrorMessage('Preencha todos os campos da escala.');
+    if (!selectedEmpForSchedule || scheduleDays.length === 0) {
+      setErrorMessage('Escolha pelo menos um dia de trabalho.');
       return;
     }
 
@@ -367,7 +359,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
       if (typeof success === 'string') {
         setErrorMessage(success);
       } else if (success !== false) {
-        setToastMessage('Escala atualizada com sucesso!');
+        setToastMessage('Dias de trabalho atualizados.');
         closeScheduleModal();
       }
     } catch (error) {
@@ -833,28 +825,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                 </div>
               </div>
 
-              {turnos.length > 0 && (
-                <div className="mb-2">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Preenchimento Rápido (Turnos)</p>
-                  <div className="flex flex-wrap gap-2">
-                    {turnos.map(t => (
-                      <button key={t.id} type="button" onClick={() => { setScheduleHourStart(t.inicio); setScheduleHourEnd(t.fim); }} className="px-3 py-1.5 rounded-lg border border-outline-variant/30 bg-surface-container hover:bg-primary/10 hover:border-primary/40 hover:text-primary text-[11px] font-bold text-on-surface-variant transition-colors">
-                        {t.nome} ({t.inicio} às {t.fim})
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Horário Início</label>
-                  <input type="time" value={scheduleHourStart} onChange={e => setScheduleHourStart(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Horário Fim</label>
-                  <input type="time" value={scheduleHourEnd} onChange={e => setScheduleHourEnd(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
-                </div>
-              </div>
+              {/* O horário de cada dia (turno) é definido na aba Escala; aqui ficam só os dias de trabalho */}
+              <p className="text-xs text-on-surface-variant">O horário de cada dia (turno) é definido na aba Escala.</p>
 
               <button type="button" onClick={handleSaveSchedule} className="w-full bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim transition-colors">
                 Salvar Escala

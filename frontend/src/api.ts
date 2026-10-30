@@ -93,7 +93,8 @@ interface BackendAppointment {
   time?: string;
   services?: string[];
   servicos?: Array<string | { nome?: string }>;
-  cliente?: { id?: string | number; nome?: string; telefone?: string; cpf?: string };
+  cliente?: { id?: string | number; codigo?: number; nome?: string; telefone?: string; cpf?: string };
+  reservaOrigem?: string | null;
   clientName?: string;
   contact?: string;
   cpf?: string;
@@ -201,6 +202,8 @@ const normalizeAppointment = (appointment: BackendAppointment): Appointment => {
     observation: appointment.observation ?? appointment.observacoesSaude ?? '',
     assignedEmployeeId: appointment.assignedEmployeeId || appointment.colaboradorId || '',
     status: appointment.status || 'scheduled',
+    aguardandoCheckin: appointment.reservaOrigem === 'autoatendimento',
+    clientCode: typeof appointment.cliente?.codigo === 'number' ? appointment.cliente.codigo : undefined,
     version: appointment.atualizadoEm,
   };
 };
@@ -385,6 +388,15 @@ export const useReassignAppointment = (token: string | null) => {
   return useMutation({
     mutationFn: ({ id, newEmployeeId }: { id: string, newEmployeeId: string }) => 
       fetchApi(`/agendamentos/${id}/reassign`, token, { method: 'PATCH', body: JSON.stringify({ newEmployeeId }) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+  });
+};
+
+// Recepção confirma a chegada de quem reservou pelo totem
+export const useCheckinAppointment = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => fetchApi(`/agendamentos/${id}/checkin`, token, { method: 'PATCH' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
   });
 };

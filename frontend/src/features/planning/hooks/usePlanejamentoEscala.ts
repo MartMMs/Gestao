@@ -637,7 +637,7 @@ export function usePlanejamentoEscala({
     return activeNonAdminEmployees
       .map((emp) => {
         const malha = buildScaleForEmployee(emp.id);
-        const analise = analisarConformidadeCLT(malha);
+        const analise = analisarConformidadeCLT(malha, { tipoEscala: emp.tipoEscala || '6x1' });
 
         return {
           id: emp.id,

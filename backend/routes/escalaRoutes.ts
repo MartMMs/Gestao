@@ -23,7 +23,12 @@ const normalizarDia = (entrada: unknown): DiaEscala | null => {
   if (!entrada || typeof entrada !== 'object') return null;
   const valor = entrada as Record<string, unknown>;
   if (valor.tipo !== 'trabalho' && valor.tipo !== 'folga' && valor.tipo !== 'fds') return null;
-  const turno = valor.tipo === 'trabalho' && typeof valor.turno === 'string' && TURNO_REGEX.test(valor.turno) ? valor.turno : null;
+  // Turno informado e inválido (ex.: 25:00-26:00) é recusado: antes virava "trabalho sem turno" em silêncio
+  const turnoInformado = valor.tipo === 'trabalho' && valor.turno !== undefined && valor.turno !== null && valor.turno !== '';
+  if (turnoInformado && (typeof valor.turno !== 'string' || !TURNO_REGEX.test(valor.turno))) {
+    throw new HttpError(400, 'Turno inválido. Use o formato HH:MM-HH:MM, com horas de 00 a 23.');
+  }
+  const turno = turnoInformado ? valor.turno as string : null;
   return { tipo: valor.tipo, turno, descricao: typeof valor.descricao === 'string' ? valor.descricao.slice(0, 200) : null };
 };
 
@@ -52,7 +57,9 @@ const gravarDiaValidado = async (tx: Prisma.TransactionClient, colaboradorId: st
     // Troca de turno: nenhum atendimento do dia pode ficar fora do novo horário (turno noturno vira a meia-noite)
     const [inicioTurno, fimTurno] = dia.turno.split('-').map(horarioParaMinutos);
     const fimEfetivo = fimTurno <= inicioTurno ? fimTurno + 24 * 60 : fimTurno;
+    // Atendimento já concluído é passado: não impede mudar o turno
     const foraDoTurno = (await agendamentosDoDia(tx, data, { colaboradorId }))
+      .filter((ag) => ag.status === 'scheduled')
       .filter((ag) => ag.inicioMin < inicioTurno || ag.fimMin > fimEfetivo);
     if (foraDoTurno.length > 0) {
       throw new HttpError(409, `O profissional tem ${foraDoTurno.length} atendimento(s) em ${dataBr} fora do turno ${dia.turno}. Realoque-os antes de mudar o turno.`);
@@ -84,7 +91,10 @@ const alertasCltDoMes = async (tx: Prisma.TransactionClient, colaboradorId: stri
   const ajustes = new Map(
     (await tx.escalaOverride.findMany({ where: { colaboradorId, data: { gte: inicioIso, lte: `${mes}-31` } } })).map((o) => [o.data, o]),
   );
-  const analise = analisarConformidadeCLT(base.map((dia) => aplicarAjusteEscala(dia, ajustes.get(dia.data))));
+  const analise = analisarConformidadeCLT(
+    base.map((dia) => aplicarAjusteEscala(dia, ajustes.get(dia.data))),
+    { tipoEscala: colaborador.tipoEscala ?? undefined },
+  );
   return analise.statusGeral ? [] : analise.resumo;
 };
 
@@ -281,7 +291,7 @@ export function createEscalaRouter(notificar: Notificar) {
           // O dia original vira folga: não pode haver atendimentos marcados nele
           const marcados = await agendamentosDoDia(tx, atual.dataOriginal, { colaboradorId: atual.colaboradorId });
           if (marcados.length > 0) {
-            throw new HttpError(409, `O colaborador tem ${marcados.length} atendimento(s) em ${atual.dataOriginal}. Realoque-os antes de aprovar a troca.`);
+            throw new HttpError(409, `O colaborador tem ${marcados.length} atendimento(s) em ${atual.dataOriginal.split('-').reverse().join('/')}. Realoque-os antes de aprovar a troca.`);
           }
         }
 
@@ -294,7 +304,7 @@ export function createEscalaRouter(notificar: Notificar) {
           const original = await tx.escalaOverride.findUnique({ where: { key: chaveEscala(atual.colaboradorId, atual.dataOriginal) } });
           const turno = original?.tipo === 'trabalho' && original.turno ? original.turno : TURNO_PADRAO;
           await gravarDia(tx, atual.colaboradorId, atual.dataOriginal, { tipo: 'folga', turno: null, descricao: 'Troca de turno aprovada' });
-          await gravarDia(tx, atual.colaboradorId, atual.dataSolicitada, { tipo: 'trabalho', turno, descricao: 'Turno de compensação' });
+          await gravarDiaValidado(tx, atual.colaboradorId, atual.dataSolicitada, { tipo: 'trabalho', turno, descricao: 'Turno de compensação' });
         }
         return atualizada;
       });

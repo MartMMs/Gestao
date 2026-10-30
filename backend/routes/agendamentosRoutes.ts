@@ -4,7 +4,8 @@ import { prisma } from '../db';
 import { getUsuario, usuarioEhSupervisor, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { HttpError, ipDoCliente, responderErro, type Notificar } from '../lib/http';
 import { transacaoSerializavel, travarChave } from '../lib/transacao';
-import { ORIGEM_COLABORADOR, clientesComAcessoSaude, prepararAgendamento } from '../lib/privacidade';
+import { clienteComMesmoNome, mensagemNomeDuplicado } from '../lib/clientes';
+import { ORIGEM_COLABORADOR, ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN, clientesComAcessoSaude, prepararAgendamento } from '../lib/privacidade';
 import { validarDisponibilidadeProfissional } from '../services/agendaService';
 import { buscarServicosPorNome } from '../services/servicoService';
 import { lerDesde } from '../lib/periodo';
@@ -132,6 +133,7 @@ const resolverCliente = async (
   // Edição sem troca de cliente: mantém o atual quando o nome não mudou
   if (!cliente && clienteAtualId) {
     const atual = await tx.cliente.findUnique({ where: { id: clienteAtualId } });
+    if (atual?.removidoEm) throw new HttpError(409, 'O cadastro deste cliente foi excluído. Informe os dados do cliente novamente.');
     if (atual && (!nome || normalizarNome(atual.nome) === normalizarNome(nome))) cliente = atual;
   }
   // Só o cliente aberto na edição tem o cadastro alterado; quem foi achado por CPF/telefone é outra ficha
@@ -149,6 +151,8 @@ const resolverCliente = async (
   if (!cliente) {
     validarContato();
     if (nome.length < 2) throw new HttpError(400, 'Informe o nome do cliente.');
+    const homonimo = await clienteComMesmoNome(tx, nome);
+    if (homonimo) throw new HttpError(409, mensagemNomeDuplicado(homonimo));
     return tx.cliente.create({
       data: { nome: nome.slice(0, 120), telefone: telefone ?? null, cpf: cpf ?? null, observacao: observacao || null },
     });
@@ -165,6 +169,8 @@ const resolverCliente = async (
   // Edição do cliente do atendimento: alterações sem permissão viram erro explícito, nunca são descartadas em silêncio
   if (nome.length >= 2 && normalizarNome(nome) !== normalizarNome(cliente.nome)) {
     if (!gerenciaAgenda(req)) throw new HttpError(403, 'Apenas a recepção ou supervisores podem alterar o nome do cliente.');
+    const homonimo = await clienteComMesmoNome(tx, nome, cliente.id);
+    if (homonimo) throw new HttpError(409, mensagemNomeDuplicado(homonimo));
     atualizacao.nome = nome.slice(0, 120);
   }
   if (!supervisor && ((telefone && telefone !== cliente.telefone) || (cpf && cpf !== cliente.cpf))) {
@@ -378,6 +384,9 @@ export function createAgendamentosRouter(notificar: Notificar) {
     if (agendamento.status === status) return agendamento;
 
     const reativando = status === 'scheduled';
+    if (reativando && agendamento.cliente?.removidoEm) {
+      throw new HttpError(409, 'O cadastro deste cliente foi excluído. Para atendê-lo de novo, faça um novo agendamento com os dados dele.');
+    }
     if (!reativando) {
       return prisma.agendamento.update({ where: { id }, data: { status: status as string }, include: INCLUDE_COMPLETO });
     }
@@ -407,6 +416,25 @@ export function createAgendamentosRouter(notificar: Notificar) {
       res.json(prepararAgendamento(atualizado, req, await clientesComAcessoSaude(req)));
     } catch (error) {
       responderErro(res, error, 'Erro ao concluir agendamento');
+    }
+  });
+
+  // Check-in da reserva feita no totem: a recepção confirma que o cliente chegou e só então a ficha de saúde
+  // fica disponível ao profissional (ver clientesComAcessoSaude)
+  router.patch('/agendamentos/:id/checkin', verificarToken, async (req, res) => {
+    try {
+      if (!gerenciaAgenda(req)) throw new HttpError(403, 'Apenas a recepção ou supervisores podem confirmar a chegada do cliente.');
+      const agendamento = await prisma.agendamento.findUnique({ where: { id: req.params.id } });
+      if (!agendamento) throw new HttpError(404, 'Agendamento não encontrado.');
+      if (agendamento.reservaOrigem !== ORIGEM_TOTEM) throw new HttpError(409, 'Só reservas feitas no totem precisam de check-in.');
+      if (agendamento.status !== 'scheduled') throw new HttpError(409, 'Só é possível confirmar a chegada de um atendimento marcado.');
+      const atualizado = await prisma.agendamento.update({
+        where: { id: agendamento.id }, data: { reservaOrigem: ORIGEM_TOTEM_CHECKIN }, include: INCLUDE_COMPLETO,
+      });
+      notificar();
+      res.json(prepararAgendamento(atualizado, req, await clientesComAcessoSaude(req)));
+    } catch (error) {
+      responderErro(res, error, 'Erro ao confirmar a chegada do cliente');
     }
   });
 

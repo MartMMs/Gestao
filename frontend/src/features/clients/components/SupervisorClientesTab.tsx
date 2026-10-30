@@ -43,7 +43,7 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
   const { token } = useAuth();
   const { data: fullClientAppointments, isLoading: loadingClientHistory, isError: clientHistoryError } = useClientAppointments(token, historyClient?.id ?? null);
 
-  const filteredClients = useSearch(clients, searchTerm, (client) => [client.nome, client.telefone, client.cpf]);
+  const filteredClients = useSearch(clients, searchTerm, (client) => [client.nome, client.telefone, client.cpf, client.codigo ? `#${client.codigo}` : undefined]);
 
   const normalizeValue = (value?: string) => normalizarTexto(value);
   const digitsOnly = (value?: string) => (value || '').replace(/\D/g, '');
@@ -220,7 +220,7 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
             <tbody>
               {currentClients.map(client => (
                 <tr key={client.id} className="border-t border-outline-variant/10 hover:bg-surface/50">
-                  <td className="py-4 px-4 text-sm font-medium text-on-surface">{client.nome}</td>
+                  <td className="py-4 px-4 text-sm font-medium text-on-surface">{client.nome}{client.codigo ? <span className="ml-2 font-mono text-xs text-on-surface-variant">#{client.codigo}</span> : null}</td>
                   <td className="py-4 px-4 text-sm text-on-surface-variant">{client.cpf ? formatCpf(client.cpf) : '-'}</td>
                   <td className="py-4 px-4 text-sm text-on-surface-variant">{client.telefone ? formatPhone(client.telefone) : '-'}</td>
                   <td className="py-4 px-4 text-xs hidden lg:table-cell">

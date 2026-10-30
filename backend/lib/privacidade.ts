@@ -5,6 +5,9 @@ import { PAPEIS_ATENDIMENTO } from './usuarios';
 
 // Origem gravada nos agendamentos criados pelo próprio colaborador
 export const ORIGEM_COLABORADOR = 'colaborador';
+// Reserva feita no totem público; vira ORIGEM_TOTEM_CHECKIN quando a recepção confirma a chegada do cliente
+export const ORIGEM_TOTEM = 'autoatendimento';
+export const ORIGEM_TOTEM_CHECKIN = 'autoatendimento_checkin';
 
 /**
  * Regras de LGPD para respostas da API:
@@ -49,7 +52,6 @@ type AgendamentoBase = { clienteId: string; observacoesSaude?: string | null; cl
 // Janela em que um atendimento libera a ficha de saúde ao profissional
 const ACESSO_ANTES_HORAS = 7 * 24; // atendimento marcado para os próximos 7 dias
 const ACESSO_DEPOIS_DIAS = 30; // atendimento concluído nos últimos 30 dias
-const ACESSO_TOTEM_HORAS = 2; // reserva do totem: só a partir de 2h antes do início
 
 /**
  * Clientes cuja anamnese o profissional pode ver/editar. Regras:
@@ -66,21 +68,16 @@ export const clientesComAcessoSaude = async (req: Request): Promise<Set<string>>
   const ags = await prisma.agendamento.findMany({
     where: {
       colaboradorId: usuario.id,
-      NOT: { reservaOrigem: ORIGEM_COLABORADOR },
-      OR: [
+      // Reserva do totem só libera a ficha depois do check-in na recepção: qualquer pessoa com nome, telefone e CPF
+      // de alguém consegue reservar ali (inclusive o próprio profissional, escolhendo a si mesmo)
+      AND: [
+        { OR: [{ reservaOrigem: null }, { reservaOrigem: { notIn: [ORIGEM_COLABORADOR, ORIGEM_TOTEM] } }] },
         {
-          status: 'scheduled',
-          NOT: { reservaOrigem: 'autoatendimento' },
-          data: { gte: new Date(agora - 12 * 3_600_000), lte: new Date(agora + ACESSO_ANTES_HORAS * 3_600_000) },
+          OR: [
+            { status: 'scheduled', data: { gte: new Date(agora - 12 * 3_600_000), lte: new Date(agora + ACESSO_ANTES_HORAS * 3_600_000) } },
+            { status: 'completed', data: { gte: new Date(agora - ACESSO_DEPOIS_DIAS * 86_400_000) } },
+          ],
         },
-        // Reserva feita no totem público só libera a ficha perto do horário: qualquer pessoa com nome, telefone e
-        // CPF de alguém consegue reservar ali, e 7 dias de acesso seriam uma porta para a ficha de saúde
-        {
-          status: 'scheduled',
-          reservaOrigem: 'autoatendimento',
-          data: { gte: new Date(agora - 12 * 3_600_000), lte: new Date(agora + ACESSO_TOTEM_HORAS * 3_600_000) },
-        },
-        { status: 'completed', data: { gte: new Date(agora - ACESSO_DEPOIS_DIAS * 86_400_000) } },
       ],
     },
     select: { clienteId: true },

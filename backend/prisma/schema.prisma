@@ -32,6 +32,8 @@ model Colaborador {
 
 model Cliente {
   id           String        @id @default(uuid())
+  // Código curto para identificar o cliente na tela e no atendimento (o id é técnico)
+  codigo       Int           @unique @default(autoincrement())
   nome         String
   telefone     String?
   cpf          String?

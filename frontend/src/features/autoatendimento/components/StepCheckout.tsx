@@ -66,7 +66,7 @@ export function StepCheckout({
   const progressPercent = Math.max(0, Math.min(100, (remainingSeconds / totalSeconds) * 100));
 
   // O código Pix vem do gateway do banco; nunca é montado aqui (um código inventado é recusado pelo app do banco)
-  const pixCode = reservation.pixCopiaECola ?? null;
+  const pixCode = (tipoPagamento === 'integral' ? reservation.pixCopiaEColaIntegral : reservation.pixCopiaECola) ?? null;
   const cartaoDisponivel = reservation.cartaoOnlineDisponivel === true;
 
   const handleCopyPix = () => {

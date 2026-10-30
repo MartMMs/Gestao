@@ -27,6 +27,8 @@ import {
 // Regras de negócio do totem (reserva, confirmação e configuração), separadas das rotas HTTP
 
 import { PAPEIS_ATENDIMENTO } from '../lib/usuarios';
+import { clienteComMesmoNome } from '../lib/clientes';
+import { ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN } from '../lib/privacidade';
 
 export { PAPEIS_ATENDIMENTO };
 // Prazo para o gateway confirmar um pagamento online antes de o horário voltar para a grade
@@ -246,7 +248,7 @@ export const criarAgendamentoTotem = async (
 
     const reservasAtivas = await tx.agendamento.count({
       where: {
-        reservaOrigem: 'autoatendimento',
+        reservaOrigem: { in: [ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN] },
         status: 'scheduled',
         data: { gte: new Date() },
         cliente: { telefone: { in: variantesTelefone(cliente.telefone) } },
@@ -257,9 +259,13 @@ export const criarAgendamentoTotem = async (
     }
 
     const existente = cliente.cpf
-      ? (await tx.cliente.findMany({ where: { telefone: { in: variantesTelefone(cliente.telefone) } } }))
+      ? (await tx.cliente.findMany({ where: { removidoEm: null, telefone: { in: variantesTelefone(cliente.telefone) } } }))
         .find((c) => normalizarNome(c.nome) === normalizarNome(cliente.nome) && c.cpf && apenasDigitos(c.cpf) === cliente.cpf)
       : undefined;
+    if (!existente && await clienteComMesmoNome(tx, cliente.nome)) {
+      // O totem não revela dados do outro cadastro: quem resolve é a recepção
+      throw new HttpError(409, 'Já existe um cadastro com esse nome e outros dados. Procure a recepção para concluir a reserva.');
+    }
     const dbCliente = existente
       ?? await tx.cliente.create({ data: { nome: cliente.nome, telefone: cliente.telefone, cpf: cliente.cpf, observacao } });
 
@@ -277,7 +283,7 @@ export const criarAgendamentoTotem = async (
         lockExpiresAt: opcoes.cobranca.comPagamentoOnline ? new Date(Date.now() + PRAZO_PAGAMENTO_MINUTOS * 60_000) : null,
         metodoPagamento: opcoes.cobranca.comPagamentoOnline ? opcoes.metodoPagamento : 'presencial_no_local',
         reservaToken: opcoes.sessionToken,
-        reservaOrigem: 'autoatendimento',
+        reservaOrigem: ORIGEM_TOTEM,
         observacoesSaude: cliente.observacoesSaude || null,
         servicos: { connect: servicos.map((s) => ({ id: s.id })) },
       } satisfies Prisma.AgendamentoUncheckedCreateInput,

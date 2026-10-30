@@ -355,7 +355,7 @@ export default function App() {
         );
 
         const malha = diasComRegras.map((dia) => applyOverrideToDia(emp.id, dia));
-        const analise = analisarConformidadeCLT(malha);
+        const analise = analisarConformidadeCLT(malha, { tipoEscala: emp.tipoEscala || '6x1' });
 
         return {
           id: emp.id,

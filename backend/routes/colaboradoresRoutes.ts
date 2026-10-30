@@ -5,12 +5,13 @@ import { prisma } from '../db';
 import { getUsuario, usuarioEhAdmin, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken, PAPEIS_VALIDOS, type Papel } from '../auth';
 import { HttpError, responderErro } from '../lib/http';
 import type { Eventos } from '../lib/eventos';
-import { transacaoSerializavel } from '../lib/transacao';
+import { transacaoSerializavel, travarChave } from '../lib/transacao';
 import { prepararBloqueio } from '../lib/privacidade';
 import { INVALIDAR_SESSOES, validarSenha } from '../lib/usuarios';
 import { validarDisponibilidadeProfissional } from '../services/agendaService';
 import { partesNoFuso } from '../../shared/agenda';
 import { ESCOPOS } from '../../shared/escopos';
+import { normalizarNome } from '../../shared/validadores';
 
 const PAPEIS_PRIVILEGIADOS: Papel[] = ['admin', 'supervisor'];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -29,6 +30,16 @@ const garantirEmailLivre = async (email: string, ignorarId?: string) => {
     where: { email: { equals: email, mode: 'insensitive' }, ...(ignorarId ? { id: { not: ignorarId } } : {}) },
   });
   if (emUso) throw new HttpError(409, 'Este e-mail já está em uso por outro colaborador. Altere o e-mail para continuar.');
+};
+
+// Dois profissionais ativos com o mesmo nome confundem agenda, escala e comissões
+const garantirNomeLivre = async (nome: string, ignorarId?: string) => {
+  const candidatos = await prisma.colaborador.findMany({
+    where: { ativo: true, nome: { contains: normalizarNome(nome).slice(0, 3), mode: 'insensitive' }, ...(ignorarId ? { id: { not: ignorarId } } : {}) },
+    select: { nome: true },
+  });
+  const igual = candidatos.find((c) => normalizarNome(c.nome) === normalizarNome(nome));
+  if (igual) throw new HttpError(409, `Já existe um profissional ativo chamado "${igual.nome}". Diferencie o nome (por exemplo, com o sobrenome).`);
 };
 
 // Mesmo limite do formulário; textos maiores são cortados (vão para todas as listagens e para o totem)
@@ -66,8 +77,8 @@ const lerCamposEscala = (body: Record<string, unknown>) => {
   for (const campo of ['folgasDomingoNoMes', 'cargaHorariaSemanal'] as const) {
     if (body[campo] === undefined) continue;
     const limite = LIMITES_NUMERICOS[campo];
-    // null, texto vazio e booleanos não viram número (Number(null) seria 0)
-    const numero = typeof body[campo] === 'number' || (typeof body[campo] === 'string' && body[campo] !== '') ? Number(body[campo]) : NaN;
+    // null, booleanos e textos como " 40", "4e1" ou "0x28" não viram número: só dígitos
+    const numero = typeof body[campo] === 'number' || (typeof body[campo] === 'string' && /^\d{1,2}$/.test(body[campo] as string)) ? Number(body[campo]) : NaN;
     if (!Number.isInteger(numero) || numero < limite.min || numero > limite.max) {
       throw new HttpError(400, `${limite.rotulo} deve ser um número inteiro ${limite.faixa}.`);
     }
@@ -115,6 +126,7 @@ export function createColaboradoresRouter(eventos: Eventos) {
         return res.status(403).json({ erro: 'Apenas administradores podem criar supervisores ou administradores.' });
       }
       await garantirEmailLivre(email);
+      await garantirNomeLivre(nome);
 
       const camposEscala = lerCamposEscala(req.body);
       const especialidade = (camposEscala.especialidade as string | undefined) || '';
@@ -154,6 +166,7 @@ export function createColaboradoresRouter(eventos: Eventos) {
       if (req.body.nome !== undefined) {
         const nome = typeof req.body.nome === 'string' ? req.body.nome.trim() : '';
         if (nome.length < 3) return res.status(400).json({ erro: 'Informe o nome completo do colaborador.' });
+        await garantirNomeLivre(nome, id);
         dados.nome = nome;
       }
       if (req.body.email !== undefined) {
@@ -198,7 +211,8 @@ export function createColaboradoresRouter(eventos: Eventos) {
 
   /**
    * Remove um profissional da equipe sem perder histórico:
-   * - atendimentos futuros são transferidos (reallocateToId) ou cancelados;
+   * - atendimentos marcados (inclusive o que está em andamento) são transferidos para reallocateToId quando ele está
+   *   livre no horário; os demais são cancelados e listados na resposta;
    * - quem já tem atendimentos é apenas desativado (some da equipe e não faz login), preservando o histórico;
    * - quem nunca atendeu é excluído de vez.
    */
@@ -221,42 +235,51 @@ export function createColaboradoresRouter(eventos: Eventos) {
 
       const resultado = await transacaoSerializavel(async (tx) => {
         const futuros = await tx.agendamento.findMany({
-          where: { colaboradorId: id, status: 'scheduled', data: { gte: new Date() } },
-          include: { servicos: true },
+          // Sem filtro de data: o atendimento em andamento (começou antes de agora) também precisa de dono
+          where: { colaboradorId: id, status: 'scheduled' },
+          include: { servicos: true, cliente: { select: { nome: true } } },
+          orderBy: { data: 'asc' },
         });
 
+        let transferidos = 0;
+        const canceladosLista: string[] = [];
         for (const ag of futuros) {
           if (realocarPara) {
+            await travarChave(tx, `agenda:${realocarPara}:${partesNoFuso(ag.data).data}`);
             const indisponivel = await validarDisponibilidadeProfissional(tx, realocarPara, ag.data, ag.servicos, { ignorarAgendamentoId: ag.id });
-            if (indisponivel) {
-              const { data, horario } = partesNoFuso(ag.data);
-              throw new HttpError(409, `Não foi possível transferir o atendimento de ${data.split('-').reverse().join('/')} às ${horario}: ${indisponivel.erro}`);
+            if (!indisponivel) {
+              await tx.agendamento.update({ where: { id: ag.id }, data: { colaboradorId: realocarPara } });
+              transferidos += 1;
+              continue;
             }
-            await tx.agendamento.update({ where: { id: ag.id }, data: { colaboradorId: realocarPara } });
-          } else {
-            await tx.agendamento.update({ where: { id: ag.id }, data: { status: 'cancelled' } });
           }
+          await tx.agendamento.update({ where: { id: ag.id }, data: { status: 'cancelled' } });
+          const { data, horario } = partesNoFuso(ag.data);
+          canceladosLista.push(`${data.split('-').reverse().join('/')} às ${horario} (${ag.cliente?.nome ?? 'cliente'})`);
         }
+        const cancelados = canceladosLista.length;
 
         const temHistorico = (await tx.agendamento.count({ where: { colaboradorId: id } })) > 0;
         if (temHistorico) {
           await tx.colaborador.update({ where: { id }, data: { ativo: false } });
-          return { desativado: true, transferidos: realocarPara ? futuros.length : 0, cancelados: realocarPara ? 0 : futuros.length };
+          return { desativado: true, transferidos, cancelados, canceladosLista };
         }
 
         await tx.bloqueio.deleteMany({ where: { colaboradorId: id } });
         await tx.escalaOverride.deleteMany({ where: { colaboradorId: id } });
         await tx.solicitacaoTroca.deleteMany({ where: { colaboradorId: id } });
         await tx.colaborador.delete({ where: { id } });
-        return { desativado: false, transferidos: realocarPara ? futuros.length : 0, cancelados: realocarPara ? 0 : futuros.length };
+        return { desativado: false, transferidos, cancelados, canceladosLista };
       });
 
       // Removido ou desativado: sockets abertos dessa pessoa caem na hora
       eventos.encerrarSessoesDoUsuario(id);
       notificar();
-      const detalhe = resultado.transferidos > 0
-        ? ` ${resultado.transferidos} atendimento(s) futuro(s) transferido(s).`
-        : resultado.cancelados > 0 ? ` ${resultado.cancelados} atendimento(s) futuro(s) cancelado(s).` : '';
+      const detalhe = (resultado.transferidos > 0 ? ` ${resultado.transferidos} atendimento(s) transferido(s).` : '')
+        + (resultado.cancelados > 0
+          ? ` ${resultado.cancelados} atendimento(s) cancelado(s)${realocarPara ? ' porque o profissional de destino não estava livre' : ''}: `
+            + `${resultado.canceladosLista.join('; ')}. Avise esses clientes.`
+          : '');
       res.json({
         ...resultado,
         mensagem: resultado.desativado

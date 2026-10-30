@@ -3,7 +3,8 @@ import { Appointment, Employee, Service } from '../../../types';
 import { AppointmentScheduleFields } from '../../../components/AppointmentScheduleFields';
 import { AppointmentModalShell } from '../../../components/AppointmentModalShell';
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
-import { isApiError } from '../../../api';
+import { isApiError, useCheckinAppointment } from '../../../api';
+import { useAuth } from '../../../AuthContext';
 import { formatPhone } from '../../../utils/formatters';
 import { useFormDraft } from '../../../hooks/useFormDraft';
 
@@ -31,6 +32,30 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
     original,
   );
   const [rascunhoRestaurado] = useState(() => JSON.stringify(editingAppointment) !== JSON.stringify(original));
+  // Rascunho de uma versão anterior deste agendamento: alguém alterou no servidor, então ele é descartado com aviso
+  const [rascunhoDescartado] = useState(() => {
+    try {
+      const atual = `rascunho:edit-appointment:${appointment.id}:${appointment.version ?? ''}`;
+      const antigos = Object.keys(sessionStorage).filter((k) => k.startsWith(`rascunho:edit-appointment:${appointment.id}:`) && k !== atual);
+      antigos.forEach((k) => sessionStorage.removeItem(k));
+      return antigos.length > 0;
+    } catch {
+      return false;
+    }
+  });
+  const { token, currentUser } = useAuth();
+  const checkin = useCheckinAppointment(token);
+  const podeFazerCheckin = appointment.aguardandoCheckin && appointment.status === 'scheduled'
+    && ['admin', 'supervisor', 'receptionist'].includes(currentUser?.role ?? '');
+  const confirmarChegada = async () => {
+    try {
+      await checkin.mutateAsync(appointment.id);
+      setToastMessage('Chegada confirmada. A ficha do cliente foi liberada para o profissional.');
+      closeAndDiscard();
+    } catch (error) {
+      setErrorMessage(isApiError(error) ? error.message : 'Não foi possível confirmar a chegada do cliente.');
+    }
+  };
   const closeAndDiscard = () => {
     clearDraft();
     onClose();
@@ -108,6 +133,18 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
               <p className="text-on-surface-variant mt-1">Revise horário, colaborador e serviços antes de salvar novamente.</p>
             </div>
           </div>
+        </div>
+      ) : podeFazerCheckin ? (
+        <div className="mb-4 rounded-2xl border border-primary/30 bg-primary/10 p-3 text-xs text-on-surface flex gap-3 items-center justify-between">
+          <span>Reserva feita no totem. A ficha de saúde só fica disponível ao profissional depois que a recepção confirmar a chegada do cliente.</span>
+          <button type="button" onClick={confirmarChegada} disabled={checkin.isPending} className="shrink-0 rounded-full bg-primary px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-on-primary disabled:opacity-60">
+            {checkin.isPending ? 'Confirmando...' : 'Confirmar chegada'}
+          </button>
+        </div>
+      ) : rascunhoDescartado ? (
+        <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-on-surface flex gap-2 items-center">
+          <span className="material-symbols-outlined text-[16px] text-amber-600">history</span>
+          <span>Suas alterações não salvas foram descartadas porque este agendamento foi modificado por outra pessoa. Confira os dados atuais.</span>
         </div>
       ) : rascunhoRestaurado ? (
         <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-on-surface flex gap-2 items-center">

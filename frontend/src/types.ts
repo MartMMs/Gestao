@@ -64,6 +64,9 @@ export interface Appointment {
   observation?: string;
   assignedEmployeeId: string;
   status: 'scheduled' | 'completed' | 'cancelled' | 'no_show';
+  // Reserva feita no totem que ainda aguarda o check-in da recepção (só então libera a ficha de saúde)
+  aguardandoCheckin?: boolean;
+  clientCode?: number;
   // Versão do registro no servidor (detecta edição simultânea)
   version?: string;
 }
@@ -86,6 +89,8 @@ export interface Service {
 
 export interface Client {
   id: string;
+  // Código curto de identificação (#123), distingue clientes na tela
+  codigo?: number;
   nome: string;
   telefone: string;
   cpf?: string;
@@ -201,6 +206,8 @@ export interface AutoatendimentoReservaSession {
   lockExpiresAt: number;
   /** Código Pix "copia e cola" emitido pelo gateway do banco (ausente enquanto não houver integração) */
   pixCopiaECola?: string;
+  /** Código Pix do valor integral (quando o cliente escolhe pagar tudo agora) */
+  pixCopiaEColaIntegral?: string;
   /** O gateway aceita cartão (os dados vão direto para ele, nunca para este servidor) */
   cartaoOnlineDisponivel?: boolean;
 }

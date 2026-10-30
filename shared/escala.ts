@@ -28,28 +28,30 @@ export interface ConfiguracaoEscala {
 
 // Datas AAAA-MM-DD tratadas sempre em UTC ao meio-dia. new Date('AAAA-MM-DD') é meia-noite UTC, e ler o dia
 // da semana no horário local (-03 no Brasil) trocava o domingo pela segunda e deslocava toda a escala.
-// Referência fixa do ciclo 12x36 (plantão nos dias pares contados a partir dela)
-const ANCORA_12X36 = new Date('2000-01-01T12:00:00Z');
-
 const dataUTC = (data: string) => new Date(`${data.slice(0, 10)}T12:00:00Z`);
 
+// Referência fixa dos ciclos que não seguem a semana (12x36 e 5x1). Contar a partir da data pedida fazia o ciclo
+// recomeçar todo dia 1 e a API (que olha também a semana anterior) calcular uma malha diferente da tela.
+const ANCORA_CICLO = new Date('2000-01-01T12:00:00Z');
+const diasDesdeAncora = (data: Date) => Math.round((data.getTime() - ANCORA_CICLO.getTime()) / 86_400_000);
+const posicaoNoCiclo = (data: Date, ciclo: number) => ((diasDesdeAncora(data) % ciclo) + ciclo) % ciclo;
+
 /**
- * Gera escala 6x1 (6 dias trabalha, 1 folga)
- * Seg Ter Qua Qui Sex Sáb | Dom(folga)
+ * Gera escala 6x1 (6 dias trabalha, 1 folga): segunda a sábado, descanso no domingo.
+ * Segue o dia da semana, não a posição desde o início: qualquer data inicial dá a mesma malha.
  */
 export function gerarEscala6x1(dataInicio: string, numeroDias: number): DiaEscala[] {
   const resultado: DiaEscala[] = [];
   let data = dataUTC(dataInicio);
-  const padrao = ['trabalho', 'trabalho', 'trabalho', 'trabalho', 'trabalho', 'trabalho', 'folga'];
-  
+
   for (let i = 0; i < numeroDias; i++) {
     const diaSemana = data.getUTCDay();
-    const tipo = diaSemana === 0 ? 'fds' : padrao[i % 7];
+    const tipo = diaSemana === 0 ? 'fds' : 'trabalho';
     
     resultado.push({
       data: data.toISOString().split('T')[0],
       tipo: tipo as 'trabalho' | 'folga' | 'fds',
-      descricao: tipo === 'folga' ? 'Folga' : tipo === 'fds' ? 'Fim de Semana' : 'Trabalho',
+      descricao: tipo === 'fds' ? 'Fim de Semana' : 'Trabalho',
     });
     
     data.setUTCDate(data.getUTCDate() + 1);
@@ -59,17 +61,15 @@ export function gerarEscala6x1(dataInicio: string, numeroDias: number): DiaEscal
 }
 
 /**
- * Gera escala 5x2 (5 dias trabalha, 2 folgas consecutivas)
- * Seg Ter Qua Qui Sex | Sáb Dom(folgas)
+ * Gera escala 5x2 (5 dias trabalha, 2 folgas consecutivas): segunda a sexta, folga sábado e domingo.
  */
 export function gerarEscala5x2(dataInicio: string, numeroDias: number): DiaEscala[] {
   const resultado: DiaEscala[] = [];
   let data = dataUTC(dataInicio);
-  const padrao = ['trabalho', 'trabalho', 'trabalho', 'trabalho', 'trabalho', 'folga', 'folga'];
-  
+
   for (let i = 0; i < numeroDias; i++) {
     const diaSemana = data.getUTCDay();
-    const tipo = padrao[i % 7];
+    const tipo = diaSemana === 0 || diaSemana === 6 ? 'folga' : 'trabalho';
     
     resultado.push({
       data: data.toISOString().split('T')[0],
@@ -92,7 +92,7 @@ export function gerarEscala5x1(dataInicio: string, numeroDias: number): DiaEscal
   const padrao = ['trabalho', 'trabalho', 'trabalho', 'trabalho', 'trabalho', 'folga'];
 
   for (let i = 0; i < numeroDias; i++) {
-    const tipo = padrao[i % 6];
+    const tipo = padrao[posicaoNoCiclo(data, 6)];
 
     resultado.push({
       data: data.toISOString().split('T')[0],
@@ -122,8 +122,7 @@ export function gerarEscala12x36(
   const turno = turnos.diurno;
 
   for (let i = 0; i < numeroDias; i++) {
-    const diasDesdeAncora = Math.round((data.getTime() - ANCORA_12X36.getTime()) / 86_400_000);
-    if (((diasDesdeAncora % 2) + 2) % 2 === 0) {
+    if (posicaoNoCiclo(data, 2) === 0) {
       resultado.push({
         data: data.toISOString().split('T')[0],
         tipo: 'trabalho',
@@ -160,20 +159,11 @@ export function gerarEscalaRotativa(
 ): DiaEscala[] {
   const resultado: DiaEscala[] = [];
   let data = dataUTC(dataInicio);
-  let semanaAtual = 1;
-  let turnoAtual = 0;
-  let diasSemana = 0;
-  
+
   for (let i = 0; i < numeroDias; i++) {
-    const diaSemana = data.getUTCDay();
-    
-    // Muda de turno a cada 7 dias (segunda-feira)
-    if (diaSemana === 1 && diasSemana > 0) {
-      turnoAtual++;
-      diasSemana = 0;
-    }
-    
-    const turnoIndex = (turnoAtual) % turnos.length;
+    // Muda de turno toda segunda-feira, contando semanas desde a âncora (2000-01-03 foi segunda)
+    const semana = Math.floor((diasDesdeAncora(data) - 2) / 7);
+    const turnoIndex = ((semana % turnos.length) + turnos.length) % turnos.length;
     const turnoConfig = turnos[turnoIndex];
     
     let tipo: 'trabalho' | 'folga' | 'fds' = 'trabalho';
@@ -201,7 +191,6 @@ export function gerarEscalaRotativa(
     resultado.push(dia);
     
     data.setUTCDate(data.getUTCDate() + 1);
-    diasSemana++;
   }
   
   return resultado;
@@ -308,14 +297,17 @@ export function gerarEscalaComRegras(
 export function aplicarFolgasDomingoNoMes(dias: DiaEscala[], folgasDomingoNoMes: number): DiaEscala[] {
   if (!Number.isFinite(folgasDomingoNoMes) || folgasDomingoNoMes <= 0) return dias;
 
-  let domingosDeFolga = 0;
+  // Conta por mês do calendário: uma janela que atravessa a virada do mês (como a da API) dá o mesmo resultado
+  const domingosDeFolga = new Map<string, number>();
 
   return dias.map((dia) => {
     const diaSemana = dataUTC(dia.data).getUTCDay();
     if (diaSemana !== 0) return dia;
 
-    if (domingosDeFolga < folgasDomingoNoMes) {
-      domingosDeFolga++;
+    const mes = dia.data.slice(0, 7);
+    const jaConcedidos = domingosDeFolga.get(mes) ?? 0;
+    if (jaConcedidos < folgasDomingoNoMes) {
+      domingosDeFolga.set(mes, jaConcedidos + 1);
 
       if (dia.tipo === 'folga' || dia.tipo === 'fds') {
         return {

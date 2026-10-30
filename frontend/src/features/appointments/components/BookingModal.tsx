@@ -560,7 +560,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
                       className={`w-full text-left px-3 py-2 transition-colors border-b last:border-b-0 border-outline-variant/10 ${(selectedClientId === c.id || index === activeClientIndex) ? 'bg-primary/10' : 'hover:bg-primary/10'}`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-bold text-on-surface truncate">{c.nome}</p>
+                        <p className="text-xs font-bold text-on-surface truncate">{c.nome}{c.codigo ? <span className="ml-1 font-mono text-on-surface-variant">#{c.codigo}</span> : null}</p>
                         {selectedClientId === c.id && (
                           <span className="text-[9px] font-bold uppercase tracking-widest text-primary bg-primary/10 px-2 py-0.5 rounded-full">Selecionado</span>
                         )}

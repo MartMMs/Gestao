@@ -9,6 +9,7 @@ import {
   minutosParaHorario,
   partesNoFuso,
   horarioParaMinutos,
+  TURNO_REGEX,
   type ServicoComDuracao,
 } from '../../shared/agenda';
 import { normalizarNome } from '../../shared/validadores';
@@ -59,6 +60,20 @@ export const mensagemIndisponibilidadeEscala = (escala: { tipo?: string | null; 
   if (!escala?.tipo || escala.tipo === 'trabalho') return null;
   const rotulo = escala.tipo === 'fds' ? 'FDS' : /f[eé]rias/i.test(escala.descricao || '') ? 'Férias' : 'Folga';
   return `Profissional indisponível na escala: ${rotulo}${escala.descricao ? ` (${escala.descricao})` : ''}.`;
+};
+
+// Dia de trabalho com turno definido na escala: o atendimento inteiro precisa caber nele (noturno vira a meia-noite)
+export const mensagemForaDoTurno = (
+  escala: { tipo?: string | null; turno?: string | null } | null,
+  inicioMin: number,
+  fimMin: number,
+) => {
+  if (escala?.tipo !== 'trabalho' || !escala.turno || !TURNO_REGEX.test(escala.turno)) return null;
+  const [inicioTurno, fimTurno] = escala.turno.split('-').map(horarioParaMinutos);
+  const fimEfetivo = fimTurno <= inicioTurno ? fimTurno + 24 * 60 : fimTurno;
+  return inicioMin < inicioTurno || fimMin > fimEfetivo
+    ? `O horário fica fora do turno do profissional neste dia (${escala.turno}).`
+    : null;
 };
 
 type ServicoElegibilidade = {
@@ -248,8 +263,9 @@ export const validarDisponibilidadeProfissional = async (
   servicos: Array<ServicoElegibilidade & ServicoComDuracao>,
   opcoes: { ignorarAgendamentoId?: string; sessaoPropria?: string } = {},
 ): Promise<{ status: number; erro: string } | null> => {
-  const { data } = partesNoFuso(inicio);
-  const msgEscala = mensagemIndisponibilidadeEscala(await getEscalaDoDia(db, colaboradorId, data));
+  const { data, minutos } = partesNoFuso(inicio);
+  const escala = await getEscalaDoDia(db, colaboradorId, data);
+  const msgEscala = mensagemIndisponibilidadeEscala(escala) ?? mensagemForaDoTurno(escala, minutos, minutos + duracaoTotal(servicos));
   if (msgEscala) return { status: 409, erro: msgEscala };
 
   const erroElegivel = await getErroElegibilidade(db, colaboradorId, servicos);

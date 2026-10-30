@@ -13,7 +13,7 @@ import {
   chaveTravaSala,
   erroElegibilidade,
   existeTrava,
-  mensagemIndisponibilidadeEscala,
+  mensagemIndisponibilidadeEscala, mensagemForaDoTurno,
   verificarCLTInterjornada,
 } from '../services/agendaService';
 import { HttpError, responderErro, ipDoCliente } from '../lib/http';
@@ -213,6 +213,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
           const bloqueado = colab.bloqueios.some((b) =>
             intervalosSobrepoem(inicio, fim, horarioParaMinutos(b.horaInicio), horarioParaMinutos(b.horaFim)));
           if (bloqueado) continue;
+          if (mensagemForaDoTurno(escalas.find((e) => e.colaboradorId === colab.id) ?? null, inicio, fim)) continue;
           if (agendamentos.some((ag) => ag.colaboradorId === colab.id && intervalosSobrepoem(inicio, fim, ag.inicioMin, ag.fimMin))) continue;
           if (await existeTrava(blocos.map((t) => chaveTravaProfissional(data, t, colab.id)))) continue;
           // Mesma regra de CLT usada na reserva: evita oferecer horário que seria recusado em seguida
@@ -340,8 +341,10 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       };
       // Com pagamento online, a cobrança (código Pix etc.) vem do gateway do banco; o totem nunca monta uma
       if (cobraOnline && gatewayPagamento) {
-        const cobranca = await gatewayPagamento.criarCobranca({ sessionToken, valor: valorSinal, descricao: sessao.servicoNome });
-        Object.assign(sessao, cobranca);
+        // Uma cobrança para cada opção do checkout (sinal ou integral): o código mostrado tem o valor que o cliente escolher
+        const sinal = await gatewayPagamento.criarCobranca({ sessionToken, valor: valorSinal, descricao: sessao.servicoNome });
+        const integral = await gatewayPagamento.criarCobranca({ sessionToken, valor: resumo.valorTotal, descricao: `${sessao.servicoNome} (integral)` });
+        Object.assign(sessao, sinal, { pixCopiaEColaIntegral: integral.pixCopiaECola, pixQrCodeIntegral: integral.pixQrCode });
       }
       await redisService.setSession(`reserva:${sessionToken}`, sessao, ttlSegundos);
 
@@ -495,10 +498,17 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
 
       const agendamento = await prisma.agendamento.findUnique({
         where: { id: agendamentoId },
-        select: { valorSinal: true, valorTotal: true },
+        select: { valorSinal: true, valorTotal: true, statusPagamento: true, status: true },
       });
       if (!agendamento) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
-      const esperado = tipo === 'integral' ? agendamento.valorTotal : agendamento.valorSinal;
+      // Reenvio de um pagamento já registrado (mesmo tipo) não muda nada, nem depois de cancelado
+      const jaRegistrado = agendamento.statusPagamento === 'integral_pago' || agendamento.statusPagamento === 'pago_apos_expirar'
+        || (tipo === 'sinal' && agendamento.statusPagamento === 'sinal_pago');
+      if (jaRegistrado) return res.json({ received: true, atualizado: false });
+      // Integral depois do sinal: o cliente paga só o restante
+      const esperado = tipo === 'integral'
+        ? (agendamento.statusPagamento === 'sinal_pago' ? (agendamento.valorTotal ?? 0) - (agendamento.valorSinal ?? 0) : agendamento.valorTotal)
+        : agendamento.valorSinal;
       // Agendamento sem valor a cobrar nunca é "pago" pelo gateway
       if (esperado === null || esperado <= 0) return res.status(422).json({ erro: 'Este agendamento não tem valor a cobrar online.' });
       if (valor + TOLERANCIA_VALOR < esperado) {
@@ -511,7 +521,8 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       const atualizado = await prisma.agendamento.updateMany({
         where: {
           id: agendamentoId,
-          status: 'scheduled',
+          // Concluído também: o cliente pode pagar no fim do atendimento
+          status: { in: ['scheduled', 'completed'] },
           statusPagamento: tipo === 'integral' ? { in: ['aguardando_pagamento', 'sinal_pago'] } : 'aguardando_pagamento',
         },
         data: { statusPagamento: novoStatus },
