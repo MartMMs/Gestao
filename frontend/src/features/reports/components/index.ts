@@ -1,0 +1,1 @@
+export { RelatorioFinanceiroTab } from './RelatorioFinanceiroTab';

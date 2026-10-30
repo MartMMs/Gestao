@@ -9,6 +9,7 @@ import { SupervisorServicosTab } from '../features/services/components';
 import { gerarSenhaProvisoria } from '../utils/formatters';
 import { AutoatendimentoAdminTab } from '../features/autoatendimento/components';
 import { CompanySettingsTab } from '../features/company/components/CompanySettingsTab';
+import { RelatorioFinanceiroTab } from '../features/reports/components';
 import { useCompanyConfig } from '../api';
 
 type ServicePayload = {
@@ -91,7 +92,7 @@ export function AdminView({
   token,
 }: AdminViewProps) {
   const { data: companyConfig } = useCompanyConfig(token);
-  const [activeTab, setActiveTab] = useState<'empresa' | 'servicos' | 'totem' | 'equipe' | 'dashboard' | 'clientes'>('empresa');
+  const [activeTab, setActiveTab] = useState<'empresa' | 'servicos' | 'totem' | 'equipe' | 'dashboard' | 'clientes' | 'relatorios'>('empresa');
 
   // Gestão de Serviços
   const [serviceSearchTerm, setServiceSearchTerm] = useState('');
@@ -405,11 +406,24 @@ export function AdminView({
             <span className="material-symbols-outlined text-[18px]">person_search</span>
             Clientes
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('relatorios')}
+            className={`px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
+              activeTab === 'relatorios'
+                ? 'bg-primary text-on-primary shadow-md'
+                : 'bg-surface-container text-on-surface-variant hover:text-primary'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[18px]">monitoring</span>
+            Relatórios
+          </button>
         </div>
       </div>
 
       {/* Conteúdo da Aba Ativa */}
       {activeTab === 'empresa' && <CompanySettingsTab token={token || null} />}
+      {activeTab === 'relatorios' && <RelatorioFinanceiroTab />}
 
       {activeTab === 'servicos' && (
         <SupervisorServicosTab

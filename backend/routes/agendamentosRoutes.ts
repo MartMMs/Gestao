@@ -8,6 +8,7 @@ import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, mensagemNomeDuplicado } fro
 import { ORIGEM_COLABORADOR, ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN, clientesComAcessoSaude, prepararAgendamento } from '../lib/privacidade';
 import { validarDisponibilidadeProfissional } from '../services/agendaService';
 import { buscarServicosPorNome } from '../services/servicoService';
+import { comissaoDosServicos, valorDosServicos } from '../lib/valores';
 import { lerDesde } from '../lib/periodo';
 import { LIMITE_HISTORICO_CLIENTE } from '../../shared/agendaJanela';
 import {
@@ -293,7 +294,8 @@ export function createAgendamentosRouter(notificar: Notificar) {
             cliente: { connect: { id: cliente.id } },
             servicos: { connect: servicos.map((s) => ({ id: s.id })) },
             // Preço do dia gravado: mudar o preço do serviço depois não reescreve o faturamento
-            valorTotal: servicos.reduce((soma, s) => soma + s.preco, 0),
+            valorTotal: valorDosServicos(servicos),
+            valorComissao: comissaoDosServicos(servicos),
           },
           include: INCLUDE_COMPLETO,
         });
@@ -366,7 +368,10 @@ export function createAgendamentosRouter(notificar: Notificar) {
         };
         // Valor só é recalculado quando a lista de serviços muda (com o preço de hoje dos serviços novos)
         const mesmosServicos = servicos.length === antigo.servicos.length && servicos.every((s) => antigo.servicos.some((a) => a.id === s.id));
-        if (!mesmosServicos || antigo.valorTotal === null) dados.valorTotal = servicos.reduce((soma, s) => soma + s.preco, 0);
+        if (!mesmosServicos || antigo.valorTotal === null) {
+          dados.valorTotal = valorDosServicos(servicos);
+          dados.valorComissao = comissaoDosServicos(servicos);
+        }
         // Observações ficam sob a regra da ficha de saúde: quem recebe o campo mascarado não pode sobrescrevê-lo
         if (req.body.observation !== undefined && (usuarioEhSupervisor(req) || acessoSaude.has(antigo.clienteId))) {
           dados.observacoesSaude = lerObservacao(req.body.observation);

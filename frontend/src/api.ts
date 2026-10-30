@@ -407,6 +407,23 @@ export const useReassignAppointment = (token: string | null) => {
   });
 };
 
+export interface RelatorioFinanceiro {
+  periodo: { de: string; ate: string };
+  usarComissao: boolean;
+  totais: { concluidos: number; faturamento: number; comissao: number; liquido: number; faltas: number; cancelados: number };
+  profissionais: Array<{
+    colaboradorId: string; nome: string; ativo: boolean; concluidos: number; faturamento: number;
+    comissao: number; ticketMedio: number; faltas: number; cancelados: number;
+  }>;
+  servicos: Array<{ nome: string; quantidade: number; faturamento: number }>;
+}
+
+export const useRelatorioFinanceiro = (token: string | null, de: string, ate: string) => useQuery<RelatorioFinanceiro>({
+  queryKey: ['relatorio-financeiro', de, ate],
+  queryFn: () => fetchApi(`/relatorios/financeiro?de=${encodeURIComponent(de)}&ate=${encodeURIComponent(ate)}`, token),
+  enabled: Boolean(token && de && ate),
+});
+
 // Recepção confirma a chegada de quem reservou pelo totem
 export const useCheckinAppointment = (token: string | null) => {
   const queryClient = useQueryClient();

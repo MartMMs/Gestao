@@ -13,6 +13,7 @@ import { SupervisorPlanejamentoTab } from '../features/planning/components';
 import { usePlanejamentoEscala, type ScaleOverridePayload } from '../features/planning/hooks/usePlanejamentoEscala';
 import { SupervisorServicosTab } from '../features/services/components';
 import { AutoatendimentoAdminTab } from '../features/autoatendimento/components';
+import { RelatorioFinanceiroTab } from '../features/reports/components';
 import { type DiaEscala } from '../utils/escalaCalculator';
 import { isTeamMember } from '../utils/formatters';
 
@@ -121,10 +122,10 @@ export interface SupervisorViewProps {
 }
 
 export function SupervisorView({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onReassign, onAddEmployee, onDeleteEmployee, onEditEmployee, onAddService, onEditService, onDeleteService, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onCompleteAppointment, onEditClient, onDeleteClient, onAddBloqueio, onDeleteBloqueio, turnoSwapRequests = [], onUpdateTurnoSwapRequestStatus, onOpenUpcomingAppointments, onSaveScaleOverride, onSwapScaleDays, onReplicateScaleDays }: SupervisorViewProps) {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'escala' | 'planejamento' | 'equipe' | 'servicos' | 'clientes' | 'autoatendimento'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'escala' | 'planejamento' | 'equipe' | 'servicos' | 'clientes' | 'autoatendimento' | 'relatorios'>(() => {
     if (typeof window === 'undefined') return 'dashboard';
     const saved = window.sessionStorage.getItem('supervisor-active-tab');
-    if (saved === 'dashboard' || saved === 'escala' || saved === 'planejamento' || saved === 'equipe' || saved === 'servicos' || saved === 'clientes' || saved === 'autoatendimento') {
+    if (saved === 'dashboard' || saved === 'escala' || saved === 'planejamento' || saved === 'equipe' || saved === 'servicos' || saved === 'clientes' || saved === 'autoatendimento' || saved === 'relatorios') {
       return saved;
     }
     return 'dashboard';
@@ -401,6 +402,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
                   <button onClick={() => setActiveTab('escala')} className={`px-6 py-2 rounded-full text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all ${activeTab === 'escala' ? 'bg-primary text-on-primary shadow-md' : 'text-on-surface-variant hover:text-primary'}`}>Agenda</button>
                   <button onClick={() => setActiveTab('servicos')} className={`px-6 py-2 rounded-full text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all ${activeTab === 'servicos' ? 'bg-primary text-on-primary shadow-md' : 'text-on-surface-variant hover:text-primary'}`}>Serviços</button>
                   <button onClick={() => setActiveTab('clientes')} className={`px-6 py-2 rounded-full text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all ${activeTab === 'clientes' ? 'bg-primary text-on-primary shadow-md' : 'text-on-surface-variant hover:text-primary'}`}>Clientes</button>
+                  <button onClick={() => setActiveTab('relatorios')} className={`px-6 py-2 rounded-full text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all ${activeTab === 'relatorios' ? 'bg-primary text-on-primary shadow-md' : 'text-on-surface-variant hover:text-primary'}`}>Relatórios</button>
                   <button onClick={() => setActiveTab('autoatendimento')} className={`px-6 py-2 rounded-full text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all ${activeTab === 'autoatendimento' ? 'bg-primary text-on-primary shadow-md' : 'text-on-surface-variant hover:text-primary'}`}>Totem & Autoatendimento</button>
                 </>
               ) : (
@@ -543,6 +545,8 @@ export function SupervisorView({ employees, appointments, services, clients, sca
       {activeTab === 'autoatendimento' && (
         <AutoatendimentoAdminTab />
       )}
+
+      {activeTab === 'relatorios' && <RelatorioFinanceiroTab />}
 
         {/* Modal de Confirmação de Exclusão */}
         {employeeToDelete && (

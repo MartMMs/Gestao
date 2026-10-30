@@ -82,6 +82,8 @@ model Agendamento {
   clienteId        String
   salaId           String?
   valorTotal       Float?
+  // Comissão do profissional gravada junto com o valor (percentual do serviço no dia)
+  valorComissao    Float?
   valorSinal       Float?
   statusPagamento  String?     @default("pendente")
   metodoPagamento  String?

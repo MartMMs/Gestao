@@ -28,6 +28,7 @@ import {
 
 import { PAPEIS_ATENDIMENTO } from '../lib/usuarios';
 import { clienteComMesmoNome } from '../lib/clientes';
+import { comissaoDosServicos } from '../lib/valores';
 import { ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN } from '../lib/privacidade';
 
 export { PAPEIS_ATENDIMENTO };
@@ -278,6 +279,7 @@ export const criarAgendamentoTotem = async (
         clienteId: dbCliente.id,
         salaId: sessao.salaId,
         valorTotal: sessao.valorTotal,
+        valorComissao: comissaoDosServicos(servicos),
         valorSinal: opcoes.cobranca.valorACobrar,
         statusPagamento: opcoes.cobranca.statusPagamento,
         // Sem confirmação do gateway até este prazo, a limpeza automática cancela e libera o horário

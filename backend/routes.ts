@@ -7,6 +7,7 @@ import { createAgendamentosRouter } from './routes/agendamentosRoutes';
 import { createClientesRouter } from './routes/clientesRoutes';
 import { createServicosRouter } from './routes/servicosRoutes';
 import { createEscalaRouter } from './routes/escalaRoutes';
+import { createRelatoriosRouter } from './routes/relatoriosRoutes';
 
 // Monta a API interna (/api). Cada módulo cuida de um assunto.
 export function createRouter(eventos: Eventos) {
@@ -18,6 +19,7 @@ export function createRouter(eventos: Eventos) {
   router.use(createClientesRouter(() => eventos.notificarMudanca(ESCOPOS.clientes)));
   router.use(createServicosRouter(() => eventos.notificarMudanca(ESCOPOS.servicos)));
   router.use(createEscalaRouter(() => eventos.notificarMudanca(ESCOPOS.escala)));
+  router.use(createRelatoriosRouter());
 
   return router;
 }
