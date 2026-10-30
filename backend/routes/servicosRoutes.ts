@@ -3,6 +3,7 @@ import { prisma } from '../db';
 import { verificarSupervisorToken, verificarToken } from '../auth';
 import { responderErro, type Notificar } from '../lib/http';
 import { prepararBloqueio } from '../lib/privacidade';
+import { registrarAuditoria } from '../lib/auditoria';
 import { MODOS_ELEGIBILIDADE, agendamentosDoDia, normalizarModoElegibilidade } from '../services/agendaService';
 import { dataValida, horarioValido, horarioParaMinutos } from '../../shared/agenda';
 
@@ -108,10 +109,12 @@ export function createServicosRouter(notificar: Notificar) {
       const { id } = req.params;
       const validacao = validarServico(req.body);
       if (!validacao.data) return res.status(400).json({ erro: validacao.erro });
-      if (!(await prisma.servico.findUnique({ where: { id } }))) return res.status(404).json({ erro: 'Serviço não encontrado.' });
+      const anterior = await prisma.servico.findUnique({ where: { id } });
+      if (!anterior) return res.status(404).json({ erro: 'Serviço não encontrado.' });
       if (await nomeEmUso(validacao.data.nome, id)) return res.status(409).json({ erro: 'Já existe um serviço com este nome.' });
 
       const servico = await prisma.servico.update({ where: { id }, data: validacao.data });
+      await registrarAuditoria(req, 'servico.alterado', `Serviço ${servico.nome}`, anterior, servico, ['nome', 'preco', 'comissaoPercentual', 'duracao']);
       notificar();
       res.json(servico);
     } catch (error) {
@@ -124,8 +127,10 @@ export function createServicosRouter(notificar: Notificar) {
   router.patch('/servicos/:id/ativo', verificarSupervisorToken, async (req, res) => {
     try {
       if (typeof req.body?.ativo !== 'boolean') return res.status(400).json({ erro: 'Informe ativo: true ou false.' });
-      const atualizado = await prisma.servico.updateMany({ where: { id: req.params.id }, data: { ativo: req.body.ativo } });
-      if (atualizado.count === 0) return res.status(404).json({ erro: 'Serviço não encontrado.' });
+      const anterior = await prisma.servico.findUnique({ where: { id: req.params.id } });
+      if (!anterior) return res.status(404).json({ erro: 'Serviço não encontrado.' });
+      await prisma.servico.update({ where: { id: anterior.id }, data: { ativo: req.body.ativo } });
+      await registrarAuditoria(req, req.body.ativo ? 'servico.reativado' : 'servico.tirado_de_linha', `Serviço ${anterior.nome}`, anterior, { ativo: req.body.ativo }, ['ativo']);
       notificar();
       res.json({ mensagem: req.body.ativo ? 'Serviço voltou ao catálogo.' : 'Serviço tirado de linha. Ele continua no histórico.' });
     } catch (error) {
@@ -140,8 +145,10 @@ export function createServicosRouter(notificar: Notificar) {
       if (emUso > 0) {
         return res.status(409).json({ erro: `Este serviço já foi usado em ${emUso} atendimento(s) e não pode ser apagado sem perder o histórico. Use "Tirar de linha" para escondê-lo do catálogo.` });
       }
-      const removido = await prisma.servico.deleteMany({ where: { id } });
-      if (removido.count === 0) return res.status(404).json({ erro: 'Serviço não encontrado.' });
+      const anterior = await prisma.servico.findUnique({ where: { id } });
+      if (!anterior) return res.status(404).json({ erro: 'Serviço não encontrado.' });
+      await prisma.servico.delete({ where: { id } });
+      await registrarAuditoria(req, 'servico.excluido', `Serviço ${anterior.nome}`, { existe: true, preco: anterior.preco }, { existe: false, preco: null });
       notificar();
       res.json({ mensagem: 'Serviço excluído' });
     } catch (error) {

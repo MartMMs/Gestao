@@ -3,6 +3,9 @@ import { motion } from 'motion/react';
 import { Appointment, Employee, Service } from '../../../types';
 import { getBrazilCurrentTimeString, getLocalTodayString } from '../../../features/appointments/utils/appointmentCore';
 import { valorDoAtendimento } from '../../../utils/valorAtendimento';
+import { useRelatorioFinanceiro } from '../../../api';
+import { useAuth } from '../../../AuthContext';
+import { hojeNoNegocio, periodoRapido } from '../../../utils/periodos';
 
 interface SupervisorDashboardTabProps {
   appointments: Appointment[];
@@ -11,7 +14,14 @@ interface SupervisorDashboardTabProps {
 }
 
 export function SupervisorDashboardTab({ appointments, services, employees }: SupervisorDashboardTabProps) {
-  const [revenueFilter, setRevenueFilter] = useState<'all' | 'month'>('all');
+  const [revenueFilter, setRevenueFilter] = useState<'all' | 'month'>('month');
+  // Faturamento, faltas e destaque do mês vêm do mesmo cálculo do relatório financeiro (servidor, fuso do negócio,
+  // valores gravados): os números do dashboard e do relatório batem
+  const { token } = useAuth();
+  const mes = useMemo(() => periodoRapido('mes'), []);
+  const ano = useMemo(() => periodoRapido('12meses'), []);
+  const { data: relatorioMes } = useRelatorioFinanceiro(token, mes.de, mes.ate);
+  const { data: relatorioAno } = useRelatorioFinanceiro(token, ano.de, ano.ate);
 
   const todayStr = getLocalTodayString();
   const currentBrazilTime = getBrazilCurrentTimeString();
@@ -31,37 +41,28 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
 
   const maxServices = Math.max(...employees.map(e => e.completedServices), 1);
 
-  const { topEmployee, monthlyNoShows, totalRevenue, last7DaysData } = useMemo(() => {
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-    const todayStrLocal = getLocalTodayString();
-    
-    const monthlyCompleted = appointments.filter(a => {
-      if (a.status !== 'completed') return false;
-      const d = new Date(`${a.date}T12:00:00`);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    });
-    const top = employees.reduce<(Employee & { monthlyCount: number }) | null>((melhor, emp) => {
-      const count = monthlyCompleted.filter(a => a.assignedEmployeeId === emp.id).length;
-      return count > 0 && (!melhor || count > melhor.monthlyCount) ? { ...emp, monthlyCount: count } : melhor;
-    }, null);
+  const topEmployee = useMemo(() => {
+    const melhor = [...(relatorioMes?.profissionais ?? [])].sort((a, b) => b.concluidos - a.concluidos)[0];
+    const emp = melhor && melhor.concluidos > 0 ? employees.find((e) => e.id === melhor.colaboradorId) : undefined;
+    return emp && melhor ? { ...emp, monthlyCount: melhor.concluidos } : null;
+  }, [relatorioMes, employees]);
+  const monthlyNoShows = relatorioMes?.totais.faltas ?? 0;
+  const totalRevenue = (revenueFilter === 'month' ? relatorioMes : relatorioAno)?.totais.faturamento ?? 0;
 
-    const noShows = appointments.filter(a => a.status === 'scheduled' && a.date < todayStrLocal && new Date(`${a.date}T12:00:00`).getMonth() === currentMonth).length;
-
-    const revenue = appointments.filter(a => a.status === 'completed' && (revenueFilter === 'all' || new Date(`${a.date}T12:00:00`).getMonth() === currentMonth)).reduce((acc, app) => acc + valorDoAtendimento(app, services), 0);
-
+  const { last7DaysData } = useMemo(() => {
+    // Dias no fuso do negócio (meio-dia UTC evita trocar o dia), com o valor gravado de cada atendimento
+    const hoje = Date.parse(`${hojeNoNegocio()}T12:00:00Z`);
     const chartDays = [];
     for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const d = new Date(hoje - i * 86_400_000);
+      const dateStr = d.toISOString().slice(0, 10);
       const dayRevenue = appointments.filter(a => a.date === dateStr && a.status === 'completed').reduce((acc, app) => acc + valorDoAtendimento(app, services), 0);
-      chartDays.push({ dateStr, label: d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', ''), revenue: dayRevenue });
+      chartDays.push({ dateStr, label: d.toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'UTC' }).replace('.', ''), revenue: dayRevenue });
     }
     const maxRev = Math.max(...chartDays.map(d => d.revenue), 1);
 
-    return { topEmployee: top, monthlyNoShows: noShows, totalRevenue: revenue, last7DaysData: { days: chartDays, maxRev } };
-  }, [appointments, services, employees, revenueFilter]);
+    return { last7DaysData: { days: chartDays, maxRev } };
+  }, [appointments, services]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
@@ -78,8 +79,8 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
               onChange={(e) => setRevenueFilter(e.target.value as 'all' | 'month')}
               className="bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-[9px] uppercase tracking-widest font-bold rounded px-1.5 py-0.5 border-none outline-none cursor-pointer shrink-0"
             >
-              <option value="all">Total</option>
-              <option value="month">Este Mês</option>
+              <option value="month">Este mês</option>
+              <option value="all">Últimos 12 meses</option>
             </select>
           </div>
           <div className="flex items-center gap-2 mt-1 w-full">

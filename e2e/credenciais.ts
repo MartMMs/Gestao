@@ -33,7 +33,7 @@ export function gerarCpfValido(): string {
   return [...base, d1, d2].join('');
 }
 
-const apiBase = () => process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:3333/api';
+export const apiBase = () => process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:3333/api';
 
 // Nome único por execução (só letras, como o totem exige), para a limpeza apagar só o que o teste criou
 export const nomeClienteTeste = (base: string) =>

@@ -101,14 +101,19 @@ export function SupervisorServicosTab({
   const usarComissao = empresa?.usarComissao !== false;
   const alternarAtivo = useToggleServiceActive(token);
   const [avisoAtivo, setAvisoAtivo] = useState<string | null>(null);
-  const trocarAtivo = async (srv: Service) => {
+  // Última troca feita, para o "Desfazer" do aviso (o botão de olho age com um clique)
+  const [ultimaTroca, setUltimaTroca] = useState<{ id: string; ativo: boolean } | null>(null);
+  const aplicarAtivo = async (id: string, ativo: boolean, desfazendo = false) => {
     try {
-      const resposta = await alternarAtivo.mutateAsync({ id: srv.id, ativo: srv.ativo === false }) as { mensagem?: string };
-      setAvisoAtivo(resposta?.mensagem ?? null);
+      const resposta = await alternarAtivo.mutateAsync({ id, ativo }) as { mensagem?: string };
+      setAvisoAtivo(desfazendo ? 'Alteração desfeita.' : resposta?.mensagem ?? null);
+      setUltimaTroca(desfazendo ? null : { id, ativo });
     } catch (error) {
       setAvisoAtivo(isApiError(error) ? error.message : 'Não foi possível alterar o serviço.');
+      setUltimaTroca(null);
     }
   };
+  const trocarAtivo = (srv: Service) => aplicarAtivo(srv.id, srv.ativo === false);
   // Categorias livres: as sugeridas mais as que já existem nos serviços
   const categorias = Array.from(new Set([...CATEGORIAS_SUGERIDAS, ...services.map((s) => s.categoria).filter((c): c is string => Boolean(c))]));
   const [excluindo, setExcluindo] = useState(false);
@@ -165,7 +170,14 @@ export function SupervisorServicosTab({
         {avisoAtivo && (
           <div role="status" className="mb-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-on-surface flex justify-between gap-2">
             <span>{avisoAtivo}</span>
-            <button type="button" onClick={() => setAvisoAtivo(null)} aria-label="Fechar aviso" className="text-on-surface-variant">✕</button>
+            <span className="flex items-center gap-3 shrink-0">
+              {ultimaTroca && (
+                <button type="button" disabled={alternarAtivo.isPending} onClick={() => aplicarAtivo(ultimaTroca.id, !ultimaTroca.ativo, true)} className="font-bold uppercase tracking-wide text-primary">
+                  Desfazer
+                </button>
+              )}
+              <button type="button" onClick={() => { setAvisoAtivo(null); setUltimaTroca(null); }} aria-label="Fechar aviso" className="text-on-surface-variant">✕</button>
+            </span>
           </div>
         )}
         <div className="grid grid-cols-1 gap-4">

@@ -434,6 +434,29 @@ export const useRelatorioFinanceiro = (token: string | null, de: string, ate: st
   enabled: Boolean(token && de && ate),
 });
 
+export interface AtendimentoDoRelatorio {
+  id: string; data: string; horario: string; status: string; cliente: string; clienteCodigo: number;
+  servicos: string[]; valor: number; comissao: number;
+}
+
+export const useAtendimentosDoRelatorio = (token: string | null, colaboradorId: string | null, de: string, ate: string) =>
+  useQuery<AtendimentoDoRelatorio[]>({
+    queryKey: ['relatorio-atendimentos', colaboradorId, de, ate],
+    queryFn: () => fetchApi(`/relatorios/financeiro/atendimentos?colaboradorId=${encodeURIComponent(colaboradorId ?? '')}&de=${de}&ate=${ate}`, token),
+    enabled: Boolean(token && colaboradorId),
+  });
+
+export interface RegistroAuditoria {
+  id: string; acao: string; alvo: string; usuarioNome: string; criadoEm: string;
+  antes: Record<string, unknown> | null; depois: Record<string, unknown> | null;
+}
+
+export const useAuditoria = (token: string | null, habilitado: boolean) => useQuery<RegistroAuditoria[]>({
+  queryKey: ['auditoria'],
+  queryFn: () => fetchApi('/auditoria', token),
+  enabled: Boolean(token && habilitado),
+});
+
 // Recepção confirma a chegada de quem reservou pelo totem
 export const useCheckinAppointment = (token: string | null) => {
   const queryClient = useQueryClient();

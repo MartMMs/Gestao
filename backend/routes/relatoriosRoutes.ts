@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../db';
-import { verificarSupervisorToken } from '../auth';
+import { usuarioEhAdmin, verificarSupervisorToken } from '../auth';
 import { HttpError, responderErro } from '../lib/http';
 import { getEmpresaConfig } from '../services/configService';
 import { comissaoDosServicos } from '../lib/valores';
@@ -116,6 +116,62 @@ export function createRelatoriosRouter() {
       });
     } catch (error) {
       responderErro(res, error, 'Erro ao gerar o relatório financeiro');
+    }
+  });
+
+  // Atendimentos de um profissional no período (conferência do fechamento e da comissão)
+  router.get('/relatorios/financeiro/atendimentos', verificarSupervisorToken, async (req, res) => {
+    try {
+      const { inicio, fim } = lerPeriodo(req.query.de, req.query.ate);
+      const colaboradorId = req.query.colaboradorId;
+      if (typeof colaboradorId !== 'string' || !colaboradorId) throw new HttpError(400, 'Informe o profissional.');
+      const usarComissao = (await getEmpresaConfig()).usarComissao !== false;
+      const depoisDoFim = new Date(Date.parse(`${fim}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+      const agendamentos = await prisma.agendamento.findMany({
+        where: {
+          colaboradorId,
+          data: { gte: instanteNoFuso(inicio, '00:00'), lt: instanteNoFuso(depoisDoFim, '00:00') },
+          status: { in: ['completed', 'no_show', 'cancelled'] },
+        },
+        orderBy: { data: 'asc' },
+        take: 2000,
+        select: {
+          id: true, data: true, status: true, valorTotal: true, valorComissao: true,
+          cliente: { select: { nome: true, codigo: true } },
+          servicos: { select: { nome: true, preco: true, comissaoPercentual: true } },
+        },
+      });
+      res.json(agendamentos.map((ag) => {
+        const { data, horario } = partesNoFuso(ag.data);
+        const concluido = ag.status === 'completed';
+        return {
+          id: ag.id,
+          data,
+          horario,
+          status: ag.status,
+          cliente: ag.cliente.nome,
+          clienteCodigo: ag.cliente.codigo,
+          servicos: ag.servicos.map((s) => s.nome),
+          valor: concluido ? ag.valorTotal ?? ag.servicos.reduce((soma, s) => soma + s.preco, 0) : 0,
+          comissao: concluido && usarComissao ? ag.valorComissao ?? comissaoDosServicos(ag.servicos) : 0,
+        };
+      }));
+    } catch (error) {
+      responderErro(res, error, 'Erro ao buscar os atendimentos do profissional');
+    }
+  });
+
+  // Histórico de alterações sensíveis (só administrador): últimas 200, com o nome de quem alterou
+  router.get('/auditoria', verificarSupervisorToken, async (req, res) => {
+    try {
+      if (!usuarioEhAdmin(req)) return res.status(403).json({ erro: 'Apenas o administrador vê o histórico de alterações.' });
+      const registros = await prisma.registroAuditoria.findMany({ orderBy: { criadoEm: 'desc' }, take: 200 });
+      const ids = [...new Set(registros.map((r) => r.usuarioId).filter((id): id is string => Boolean(id)))];
+      const nomes = new Map((await prisma.colaborador.findMany({ where: { id: { in: ids } }, select: { id: true, nome: true } }))
+        .map((c) => [c.id, c.nome]));
+      res.json(registros.map((r) => ({ ...r, usuarioNome: r.usuarioId ? nomes.get(r.usuarioId) ?? 'Usuário removido' : 'Sistema' })));
+    } catch (error) {
+      responderErro(res, error, 'Erro ao buscar o histórico de alterações');
     }
   });
 

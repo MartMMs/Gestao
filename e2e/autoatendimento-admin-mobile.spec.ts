@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CONTAS, apagarClienteDeTeste, escolherDiaFuturoNoTotem, loginPelaTela, nomeClienteTeste } from './credenciais';
+import { CONTAS, E2E_PASSWORD, apiBase, apagarClienteDeTeste, escolherDiaFuturoNoTotem, loginPelaTela, nomeClienteTeste } from './credenciais';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -34,15 +34,25 @@ test.describe('Autoatendimento - Modo Admin, Agendamento Sem Pagamento & Mobile'
     await page.waitForTimeout(1000);
     await page.screenshot({ path: test.info().outputPath('10_admin_simulador_mobile.png') });
 
-    // Garante que a exigência de pagamento fique desligada para o modo sem pagamento (apenas agendamento)
-    const togglePagamento = page.locator('input[type="checkbox"]').first();
-    if (await togglePagamento.isChecked()) {
-      await togglePagamento.click({ force: true });
-    }
+    // Supervisor vê a cobrança em texto, sem poder alterá-la (decisão do administrador)
+    await expect(page.getByText(/alterado só pelo administrador/i)).toBeVisible();
 
-    // Salva as configurações
+    // Salva as demais configurações
     await page.getByRole('button', { name: /Salvar Alterações/i }).click();
     await expect(page.getByText(/Configurações salvas e aplicadas/i)).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('Administrador desliga a cobrança online para o modo sem pagamento', async ({ request }) => {
+    const login = await request.post(`${apiBase()}/login`, {
+      data: { email: CONTAS.admin, senha: E2E_PASSWORD },
+      headers: { 'X-Auth-Mode': 'token' },
+    });
+    const { token } = await login.json();
+    const res = await request.put(`${apiBase()}/autoatendimento/config`, {
+      data: { exigirPagamento: false, ativo: true },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.ok(), await res.text()).toBeTruthy();
   });
 
   test('Fluxo completo de Autoatendimento SEM PAGAMENTO (Pagar no Local) no Mobile', async ({ browser, request }) => {

@@ -190,3 +190,16 @@ model AcessoHistoricoCliente {
   @@index([clienteId, criadoEm])
   @@index([colaboradorId, criadoEm])
 }
+
+// Quem mudou o quê nas decisões financeiras e de catálogo (preço, comissão, serviço fora de linha, cobrança)
+model RegistroAuditoria {
+  id        String   @id @default(uuid())
+  usuarioId String?
+  acao      String
+  alvo      String
+  antes     Json?
+  depois    Json?
+  criadoEm  DateTime @default(now())
+
+  @@index([criadoEm])
+}

@@ -2,6 +2,7 @@ import { Router, Request } from 'express';
 import crypto from 'node:crypto';
 import { prisma } from '../db';
 import { config as ambiente } from '../env';
+import { registrarAuditoria } from '../lib/auditoria';
 import { usuarioEhAdmin, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { redisService } from '../services/redisService';
 import { communicationService } from '../services/communicationService';
@@ -142,6 +143,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         return res.status(403).json({ erro: 'Apenas o administrador pode alterar a cobrança de pagamento do totem.' });
       }
       const config = await prisma.configuracaoAutoatendimento.update({ where: { id: 'default' }, data: dados });
+      await registrarAuditoria(req, 'totem.cobranca', 'Cobrança do totem', atual, config, ['exigirPagamento', 'percentualSinal']);
       eventos.emitirConfigAutoatendimento(comDisponibilidadePagamento(config));
       eventos.notificarMudanca();
       res.json(comDisponibilidadePagamento(config));

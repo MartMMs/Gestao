@@ -273,12 +273,17 @@ export function AutoatendimentoAdminTab() {
                   Controla se o cliente precisa pagar sinal online ou se agenda sem custo.
                 </p>
                 {!podeAlterarPagamento && (
-                  <p className="text-[11px] font-bold text-on-surface-variant mt-1">Somente o administrador altera a cobrança.</p>
+                  // Supervisor: estado em texto (uma chave travada parecia ligada mesmo quando estava desligada)
+                  <p className="text-[11px] font-bold text-on-surface mt-1">
+                    Pagamento online: {config.exigirPagamento ? 'ligado' : 'desligado'}
+                    {config.exigirPagamento ? ` · Sinal ${config.percentualSinal}%` : ''} · alterado só pelo administrador
+                  </p>
                 )}
               </div>
             </div>
 
             {/* Toggle Switch */}
+{podeAlterarPagamento && (
             <label className={`relative inline-flex items-center ${podeAlterarPagamento ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
               <input
                 type="checkbox"
@@ -289,6 +294,7 @@ export function AutoatendimentoAdminTab() {
               />
               <div className="w-13 h-7 bg-surface-container-high peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[3px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-primary" />
             </label>
+            )}
           </div>
 
           <div
@@ -335,7 +341,7 @@ export function AutoatendimentoAdminTab() {
           )}
 
           {/* Configuração de Percentual de Sinal (quando exigido) */}
-          {config.exigirPagamento && (
+          {config.exigirPagamento && podeAlterarPagamento && (
             <div className="space-y-3 pt-2 border-t border-outline-variant/15">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">

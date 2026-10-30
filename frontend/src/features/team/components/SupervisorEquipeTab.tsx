@@ -423,7 +423,13 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                 <div className="flex items-center gap-3">
                   <img src={emp.avatar} alt={emp.name} className="w-12 h-12 rounded-full object-cover border border-outline-variant/30" />
                   <div className="min-w-0">
-                    <h4 className="text-sm font-bold text-on-surface truncate">{emp.name}</h4>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <h4 className="text-sm font-bold text-on-surface truncate">{emp.name}</h4>
+                      {/* Função de acesso visível: dá para saber quem é supervisor ou recepção sem abrir o cadastro */}
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest ${emp.role === 'admin' || emp.role === 'supervisor' ? 'bg-primary/15 text-primary' : emp.role === 'receptionist' ? 'bg-amber-500/15 text-amber-700' : 'bg-surface-container text-on-surface-variant'}`}>
+                        {emp.role === 'admin' ? 'Admin' : emp.role === 'supervisor' ? 'Supervisor' : emp.role === 'receptionist' ? 'Recepção' : 'Colaborador'}
+                      </span>
+                    </div>
                     <p className="text-xs text-on-surface-variant truncate">{emp.email}</p>
                     <p className="text-[10px] uppercase tracking-widest text-primary mt-1">{emp.specialty}</p>
                     <p className="text-[10px] text-on-surface-variant mt-1">{emp.tipoEscala || '6x1'} • {emp.cargaHorariaSemanal ?? 40}h/sem</p>

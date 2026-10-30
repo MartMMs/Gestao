@@ -1,26 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { isApiError, useRelatorioFinanceiro, type RelatorioFinanceiro } from '../../../api';
+import { isApiError, useAtendimentosDoRelatorio, useAuditoria, useRelatorioFinanceiro, type RelatorioFinanceiro } from '../../../api';
 import { useAuth } from '../../../AuthContext';
+import { periodoRapido } from '../../../utils/periodos';
 
 const reais = (valor: number) => valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBr = (iso: string) => iso.split('-').reverse().join('/');
-
-const hojeIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
-
-// Atalhos de período mais usados no fechamento
-const periodoRapido = (tipo: 'mes' | 'mesPassado' | '30dias') => {
-  const hoje = hojeIso();
-  const [ano, mes] = hoje.split('-').map(Number);
-  if (tipo === 'mes') return { de: `${hoje.slice(0, 7)}-01`, ate: hoje };
-  if (tipo === 'mesPassado') {
-    const inicio = new Date(Date.UTC(ano, mes - 2, 1)).toISOString().slice(0, 10);
-    const fim = new Date(Date.UTC(ano, mes - 1, 0)).toISOString().slice(0, 10);
-    return { de: inicio, ate: fim };
-  }
-  const inicio = new Date(Date.parse(`${hoje}T12:00:00Z`) - 29 * 86_400_000).toISOString().slice(0, 10);
-  return { de: inicio, ate: hoje };
-};
 
 // CSV com ponto e vírgula e vírgula decimal: abre direto no Excel em português
 const baixarCsv = (relatorio: RelatorioFinanceiro) => {
@@ -42,9 +27,92 @@ const baixarCsv = (relatorio: RelatorioFinanceiro) => {
   URL.revokeObjectURL(url);
 };
 
-export function RelatorioFinanceiroTab() {
+const STATUS_ROTULO: Record<string, string> = { completed: 'Concluído', no_show: 'Falta', cancelled: 'Cancelado' };
+
+const ACAO_ROTULO: Record<string, string> = {
+  'servico.alterado': 'Serviço alterado',
+  'servico.tirado_de_linha': 'Serviço tirado de linha',
+  'servico.reativado': 'Serviço voltou ao catálogo',
+  'servico.excluido': 'Serviço excluído',
+  'totem.cobranca': 'Cobrança do totem',
+  'empresa.comissao': 'Comissão da empresa',
+};
+
+const CAMPO_ROTULO: Record<string, string> = {
+  preco: 'preço', comissaoPercentual: 'comissão (%)', nome: 'nome', duracao: 'duração (min)', ativo: 'ativo',
+  exigirPagamento: 'cobrança online', percentualSinal: 'sinal (%)', usarComissao: 'usar comissão', existe: 'existe',
+};
+
+const valorLegivel = (v: unknown) => (v === true ? 'sim' : v === false ? 'não' : v === null || v === undefined ? '—' : String(v));
+
+// Atendimentos de um profissional no período, para conferir o fechamento
+function DetalheProfissional({ colaboradorId, de, ate, usarComissao }: { colaboradorId: string; de: string; ate: string; usarComissao: boolean }) {
   const { token } = useAuth();
+  const { data, isLoading, error } = useAtendimentosDoRelatorio(token, colaboradorId, de, ate);
+  if (isLoading) return <p className="text-xs text-on-surface-variant p-3">Carregando atendimentos...</p>;
+  if (error) return <p className="text-xs text-error p-3">{isApiError(error) ? error.message : 'Não foi possível carregar os atendimentos.'}</p>;
+  if (!data?.length) return <p className="text-xs text-on-surface-variant p-3">Nenhum atendimento no período.</p>;
+  return (
+    <table className="w-full text-xs">
+      <thead className="text-[10px] uppercase tracking-widest text-outline">
+        <tr>
+          <th className="text-left py-2 px-3">Data</th>
+          <th className="text-left py-2 px-3">Cliente</th>
+          <th className="text-left py-2 px-3">Serviços</th>
+          <th className="text-left py-2 px-3">Situação</th>
+          <th className="text-right py-2 px-3">Valor</th>
+          {usarComissao && <th className="text-right py-2 px-3">Comissão</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {data.map((a) => (
+          <tr key={a.id} className="border-t border-outline-variant/10">
+            <td className="py-2 px-3 tabular-nums">{dataBr(a.data)} {a.horario}</td>
+            <td className="py-2 px-3">{a.cliente} <span className="font-mono text-on-surface-variant">#{a.clienteCodigo}</span></td>
+            <td className="py-2 px-3">{a.servicos.join(', ')}</td>
+            <td className="py-2 px-3">{STATUS_ROTULO[a.status] ?? a.status}</td>
+            <td className="py-2 px-3 text-right tabular-nums">{reais(a.valor)}</td>
+            {usarComissao && <td className="py-2 px-3 text-right tabular-nums">{reais(a.comissao)}</td>}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// Histórico de alterações sensíveis (só o administrador vê)
+function HistoricoAlteracoes() {
+  const { token } = useAuth();
+  const { data, isLoading } = useAuditoria(token, true);
+  return (
+    <div className="bg-surface-container-lowest border border-outline-variant/10 rounded-3xl p-5">
+      <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant mb-1">Histórico de alterações</h3>
+      <p className="text-xs text-on-surface-variant mb-3">Preços, comissões, serviços fora de linha e cobrança do totem: quem mudou e quando.</p>
+      {isLoading && <p className="text-xs text-on-surface-variant">Carregando...</p>}
+      {data && data.length === 0 && <p className="text-xs text-on-surface-variant">Nenhuma alteração registrada ainda.</p>}
+      <ul className="divide-y divide-outline-variant/10">
+        {data?.map((r) => (
+          <li key={r.id} className="py-2 text-xs">
+            <div className="flex flex-wrap justify-between gap-2">
+              <span className="font-bold text-on-surface">{ACAO_ROTULO[r.acao] ?? r.acao} · {r.alvo}</span>
+              <span className="text-on-surface-variant">{new Date(r.criadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })} · {r.usuarioNome}</span>
+            </div>
+            <p className="text-on-surface-variant mt-0.5">
+              {Object.keys(r.depois ?? {}).map((campo) => (
+                `${CAMPO_ROTULO[campo] ?? campo}: ${valorLegivel(r.antes?.[campo])} → ${valorLegivel(r.depois?.[campo])}`
+              )).join(' · ')}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function RelatorioFinanceiroTab() {
+  const { token, currentUser } = useAuth();
   const [periodo, setPeriodo] = useState(() => periodoRapido('mes'));
+  const [aberto, setAberto] = useState<string | null>(null);
   const { data, isLoading, error } = useRelatorioFinanceiro(token, periodo.de, periodo.ate);
   const maiorFaturamento = useMemo(() => Math.max(1, ...(data?.profissionais.map((p) => p.faturamento) ?? [])), [data]);
 
@@ -65,15 +133,19 @@ export function RelatorioFinanceiroTab() {
         <div>
           <h2 className="text-2xl font-headline text-on-surface">Relatório financeiro</h2>
           <p className="text-sm text-on-surface-variant">
-            Faturamento{data?.usarComissao !== false ? ' e comissão' : ''} por profissional, com os valores gravados em cada atendimento concluído.
+            {data ? `Faturamento${data.usarComissao ? ' e comissão' : ''} por profissional` : 'Faturamento por profissional'}, com os valores gravados em cada atendimento concluído. Clique num profissional para ver os atendimentos.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          {([['mes', 'Este mês'], ['mesPassado', 'Mês passado'], ['30dias', 'Últimos 30 dias']] as const).map(([tipo, rotulo]) => (
-            <button key={tipo} type="button" onClick={() => setPeriodo(periodoRapido(tipo))} className="px-3 py-2 rounded-xl text-[11px] font-bold uppercase tracking-wide bg-surface-container text-on-surface-variant hover:text-primary">
+          {([['mes', 'Este mês'], ['mesPassado', 'Mês passado'], ['30dias', 'Últimos 30 dias']] as const).map(([tipo, rotulo]) => {
+            const atalho = periodoRapido(tipo);
+            const ativo = atalho.de === periodo.de && atalho.ate === periodo.ate;
+            return (
+            <button key={tipo} type="button" aria-pressed={ativo} onClick={() => setPeriodo(atalho)} className={`px-3 py-2 rounded-xl text-[11px] font-bold uppercase tracking-wide ${ativo ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant hover:text-primary'}`}>
               {rotulo}
             </button>
-          ))}
+            );
+          })}
           <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
             De
             <input type="date" value={periodo.de} max={periodo.ate} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, de: e.target.value }))} className="block mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-2 text-sm normal-case" />
@@ -126,8 +198,14 @@ export function RelatorioFinanceiroTab() {
                   <tr><td colSpan={7} className="py-6 px-4 text-center text-on-surface-variant">Nenhum atendimento concluído, falta ou cancelamento no período.</td></tr>
                 )}
                 {data.profissionais.map((p) => (
-                  <tr key={p.colaboradorId} className="border-t border-outline-variant/10">
+                  <React.Fragment key={p.colaboradorId}>
+                  <tr
+                    className="border-t border-outline-variant/10 cursor-pointer hover:bg-surface-container-low"
+                    onClick={() => setAberto((atual) => (atual === p.colaboradorId ? null : p.colaboradorId))}
+                    aria-expanded={aberto === p.colaboradorId}
+                  >
                     <td className="py-3 px-4 font-medium text-on-surface">
+                      <span className="material-symbols-outlined text-[16px] align-middle mr-1 text-on-surface-variant">{aberto === p.colaboradorId ? 'expand_less' : 'expand_more'}</span>
                       {p.nome}{!p.ativo && <span className="ml-2 text-[10px] uppercase text-on-surface-variant">desligado</span>}
                     </td>
                     <td className="py-3 px-4 text-right tabular-nums">{p.concluidos}</td>
@@ -142,6 +220,14 @@ export function RelatorioFinanceiroTab() {
                     <td className="py-3 px-4 text-right tabular-nums">{p.faltas}</td>
                     <td className="py-3 px-4 text-right tabular-nums">{p.cancelados}</td>
                   </tr>
+                  {aberto === p.colaboradorId && (
+                    <tr className="bg-surface-container-low/50">
+                      <td colSpan={7} className="p-2">
+                        <DetalheProfissional colaboradorId={p.colaboradorId} de={periodo.de} ate={periodo.ate} usarComissao={data.usarComissao} />
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -162,6 +248,8 @@ export function RelatorioFinanceiroTab() {
           )}
         </>
       )}
+
+      {currentUser?.role === 'admin' && <HistoricoAlteracoes />}
     </motion.div>
   );
 }

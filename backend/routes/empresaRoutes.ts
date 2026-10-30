@@ -9,6 +9,7 @@ import { redisService } from '../services/redisService';
 import { getEmpresaConfig } from '../services/configService';
 import { obterFeriadosNacionais } from '../../shared/feriadosBR';
 import { responderErro, ipDoCliente } from '../lib/http';
+import { registrarAuditoria } from '../lib/auditoria';
 import { apagarCookieSessao, gravarCookieSessao, tokenDaRequisicao } from '../lib/cookies';
 import type { Eventos } from '../lib/eventos';
 
@@ -159,6 +160,7 @@ export function createEmpresaRouter(eventos: Eventos) {
         data: validacao.dados as Prisma.ConfiguracaoEmpresaUpdateInput,
       });
 
+      await registrarAuditoria(req, 'empresa.comissao', 'Comissão da empresa', atual, configAtualizada, ['usarComissao']);
       eventos.emitirConfigEmpresa(configAtualizada);
       eventos.notificarMudanca();
       res.json(configAtualizada);
