@@ -97,7 +97,7 @@ export interface SupervisorViewProps {
   services: Service[];
   clients: Client[];
   scaleOverrides?: ScaleOverridePayload[];
-  onReassign: (appointmentId: string, newEmployeeId: string) => void;
+  onReassign: (appointmentId: string, newEmployeeId: string, version?: string) => Promise<unknown> | void;
   onAddEmployee: (employee: Omit<Employee, 'id' | 'rating' | 'completedServices'> & { password: string }) => Promise<boolean | string | void> | void;
   onDeleteEmployee: (id: string, reallocateToId?: string) => Promise<unknown> | void;
   onEditEmployee: (id: string, employee: EmployeeUpdate) => Promise<boolean | string | void> | void;

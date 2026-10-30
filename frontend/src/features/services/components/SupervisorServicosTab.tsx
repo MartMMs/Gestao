@@ -96,7 +96,9 @@ export function SupervisorServicosTab({
   setNewServiceDescription,
 }: SupervisorServicosTabProps) {
   const [servicoParaExcluir, setServicoParaExcluir] = useState<Service | null>(null);
-  const { token } = useAuth();
+  const { token, currentUser } = useAuth();
+  // Comissão é definida só pelo admin (o servidor recusa a alteração vinda de outro papel)
+  const podeEditarComissao = currentUser?.role === 'admin';
   const { data: empresa } = useCompanyConfig(token);
   const usarComissao = empresa?.usarComissao !== false;
   const alternarAtivo = useToggleServiceActive(token);
@@ -237,10 +239,10 @@ export function SupervisorServicosTab({
                     </p>
                   </div>
                 </div>
-                <div className="flex gap-2 justify-end border-t border-outline-variant/10 pt-3 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={(e) => { e.stopPropagation(); onEditServiceCard(srv); }} className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full transition-colors" title="Editar"><span className="material-symbols-outlined text-[22px]">edit</span></button>
-                  <button onClick={(e) => { e.stopPropagation(); trocarAtivo(srv); }} disabled={alternarAtivo.isPending} className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full transition-colors" title={srv.ativo === false ? 'Voltar ao catálogo' : 'Tirar de linha (some do totem e de novos agendamentos)'}><span className="material-symbols-outlined text-[22px]">{srv.ativo === false ? 'visibility' : 'visibility_off'}</span></button>
-                  <button onClick={(e) => { e.stopPropagation(); if (confirmarExclusao) setServicoParaExcluir(srv); else onDeleteServiceCard(srv.id); }} className="p-2 text-on-surface-variant hover:bg-error-container/20 hover:text-error rounded-full transition-colors" title="Excluir"><span className="material-symbols-outlined text-[22px]">delete</span></button>
+                <div className="flex gap-2 justify-end border-t border-outline-variant/10 pt-3 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={(e) => { e.stopPropagation(); onEditServiceCard(srv); }} className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full transition-colors" title="Editar" aria-label={`Editar ${srv.nome}`}><span className="material-symbols-outlined text-[22px]" aria-hidden="true">edit</span></button>
+                  <button onClick={(e) => { e.stopPropagation(); trocarAtivo(srv); }} disabled={alternarAtivo.isPending} className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full transition-colors" title={srv.ativo === false ? 'Voltar ao catálogo' : 'Tirar de linha (some do totem e de novos agendamentos)'} aria-label={srv.ativo === false ? `Voltar ${srv.nome} ao catálogo` : `Tirar ${srv.nome} de linha`}><span className="material-symbols-outlined text-[22px]" aria-hidden="true">{srv.ativo === false ? 'visibility' : 'visibility_off'}</span></button>
+                  <button onClick={(e) => { e.stopPropagation(); if (confirmarExclusao) setServicoParaExcluir(srv); else onDeleteServiceCard(srv.id); }} className="p-2 text-on-surface-variant hover:bg-error-container/20 hover:text-error rounded-full transition-colors" title="Excluir" aria-label={`Excluir ${srv.nome}`}><span className="material-symbols-outlined text-[22px]" aria-hidden="true">delete</span></button>
                 </div>
               </div>
             );
@@ -291,7 +293,8 @@ export function SupervisorServicosTab({
             </div>
             {usarComissao && <div>
               <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Comissão (%) - Opcional</label>
-              <input type="number" step="0.1" min="0" max="100" value={newServiceComissao} onChange={e => setNewServiceComissao(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all" placeholder="Deixe em branco se não houver" />
+              <input type="number" step="0.1" min="0" max="100" value={newServiceComissao} onChange={e => setNewServiceComissao(e.target.value)} disabled={!podeEditarComissao} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all disabled:opacity-60" placeholder={podeEditarComissao ? 'Deixe em branco se não houver' : 'Sem comissão'} />
+              {!podeEditarComissao && <p className="text-[11px] text-on-surface-variant mt-1">Definida pelo administrador.</p>}
             </div>}
             <div>
               <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Duração (Min)</label>

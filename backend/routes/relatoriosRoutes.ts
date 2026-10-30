@@ -4,7 +4,7 @@ import { usuarioEhAdmin, verificarSupervisorToken } from '../auth';
 import { HttpError, responderErro } from '../lib/http';
 import { getEmpresaConfig } from '../services/configService';
 import { comissaoDosServicos } from '../lib/valores';
-import { dataValida, instanteNoFuso, partesNoFuso } from '../../shared/agenda';
+import { dataValida, duracaoTotal, instanteNoFuso, partesNoFuso } from '../../shared/agenda';
 
 const MAX_DIAS_RELATORIO = 366;
 
@@ -21,6 +21,18 @@ type LinhaProfissional = {
 };
 
 const arredondar = (valor: number) => Math.round(valor * 100) / 100;
+
+const STATUS_FECHADOS = ['completed', 'no_show', 'cancelled'];
+// Além dos fechados, os ainda "agendados" que já começaram: a falta só vira no_show bem depois (limpeza),
+// e a grade já os mostra como falta. Os que ainda não terminaram são descartados em `semBaixaVencido`.
+const filtroStatusRelatorio = (agora: Date) => [
+  { status: { in: STATUS_FECHADOS } },
+  { status: 'scheduled', data: { lt: agora } },
+  { status: null, data: { lt: agora } },
+];
+// Agendado cujo horário já terminou sem ninguém dar baixa (concluir ou marcar falta): conta como falta
+const semBaixaVencido = (ag: { status: string | null; data: Date; servicos: { duracao?: number | null }[] }, agora: Date) =>
+  !STATUS_FECHADOS.includes(ag.status ?? 'scheduled') && ag.data.getTime() + duracaoTotal(ag.servicos) * 60_000 < agora.getTime();
 
 // Período fechado [de, ate] em datas do negócio (AAAA-MM-DD); padrão: mês atual até hoje
 const lerPeriodo = (de: unknown, ate: unknown) => {
@@ -46,28 +58,31 @@ export function createRelatoriosRouter() {
       const { inicio, fim } = lerPeriodo(req.query.de, req.query.ate);
       const empresa = await getEmpresaConfig();
       const usarComissao = empresa.usarComissao !== false;
+      const agora = new Date();
       // O dia seguinte ao fim, à meia-noite no fuso do negócio, fecha o intervalo
       const depoisDoFim = new Date(Date.parse(`${fim}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
       const agendamentos = await prisma.agendamento.findMany({
         where: {
           data: { gte: instanteNoFuso(inicio, '00:00'), lt: instanteNoFuso(depoisDoFim, '00:00') },
-          status: { in: ['completed', 'no_show', 'cancelled'] },
+          OR: filtroStatusRelatorio(agora),
         },
         select: {
-          status: true, valorTotal: true, valorComissao: true, colaboradorId: true,
+          status: true, data: true, valorTotal: true, valorComissao: true, colaboradorId: true,
           colaborador: { select: { nome: true, ativo: true } },
-          servicos: { select: { id: true, nome: true, preco: true, comissaoPercentual: true } },
+          servicos: { select: { id: true, nome: true, preco: true, comissaoPercentual: true, duracao: true } },
         },
       });
 
       const porProfissional = new Map<string, LinhaProfissional>();
       const porServico = new Map<string, { nome: string; quantidade: number; faturamento: number }>();
       for (const ag of agendamentos) {
+        const semBaixa = semBaixaVencido(ag, agora);
+        if (!semBaixa && !STATUS_FECHADOS.includes(ag.status ?? 'scheduled')) continue; // ainda em andamento
         const linha = porProfissional.get(ag.colaboradorId) ?? {
           colaboradorId: ag.colaboradorId, nome: ag.colaborador.nome, ativo: ag.colaborador.ativo,
           concluidos: 0, faturamento: 0, comissao: 0, ticketMedio: 0, faltas: 0, cancelados: 0,
         };
-        if (ag.status === 'no_show') linha.faltas += 1;
+        if (ag.status === 'no_show' || semBaixa) linha.faltas += 1;
         else if (ag.status === 'cancelled') linha.cancelados += 1;
         else {
           const valor = ag.valorTotal ?? ag.servicos.reduce((soma, s) => soma + s.preco, 0);
@@ -126,29 +141,32 @@ export function createRelatoriosRouter() {
       const colaboradorId = req.query.colaboradorId;
       if (typeof colaboradorId !== 'string' || !colaboradorId) throw new HttpError(400, 'Informe o profissional.');
       const usarComissao = (await getEmpresaConfig()).usarComissao !== false;
+      const agora = new Date();
       const depoisDoFim = new Date(Date.parse(`${fim}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
       const agendamentos = await prisma.agendamento.findMany({
         where: {
           colaboradorId,
           data: { gte: instanteNoFuso(inicio, '00:00'), lt: instanteNoFuso(depoisDoFim, '00:00') },
-          status: { in: ['completed', 'no_show', 'cancelled'] },
+          OR: filtroStatusRelatorio(agora),
         },
         orderBy: { data: 'asc' },
         take: 2000,
         select: {
           id: true, data: true, status: true, valorTotal: true, valorComissao: true,
           cliente: { select: { nome: true, codigo: true } },
-          servicos: { select: { nome: true, preco: true, comissaoPercentual: true } },
+          servicos: { select: { nome: true, preco: true, comissaoPercentual: true, duracao: true } },
         },
       });
-      res.json(agendamentos.map((ag) => {
+      const visiveis = agendamentos.filter((ag) => STATUS_FECHADOS.includes(ag.status ?? 'scheduled') || semBaixaVencido(ag, agora));
+      res.json(visiveis.map((ag) => {
         const { data, horario } = partesNoFuso(ag.data);
         const concluido = ag.status === 'completed';
         return {
           id: ag.id,
           data,
           horario,
-          status: ag.status,
+          // Falta sem baixa aparece com rótulo próprio: a recepção ainda pode concluir ou marcar a falta
+          status: STATUS_FECHADOS.includes(ag.status ?? 'scheduled') ? ag.status : 'sem_baixa',
           cliente: ag.cliente.nome,
           clienteCodigo: ag.cliente.codigo,
           servicos: ag.servicos.map((s) => s.nome),

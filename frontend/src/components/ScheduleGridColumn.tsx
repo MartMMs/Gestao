@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useMemo } from 'react';
-import { horarioParaMinutos } from '@shared/agenda';
+import { horarioParaMinutos, horarioValido } from '@shared/agenda';
 import { Appointment, Employee, Service } from '../types';
 import { getDuration } from '../features/appointments/utils/appointmentCore';
+import { isApiError } from '../api';
 
 export interface ScheduleGridContext {
   receptionDate: string;
@@ -19,7 +20,7 @@ export interface ScheduleGridContext {
 export interface ScheduleGridActions {
   onGridClick: (e: React.MouseEvent<HTMLDivElement>, empId: string) => void;
   onDeleteBloqueio?: (id: string) => Promise<boolean | void> | void;
-  onReassignAppointment?: (appointmentId: string, newEmployeeId: string) => Promise<boolean | void> | void;
+  onReassignAppointment?: (appointmentId: string, newEmployeeId: string, version?: string) => Promise<unknown> | void;
   // Arrastar e soltar: novo profissional e novo horário (HH:MM) de uma vez; o servidor valida conflitos
   onMoveAppointment?: (appointmentId: string, newEmployeeId: string, time: string) => Promise<boolean | void> | void;
   onCompleteAppointment: (id: string) => void;
@@ -47,6 +48,7 @@ const DRAG_SOURCE_EMPLOYEE = 'application/x-source-employee';
 const DRAG_SOURCE_TIME = 'application/x-source-time';
 // Distância entre o topo do card e o ponto onde ele foi agarrado: o card cai onde o usuário vê, não pelo cursor
 const DRAG_GRAB_OFFSET = 'application/x-grab-offset';
+const DRAG_DURACAO = 'application/x-duracao';
 const PASSO_ARRASTE_MIN = 15;
 
 type EstadoVisual = 'agendado' | 'totem' | 'aguardando' | 'em_atendimento' | 'finalizado' | 'falta';
@@ -57,7 +59,7 @@ const ESTILO_ESTADO: Record<EstadoVisual, { card: string; side: string; text: st
   totem: { card: 'bg-violet-500/15 border-violet-400/45 shadow-sm', side: 'bg-violet-500', text: 'text-violet-700 dark:text-violet-300' },
   aguardando: { card: 'bg-sky-500/15 border-sky-400/45 shadow-sm', side: 'bg-sky-400', text: 'text-sky-700 dark:text-sky-300' },
   em_atendimento: { card: 'bg-emerald-500/15 border-emerald-400/45 shadow-sm', side: 'bg-emerald-400', text: 'text-emerald-700 dark:text-emerald-300' },
-  finalizado: { card: 'bg-surface-container-low/80 border-outline-variant/30 opacity-75', side: 'bg-outline-variant/60', text: 'text-outline-variant line-through' },
+  finalizado: { card: 'bg-surface-container-low/80 border-outline-variant/30', side: 'bg-outline', text: 'text-on-surface-variant line-through' },
   falta: { card: 'bg-error-container/25 border-error/45 shadow-sm', side: 'bg-error', text: 'text-error' },
 };
 
@@ -76,7 +78,7 @@ export function LegendaEstadosAgenda() {
     <div className="flex flex-wrap gap-x-4 gap-y-1" aria-label="Legenda de cores da agenda">
       {(Object.keys(ESTILO_ESTADO) as EstadoVisual[]).map((estado) => (
         <span key={estado} className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">
-          <span className={`w-2.5 h-2.5 rounded-full ${ESTILO_ESTADO[estado].side}`} />
+          <span className={`w-3 h-3 rounded-full ring-1 ring-on-surface/25 ${ESTILO_ESTADO[estado].side}`} />
           {ROTULO_ESTADO[estado]}
         </span>
       ))}
@@ -147,14 +149,21 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
     const grade = event.currentTarget.getBoundingClientRect();
     const offset = Number(event.dataTransfer.getData(DRAG_GRAB_OFFSET)) || 0;
     const minutosBrutos = startHour * 60 + ((event.clientY - grade.top - offset) / hourHeight) * 60;
-    const minutos = Math.min(Math.max(Math.round(minutosBrutos / PASSO_ARRASTE_MIN) * PASSO_ARRASTE_MIN, startHour * 60), endHour * 60);
-    const horario = `${String(Math.floor(minutos / 60)).padStart(2, '0')}:${String(minutos % 60).padStart(2, '0')}`;
-    const mesmoHorario = event.dataTransfer.getData(DRAG_SOURCE_TIME) === horario;
+    // O fim do atendimento também precisa caber na grade (soltar no rodapé não pode passar do expediente)
+    const duracao = Number(event.dataTransfer.getData(DRAG_DURACAO)) || PASSO_ARRASTE_MIN;
+    const ultimoInicio = Math.floor((endHour * 60 - duracao) / PASSO_ARRASTE_MIN) * PASSO_ARRASTE_MIN;
+    const minutos = Math.min(Math.max(Math.round(minutosBrutos / PASSO_ARRASTE_MIN) * PASSO_ARRASTE_MIN, startHour * 60), Math.max(ultimoInicio, startHour * 60));
+    // Solto a menos de meio passo de onde estava: mantém o horário original (10:10 não vira 10:15 por arredondamento)
+    const horarioOrigem = event.dataTransfer.getData(DRAG_SOURCE_TIME);
+    const ficouNoLugar = horarioValido(horarioOrigem) && Math.abs(minutosBrutos - horarioParaMinutos(horarioOrigem)) < PASSO_ARRASTE_MIN / 2;
+    const horario = ficouNoLugar ? horarioOrigem : `${String(Math.floor(minutos / 60)).padStart(2, '0')}:${String(minutos % 60).padStart(2, '0')}`;
+    const mesmoHorario = horarioOrigem === horario;
     if (mesmoProfissional && mesmoHorario) return;
 
     try {
       if (onMoveAppointment) {
-        await onMoveAppointment(appointmentId, emp.id, horario);
+        // false = a pessoa desistiu na confirmação
+        if ((await onMoveAppointment(appointmentId, emp.id, horario)) === false) return;
         setToastMessage(mesmoProfissional ? `Agendamento remarcado para ${horario}.` : `Agendamento movido para ${emp.name} às ${horario}.`);
         return;
       }
@@ -163,7 +172,10 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
       await onReassignAppointment(appointmentId, emp.id);
       setToastMessage(`Agendamento movido para ${emp.name}.`);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Erro ao realocar agendamento.';
+      // Versão desatualizada: não há formulário para "fechar e abrir", e a agenda já foi recarregada (ver useEditAppointment)
+      const msg = isApiError(error) && error.status === 409 && /alterado por outra pessoa/.test(error.message)
+        ? 'Este atendimento mudou enquanto você arrastava. A agenda foi atualizada: confira e tente de novo.'
+        : error instanceof Error ? error.message : 'Erro ao realocar agendamento.';
       setErrorMessage(msg); // Exibe o modal vermelho com a explicação do conflito CLT
     }
   };
@@ -273,6 +285,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
               event.dataTransfer.setData('text/plain', app.id);
               event.dataTransfer.setData(DRAG_SOURCE_EMPLOYEE, app.assignedEmployeeId);
               event.dataTransfer.setData(DRAG_SOURCE_TIME, app.time);
+              event.dataTransfer.setData(DRAG_DURACAO, String(durationMins));
               event.dataTransfer.setData(DRAG_GRAB_OFFSET, String(event.clientY - event.currentTarget.getBoundingClientRect().top));
             }}
             className={`absolute left-1 right-1 rounded-xl border ${cardStatusClass} flex flex-col group overflow-hidden transition-all hover:z-20`}
@@ -282,7 +295,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
             <div className="pl-2 pr-1 py-1 flex flex-col h-full">
               <div className="flex justify-between items-start">
                 <span className={`text-[10px] font-bold leading-none whitespace-nowrap ${visualStyle.text}`}>{app.time}–{horaFim}</span>
-                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-surface-container-lowest/90 rounded-full shadow-sm p-0.5 border border-outline-variant/20 absolute right-1 top-1 z-30">
+                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity bg-surface-container-lowest/90 rounded-full shadow-sm p-0.5 border border-outline-variant/20 absolute right-1 top-1 z-30">
                   {!isCompleted && (
                     <button
                       onClick={(e) => {

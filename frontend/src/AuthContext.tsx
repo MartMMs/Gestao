@@ -178,6 +178,12 @@ const parseStoredUser = (): Employee | null => {
 };
 
 
+// Revoga a sessão no servidor (o token e o cookie HttpOnly): apagar o localStorage não basta, o cookie
+// continuaria valendo até expirar para quem usasse o mesmo navegador. Falha de rede não impede sair.
+const revogarSessaoNoServidor = () => {
+  fetch(`${getApiUrl()}/logout`, { method: 'POST', credentials: 'include', headers: CABECALHO_CSRF, keepalive: true }).catch(() => {});
+};
+
 const hydrateInitialAuthState = (): InitialAuthState => {
   // Sessões do formato antigo (token no localStorage) são descartadas: o próximo login usa o cookie
   if (localStorage.getItem(TOKEN_STORAGE_KEY_ANTIGO)) {
@@ -188,6 +194,7 @@ const hydrateInitialAuthState = (): InitialAuthState => {
   const now = Date.now();
   const activeMeta = parseStoredSessionMeta();
   if (!activeMeta || isSessionExpired(activeMeta, now)) {
+    if (activeMeta) revogarSessaoNoServidor();
     clearStoredAuth({ manterRascunhos: true });
     return { currentUser: null, token: null };
   }
@@ -289,9 +296,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const handleLogout = useCallback(() => {
-    // Revoga o token no servidor; falha de rede não impede sair
-    // O servidor revoga o token e apaga o cookie
-    fetch(`${getApiUrl()}/logout`, { method: 'POST', credentials: 'include', headers: CABECALHO_CSRF, keepalive: true }).catch(() => {});
+    revogarSessaoNoServidor();
     setCurrentUser(null);
     setToken(null);
     setLoginError(null);
@@ -300,6 +305,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Expiração (401, inatividade ou limite da sessão): volta ao login com aviso e preserva os rascunhos
   const encerrarSessaoExpirada = useCallback(() => {
+    // Inatividade num computador compartilhado: o próximo a usar não pode herdar a sessão pelo cookie
+    revogarSessaoNoServidor();
     setCurrentUser(null);
     setToken(null);
     clearStoredAuth({ manterRascunhos: true });

@@ -394,8 +394,8 @@ export default function App() {
   const { mutateAsync: replicateScaleDays } = useReplicateScaleDays(token);
 
   // Estável entre renders: a agenda repassa este callback às colunas memoizadas
-  const handleReassign = useCallback((appointmentId: string, newEmployeeId: string) => {
-    return reassignAppointment({ id: appointmentId, newEmployeeId });
+  const handleReassign = useCallback((appointmentId: string, newEmployeeId: string, version?: string) => {
+    return reassignAppointment({ id: appointmentId, newEmployeeId, version });
   }, [reassignAppointment]);
 
   const handleDeleteEmployee = (id: string, reallocateToId?: string) => {

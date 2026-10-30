@@ -8,8 +8,9 @@ import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, mensagemNomeDuplicado } fro
 import { ORIGEM_COLABORADOR, ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN, clientesComAcessoSaude, prepararAgendamento } from '../lib/privacidade';
 import { validarDisponibilidadeProfissional } from '../services/agendaService';
 import { buscarServicosPorNome } from '../services/servicoService';
-import { comissaoDosServicos, valorDosServicos } from '../lib/valores';
+import { comissaoDosServicos, recalcularValores, valorDosServicos } from '../lib/valores';
 import { lerDesde } from '../lib/periodo';
+import { registrarAuditoria } from '../lib/auditoria';
 import { LIMITE_HISTORICO_CLIENTE } from '../../shared/agendaJanela';
 import {
   HORA_FECHAMENTO,
@@ -47,6 +48,13 @@ const garantirPermissao = (req: Request, colaboradorId: string) => {
   if (!gerenciaAgenda(req) && getUsuario(req)?.id !== colaboradorId) {
     throw new HttpError(403, 'Você só pode alterar os seus próprios atendimentos.');
   }
+};
+
+const MENSAGEM_VERSAO_DESATUALIZADA = 'Este agendamento foi alterado por outra pessoa enquanto você editava. Feche e abra de novo para ver a versão atual.';
+
+// Versão informada (atualizadoEm que a tela leu) diferente da atual: outra pessoa salvou antes
+const conferirVersao = (atualizadoEm: Date, versao: unknown) => {
+  if (typeof versao === 'string' && versao && atualizadoEm.toISOString() !== versao) throw new HttpError(409, MENSAGEM_VERSAO_DESATUALIZADA);
 };
 
 // Lê data (YYYY-MM-DD) e horário (HH:MM) do corpo; aceita o formato legado com data ISO completa
@@ -311,7 +319,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
   router.put('/agendamentos/:id', verificarToken, async (req, res) => {
     try {
       const { id } = req.params;
-      const antigo = await prisma.agendamento.findUnique({ where: { id }, include: { servicos: true, cliente: { select: { removidoEm: true } } } });
+      const antigo = await prisma.agendamento.findUnique({ where: { id }, include: { cliente: { select: { removidoEm: true } } } });
       if (!antigo) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
       garantirPermissao(req, antigo.colaboradorId);
       // Atendimento de cliente excluído é só histórico: não se edita
@@ -333,19 +341,18 @@ export function createAgendamentosRouter(notificar: Notificar) {
       const inicio = instanteNoFuso(data, horario);
       const acessoSaude = await clientesComAcessoSaude(req);
 
+      // Sem a versão não dá para saber se outra pessoa salvou antes: quem salvasse por último apagaria a alteração dela
       const versaoEsperada = typeof req.body.version === 'string' ? req.body.version : undefined;
+      if (!versaoEsperada) return res.status(428).json({ erro: 'Versão do agendamento ausente. Atualize a agenda e tente de novo.' });
 
       const atualizado = await transacaoSerializavel(async (tx) => {
         await travarChave(tx, `agenda:${novoColaboradorId}:${data}`);
 
+        // Relido dentro da transação: valores e serviços são calculados sobre o estado atual, não sobre a leitura de antes
+        const antigo = await tx.agendamento.findUnique({ where: { id }, include: { servicos: true } });
+        if (!antigo) throw new HttpError(404, 'Agendamento não encontrado.');
         // Quem abriu o formulário antes de outra pessoa salvar não sobrescreve a alteração dela
-        if (versaoEsperada) {
-          const atual = await tx.agendamento.findUnique({ where: { id }, select: { atualizadoEm: true } });
-          if (!atual) throw new HttpError(404, 'Agendamento não encontrado.');
-          if (atual.atualizadoEm.toISOString() !== versaoEsperada) {
-            throw new HttpError(409, 'Este agendamento foi alterado por outra pessoa enquanto você editava. Feche e abra de novo para ver a versão atual.');
-          }
-        }
+        conferirVersao(antigo.atualizadoEm, versaoEsperada);
 
         const nomesServicos = req.body.serviceNames ?? req.body.services ?? antigo.servicos.map((s) => s.nome);
         const servicos = await buscarServicosPorNome(tx, nomesServicos, { jaVinculados: antigo.servicos.map((s) => s.id) });
@@ -358,6 +365,13 @@ export function createAgendamentosRouter(notificar: Notificar) {
           throw new HttpError(400, `Com esses serviços o atendimento terminaria depois do fechamento (${HORA_FECHAMENTO_TEXTO}).`);
         }
 
+        // Concluído, falta ou cancelado é registro fechado (entra no faturamento e na comissão): só as observações mudam
+        const encerrado = antigo.status !== null && antigo.status !== 'scheduled';
+        const mesmosServicos = servicos.length === antigo.servicos.length && servicos.every((s) => antigo.servicos.some((a) => a.id === s.id));
+        if (encerrado && (inicio.getTime() !== antigo.data.getTime() || novoColaboradorId !== antigo.colaboradorId || !mesmosServicos)) {
+          throw new HttpError(409, 'Atendimento já encerrado (concluído, falta ou cancelado): não dá para mudar horário, profissional ou serviços.');
+        }
+
         const indisponivel = await validarDisponibilidadeProfissional(tx, novoColaboradorId, inicio, servicos, { ignorarAgendamentoId: id });
         if (indisponivel) throw new HttpError(indisponivel.status, indisponivel.erro);
 
@@ -365,22 +379,9 @@ export function createAgendamentosRouter(notificar: Notificar) {
           data: inicio,
           colaboradorId: novoColaboradorId,
           servicos: { set: servicos.map((s) => ({ id: s.id })) },
+          // Só muda quando a lista de serviços muda ou um dos campos está vazio (ver shared/valores.ts)
+          ...recalcularValores(antigo, servicos),
         };
-        // Valor só é recalculado quando a lista de serviços muda (com o preço de hoje dos serviços novos)
-        const mesmosServicos = servicos.length === antigo.servicos.length && servicos.every((s) => antigo.servicos.some((a) => a.id === s.id));
-        if (antigo.valorTotal === null || antigo.valorComissao === null) {
-          dados.valorTotal = valorDosServicos(servicos);
-          dados.valorComissao = comissaoDosServicos(servicos);
-        } else if (!mesmosServicos) {
-          // Serviços que ficaram mantêm o valor do dia em que foram marcados (fatia proporcional ao preço da época);
-          // só os adicionados entram com o preço e a comissão de hoje
-          const ficaram = antigo.servicos.filter((a) => servicos.some((s) => s.id === a.id));
-          const novos = servicos.filter((s) => !antigo.servicos.some((a) => a.id === s.id));
-          const precoAntigo = valorDosServicos(antigo.servicos);
-          const fracao = precoAntigo > 0 ? valorDosServicos(ficaram) / precoAntigo : 0;
-          dados.valorTotal = Math.round((antigo.valorTotal * fracao + valorDosServicos(novos)) * 100) / 100;
-          dados.valorComissao = Math.round((antigo.valorComissao * fracao + comissaoDosServicos(novos)) * 100) / 100;
-        }
         // Observações ficam sob a regra da ficha de saúde: quem recebe o campo mascarado não pode sobrescrevê-lo
         if (req.body.observation !== undefined && (usuarioEhSupervisor(req) || acessoSaude.has(antigo.clienteId))) {
           dados.observacoesSaude = lerObservacao(req.body.observation);
@@ -389,6 +390,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
         if (!gerenciaAgenda(req) && inicio.getTime() !== antigo.data.getTime()) dados.reservaOrigem = ORIGEM_COLABORADOR;
         if (req.body.clientName !== undefined || req.body.clientId !== undefined) {
           const cliente = await resolverCliente(tx, req, req.body, { clienteAtualId: antigo.clienteId, acessoSaude });
+          if (encerrado && cliente.id !== antigo.clienteId) throw new HttpError(409, 'Atendimento já encerrado: não dá para trocar o cliente.');
           dados.clienteId = cliente.id;
           // Cliente trocado pelo próprio colaborador não libera a ficha de saúde (ver clientesComAcessoSaude)
           if (cliente.id !== antigo.clienteId && !gerenciaAgenda(req)) dados.reservaOrigem = ORIGEM_COLABORADOR;
@@ -403,13 +405,15 @@ export function createAgendamentosRouter(notificar: Notificar) {
     }
   });
 
-  const alterarStatus = async (req: Request, id: string, status: unknown) => {
+  const alterarStatus = async (req: Request, id: string, status: unknown, versao: unknown) => {
     if (!(STATUS_AGENDAMENTO as readonly unknown[]).includes(status)) {
       throw new HttpError(400, `Status inválido. Use: ${STATUS_AGENDAMENTO.join(', ')}.`);
     }
-    const agendamento = await prisma.agendamento.findUnique({ where: { id }, include: { servicos: true, cliente: true, colaborador: true } });
+    // Do profissional, só o que a resposta pode levar (o registro completo tem hash de senha e e-mail)
+    const agendamento = await prisma.agendamento.findUnique({ where: { id }, include: INCLUDE_COMPLETO });
     if (!agendamento) throw new HttpError(404, 'Agendamento não encontrado.');
     garantirPermissao(req, agendamento.colaboradorId);
+    conferirVersao(agendamento.atualizadoEm, versao);
 
     const erroTransicao = erroTransicaoStatus(agendamento.status ?? 'scheduled', status as string, agendamento.data, usuarioEhSupervisor(req), gerenciaAgenda(req));
     if (erroTransicao) throw new HttpError(409, erroTransicao);
@@ -422,18 +426,28 @@ export function createAgendamentosRouter(notificar: Notificar) {
     if (!reativando) {
       return prisma.agendamento.update({ where: { id }, data: { status: status as string }, include: INCLUDE_COMPLETO });
     }
+    // Reabrir um registro fechado volta a permitir mudar horário, profissional e serviços (e o faturamento):
+    // exige a versão (ninguém reabre em cima da alteração de outra pessoa) e fica no histórico de alterações
+    if (typeof versao !== 'string' || !versao) throw new HttpError(428, 'Versão do agendamento ausente. Atualize a agenda e tente de novo.');
     // Reativar exige que o horário ainda esteja livre (senão vira overbooking)
     return transacaoSerializavel(async (tx) => {
       await travarChave(tx, `agenda:${agendamento.colaboradorId}:${partesNoFuso(agendamento.data).data}`);
+      const atual = await tx.agendamento.findUnique({ where: { id }, select: { atualizadoEm: true } });
+      if (!atual) throw new HttpError(404, 'Agendamento não encontrado.');
+      conferirVersao(atual.atualizadoEm, versao);
       const indisponivel = await validarDisponibilidadeProfissional(tx, agendamento.colaboradorId, agendamento.data, agendamento.servicos, { ignorarAgendamentoId: id });
       if (indisponivel) throw new HttpError(409, `Não é possível reativar: ${indisponivel.erro}`);
-      return tx.agendamento.update({ where: { id }, data: { status: 'scheduled' }, include: INCLUDE_COMPLETO });
+      const reaberto = await tx.agendamento.update({ where: { id }, data: { status: 'scheduled' }, include: INCLUDE_COMPLETO });
+      const { data: dia, horario } = partesNoFuso(agendamento.data);
+      const alvo = `Atendimento de ${agendamento.cliente?.nome ?? 'cliente'} com ${agendamento.colaborador?.nome ?? 'profissional'} em ${dia.split('-').reverse().join('/')} ${horario}`;
+      await registrarAuditoria(req, 'agendamento.reaberto', alvo, { status: agendamento.status }, { status: 'scheduled' }, undefined, tx);
+      return reaberto;
     });
   };
 
   router.patch('/agendamentos/:id/status', verificarToken, async (req, res) => {
     try {
-      const atualizado = await alterarStatus(req, req.params.id, req.body.status);
+      const atualizado = await alterarStatus(req, req.params.id, req.body.status, req.body.version);
       notificar();
       res.json(prepararAgendamento(atualizado, req, await clientesComAcessoSaude(req)));
     } catch (error) {
@@ -443,7 +457,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
 
   router.patch('/agendamentos/:id/concluir', verificarToken, async (req, res) => {
     try {
-      const atualizado = await alterarStatus(req, req.params.id, 'completed');
+      const atualizado = await alterarStatus(req, req.params.id, 'completed', req.body?.version);
       notificar();
       res.json(prepararAgendamento(atualizado, req, await clientesComAcessoSaude(req)));
     } catch (error) {
@@ -460,6 +474,10 @@ export function createAgendamentosRouter(notificar: Notificar) {
       if (!agendamento) throw new HttpError(404, 'Agendamento não encontrado.');
       if (agendamento.reservaOrigem !== ORIGEM_TOTEM) throw new HttpError(409, 'Só reservas feitas no totem precisam de check-in.');
       if (agendamento.status !== 'scheduled') throw new HttpError(409, 'Só é possível confirmar a chegada de um atendimento marcado.');
+      // Chegada é no dia: confirmar antes liberaria a ficha de saúde de uma reserva que ninguém viu chegar
+      if (partesNoFuso(agendamento.data).data !== partesNoFuso(new Date()).data) {
+        throw new HttpError(409, 'A chegada só pode ser confirmada no dia do atendimento.');
+      }
       const atualizado = await prisma.agendamento.update({
         where: { id: agendamento.id }, data: { reservaOrigem: ORIGEM_TOTEM_CHECKIN }, include: INCLUDE_COMPLETO,
       });
@@ -471,13 +489,18 @@ export function createAgendamentosRouter(notificar: Notificar) {
   });
 
   // Realocar o atendimento para outro profissional (recepção e supervisores)
-  const realocar = async (req: Request, id: string, destinoId: unknown) => {
+  const realocar = async (req: Request, id: string, destinoId: unknown, versao: unknown) => {
     if (!gerenciaAgenda(req)) throw new HttpError(403, 'Apenas a recepção ou supervisores podem realocar atendimentos.');
     if (typeof destinoId !== 'string' || !destinoId) throw new HttpError(400, 'Informe o colaborador de destino.');
 
     return transacaoSerializavel(async (tx) => {
       const agendamento = await tx.agendamento.findUnique({ where: { id }, include: { servicos: true } });
       if (!agendamento) throw new HttpError(404, 'Agendamento não encontrado.');
+      conferirVersao(agendamento.atualizadoEm, versao);
+      // Mesma regra da edição: registro fechado não troca de profissional (mudaria o dono do faturamento e da comissão)
+      if (agendamento.status !== null && agendamento.status !== 'scheduled') {
+        throw new HttpError(409, 'Atendimento já encerrado (concluído, falta ou cancelado): não dá para mudar o profissional.');
+      }
       await travarChave(tx, `agenda:${destinoId}:${partesNoFuso(agendamento.data).data}`);
 
       const indisponivel = await validarDisponibilidadeProfissional(tx, destinoId, agendamento.data, agendamento.servicos, { ignorarAgendamentoId: id });
@@ -489,7 +512,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
 
   router.patch('/agendamentos/:id/reassign', verificarToken, async (req, res) => {
     try {
-      const atualizado = await realocar(req, req.params.id, req.body.newEmployeeId);
+      const atualizado = await realocar(req, req.params.id, req.body.newEmployeeId, req.body.version);
       notificar();
       res.json(prepararAgendamento(atualizado, req, await clientesComAcessoSaude(req)));
     } catch (error) {

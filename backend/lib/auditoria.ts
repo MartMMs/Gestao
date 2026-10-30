@@ -15,9 +15,12 @@ const diferencas = (antes: Valores, depois: Valores) => {
   };
 };
 
+type ClienteAuditoria = Pick<Prisma.TransactionClient, 'registroAuditoria'>;
+
 /**
  * Registra uma alteração sensível. Falha ao registrar não desfaz a operação (já concluída), mas fica no log.
  * `campos` limita o que é comparado (ex.: só preço e comissão de um serviço).
+ * Com `db` (transação), o registro é gravado junto com a alteração e uma falha desfaz as duas.
  */
 export const registrarAuditoria = async (
   req: Request,
@@ -26,20 +29,24 @@ export const registrarAuditoria = async (
   antes: Valores,
   depois: Valores,
   campos?: string[],
+  db?: ClienteAuditoria,
 ) => {
   const filtrar = (v: Valores) => (campos ? Object.fromEntries(campos.map((c) => [c, v[c]])) : v);
   const delta = diferencas(filtrar(antes), filtrar(depois));
   if (!delta.mudou) return;
+  const data = {
+    usuarioId: getUsuario(req)?.id ?? null,
+    acao,
+    alvo,
+    antes: delta.antes as Prisma.InputJsonValue,
+    depois: delta.depois as Prisma.InputJsonValue,
+  };
+  if (db) {
+    await db.registroAuditoria.create({ data });
+    return;
+  }
   try {
-    await prisma.registroAuditoria.create({
-      data: {
-        usuarioId: getUsuario(req)?.id ?? null,
-        acao,
-        alvo,
-        antes: delta.antes as Prisma.InputJsonValue,
-        depois: delta.depois as Prisma.InputJsonValue,
-      },
-    });
+    await prisma.registroAuditoria.create({ data });
   } catch (error) {
     console.error('[AUDITORIA] Falha ao registrar', acao, alvo, error);
   }

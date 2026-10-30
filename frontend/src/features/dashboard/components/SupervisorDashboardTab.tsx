@@ -18,8 +18,10 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
   // Faturamento, faltas e destaque do mês vêm do mesmo cálculo do relatório financeiro (servidor, fuso do negócio,
   // valores gravados): os números do dashboard e do relatório batem
   const { token } = useAuth();
-  const mes = useMemo(() => periodoRapido('mes'), []);
-  const ano = useMemo(() => periodoRapido('12meses'), []);
+  // Recalculados quando o dia muda: aba aberta na virada do mês passa a mostrar o mês novo
+  const hoje = hojeNoNegocio();
+  const mes = useMemo(() => periodoRapido('mes', hoje), [hoje]);
+  const ano = useMemo(() => periodoRapido('12meses', hoje), [hoje]);
   const { data: relatorioMes } = useRelatorioFinanceiro(token, mes.de, mes.ate);
   const { data: relatorioAno } = useRelatorioFinanceiro(token, ano.de, ano.ate);
 

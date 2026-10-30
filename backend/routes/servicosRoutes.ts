@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../db';
-import { verificarSupervisorToken, verificarToken } from '../auth';
+import { usuarioEhAdmin, usuarioEhSupervisor, verificarSupervisorToken, verificarToken } from '../auth';
 import { responderErro, type Notificar } from '../lib/http';
 import { prepararBloqueio } from '../lib/privacidade';
 import { registrarAuditoria } from '../lib/auditoria';
@@ -74,12 +74,17 @@ const validarServico = (entrada: unknown) => {
 
 const MAX_DIAS_BLOQUEIO = 62;
 
+// Comissão define quanto cada profissional recebe: como a chave geral (usarComissao), só o admin altera
+const ERRO_COMISSAO_SO_ADMIN = 'Só o administrador pode definir a comissão dos serviços.';
+
 export function createServicosRouter(notificar: Notificar) {
   const router = Router();
 
-  router.get('/servicos', verificarToken, async (_req, res) => {
+  router.get('/servicos', verificarToken, async (req, res) => {
     try {
-      res.json(await prisma.servico.findMany({ orderBy: [{ ordem: 'asc' }, { nome: 'asc' }] }));
+      const servicos = await prisma.servico.findMany({ orderBy: [{ ordem: 'asc' }, { nome: 'asc' }] });
+      // Percentual de comissão é política da supervisão (com o valor do atendimento, daria a comissão dos colegas)
+      res.json(usuarioEhSupervisor(req) ? servicos : servicos.map(({ comissaoPercentual: _comissao, ...s }) => s));
     } catch (error) {
       responderErro(res, error, 'Erro ao buscar serviços');
     }
@@ -93,6 +98,7 @@ export function createServicosRouter(notificar: Notificar) {
     try {
       const validacao = validarServico(req.body);
       if (!validacao.data) return res.status(400).json({ erro: validacao.erro });
+      if (validacao.data.comissaoPercentual !== null && !usuarioEhAdmin(req)) return res.status(403).json({ erro: ERRO_COMISSAO_SO_ADMIN });
       if (await nomeEmUso(validacao.data.nome)) return res.status(409).json({ erro: 'Já existe um serviço com este nome.' });
 
       const servico = await prisma.servico.create({ data: validacao.data });
@@ -111,6 +117,11 @@ export function createServicosRouter(notificar: Notificar) {
       if (!validacao.data) return res.status(400).json({ erro: validacao.erro });
       const anterior = await prisma.servico.findUnique({ where: { id } });
       if (!anterior) return res.status(404).json({ erro: 'Serviço não encontrado.' });
+      if (!usuarioEhAdmin(req)) {
+        // Campo omitido mantém a comissão atual; mudar o valor exige admin
+        if (req.body?.comissaoPercentual === undefined) validacao.data.comissaoPercentual = anterior.comissaoPercentual;
+        if (validacao.data.comissaoPercentual !== anterior.comissaoPercentual) return res.status(403).json({ erro: ERRO_COMISSAO_SO_ADMIN });
+      }
       if (await nomeEmUso(validacao.data.nome, id)) return res.status(409).json({ erro: 'Já existe um serviço com este nome.' });
 
       const servico = await prisma.servico.update({ where: { id }, data: validacao.data });

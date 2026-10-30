@@ -27,7 +27,7 @@ const baixarCsv = (relatorio: RelatorioFinanceiro) => {
   URL.revokeObjectURL(url);
 };
 
-const STATUS_ROTULO: Record<string, string> = { completed: 'Concluído', no_show: 'Falta', cancelled: 'Cancelado' };
+const STATUS_ROTULO: Record<string, string> = { completed: 'Concluído', no_show: 'Falta', cancelled: 'Cancelado', sem_baixa: 'Falta (sem baixa)' };
 
 const ACAO_ROTULO: Record<string, string> = {
   'servico.alterado': 'Serviço alterado',
@@ -36,14 +36,22 @@ const ACAO_ROTULO: Record<string, string> = {
   'servico.excluido': 'Serviço excluído',
   'totem.cobranca': 'Cobrança do totem',
   'empresa.comissao': 'Comissão da empresa',
+  'agendamento.reaberto': 'Atendimento reaberto',
 };
 
 const CAMPO_ROTULO: Record<string, string> = {
   preco: 'preço', comissaoPercentual: 'comissão (%)', nome: 'nome', duracao: 'duração (min)', ativo: 'ativo',
-  exigirPagamento: 'cobrança online', percentualSinal: 'sinal (%)', usarComissao: 'usar comissão', existe: 'existe',
+  exigirPagamento: 'cobrança online', percentualSinal: 'sinal (%)', usarComissao: 'usar comissão', existe: 'existe', status: 'situação',
 };
 
-const valorLegivel = (v: unknown) => (v === true ? 'sim' : v === false ? 'não' : v === null || v === undefined ? '—' : String(v));
+const valorLegivel = (campo: string, v: unknown) => {
+  if (v === true) return 'sim';
+  if (v === false) return 'não';
+  if (v === null || v === undefined) return '—';
+  if (campo === 'preco' && typeof v === 'number') return reais(v);
+  if (campo === 'status') return v === 'scheduled' ? 'Agendado' : STATUS_ROTULO[String(v)] ?? String(v);
+  return String(v);
+};
 
 // Atendimentos de um profissional no período, para conferir o fechamento
 function DetalheProfissional({ colaboradorId, de, ate, usarComissao }: { colaboradorId: string; de: string; ate: string; usarComissao: boolean }) {
@@ -83,12 +91,18 @@ function DetalheProfissional({ colaboradorId, de, ate, usarComissao }: { colabor
 // Histórico de alterações sensíveis (só o administrador vê)
 function HistoricoAlteracoes() {
   const { token } = useAuth();
-  const { data, isLoading } = useAuditoria(token, true);
+  const { data, isLoading, error, refetch } = useAuditoria(token, true);
   return (
     <div className="bg-surface-container-lowest border border-outline-variant/10 rounded-3xl p-5">
       <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant mb-1">Histórico de alterações</h3>
       <p className="text-xs text-on-surface-variant mb-3">Preços, comissões, serviços fora de linha e cobrança do totem: quem mudou e quando.</p>
       {isLoading && <p className="text-xs text-on-surface-variant">Carregando...</p>}
+      {error && (
+        <p role="alert" className="text-xs text-error">
+          Não foi possível carregar o histórico.{' '}
+          <button type="button" onClick={() => refetch()} className="font-bold underline">Tentar de novo</button>
+        </p>
+      )}
       {data && data.length === 0 && <p className="text-xs text-on-surface-variant">Nenhuma alteração registrada ainda.</p>}
       <ul className="divide-y divide-outline-variant/10">
         {data?.map((r) => (
@@ -99,7 +113,7 @@ function HistoricoAlteracoes() {
             </div>
             <p className="text-on-surface-variant mt-0.5">
               {Object.keys(r.depois ?? {}).map((campo) => (
-                `${CAMPO_ROTULO[campo] ?? campo}: ${valorLegivel(r.antes?.[campo])} → ${valorLegivel(r.depois?.[campo])}`
+                `${CAMPO_ROTULO[campo] ?? campo}: ${valorLegivel(campo, r.antes?.[campo])} → ${valorLegivel(campo, r.depois?.[campo])}`
               )).join(' · ')}
             </p>
           </li>
@@ -113,6 +127,7 @@ export function RelatorioFinanceiroTab() {
   const { token, currentUser } = useAuth();
   const [periodo, setPeriodo] = useState(() => periodoRapido('mes'));
   const [aberto, setAberto] = useState<string | null>(null);
+  const alternar = (id: string) => setAberto((atual) => (atual === id ? null : id));
   const { data, isLoading, error } = useRelatorioFinanceiro(token, periodo.de, periodo.ate);
   const maiorFaturamento = useMemo(() => Math.max(1, ...(data?.profissionais.map((p) => p.faturamento) ?? [])), [data]);
 
@@ -154,7 +169,7 @@ export function RelatorioFinanceiroTab() {
             Até
             <input type="date" value={periodo.ate} min={periodo.de} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, ate: e.target.value }))} className="block mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-2 text-sm normal-case" />
           </label>
-          <button type="button" disabled={!data || data.profissionais.length === 0} onClick={() => data && baixarCsv(data)} className="px-4 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wide bg-primary text-on-primary disabled:opacity-50 flex items-center gap-1">
+          <button type="button" disabled={!data || data.profissionais.length === 0} onClick={() => data && baixarCsv(data)} title={data && data.profissionais.length === 0 ? 'Sem atendimentos no período' : undefined} className="px-4 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wide bg-primary text-on-primary disabled:opacity-50 flex items-center gap-1">
             <span className="material-symbols-outlined text-[16px]">download</span> Exportar planilha
           </button>
         </div>
@@ -199,14 +214,23 @@ export function RelatorioFinanceiroTab() {
                 )}
                 {data.profissionais.map((p) => (
                   <React.Fragment key={p.colaboradorId}>
+                  {/* A linha inteira é atalho do mouse; o botão no nome é o controle (teclado e leitor de tela) */}
                   <tr
                     className="border-t border-outline-variant/10 cursor-pointer hover:bg-surface-container-low"
-                    onClick={() => setAberto((atual) => (atual === p.colaboradorId ? null : p.colaboradorId))}
-                    aria-expanded={aberto === p.colaboradorId}
+                    onClick={() => alternar(p.colaboradorId)}
                   >
                     <td className="py-3 px-4 font-medium text-on-surface">
-                      <span className="material-symbols-outlined text-[16px] align-middle mr-1 text-on-surface-variant">{aberto === p.colaboradorId ? 'expand_less' : 'expand_more'}</span>
-                      {p.nome}{!p.ativo && <span className="ml-2 text-[10px] uppercase text-on-surface-variant">desligado</span>}
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); alternar(p.colaboradorId); }}
+                        aria-expanded={aberto === p.colaboradorId}
+                        aria-controls={`detalhe-${p.colaboradorId}`}
+                        className="text-left rounded hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                      >
+                        <span className="material-symbols-outlined text-[16px] align-middle mr-1 text-on-surface-variant" aria-hidden="true">{aberto === p.colaboradorId ? 'expand_less' : 'expand_more'}</span>
+                        {p.nome}
+                      </button>
+                      {!p.ativo && <span className="ml-2 text-[10px] uppercase text-on-surface-variant">desligado</span>}
                     </td>
                     <td className="py-3 px-4 text-right tabular-nums">{p.concluidos}</td>
                     <td className="py-3 px-4 min-w-48">
@@ -221,7 +245,7 @@ export function RelatorioFinanceiroTab() {
                     <td className="py-3 px-4 text-right tabular-nums">{p.cancelados}</td>
                   </tr>
                   {aberto === p.colaboradorId && (
-                    <tr className="bg-surface-container-low/50">
+                    <tr id={`detalhe-${p.colaboradorId}`} className="bg-surface-container-low/50">
                       <td colSpan={7} className="p-2">
                         <DetalheProfissional colaboradorId={p.colaboradorId} de={periodo.de} ate={periodo.ate} usarComissao={data.usarComissao} />
                       </td>

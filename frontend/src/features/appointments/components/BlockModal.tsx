@@ -14,7 +14,7 @@ export interface BlockModalProps {
   appointments?: Appointment[];
   onClose: () => void;
   onAddBloqueio?: (b: Omit<Bloqueio, 'id'> & { datas?: string[] }) => Promise<unknown>;
-  onReassignAppointment?: (appointmentId: string, newEmployeeId: string) => Promise<unknown> | void;
+  onReassignAppointment?: (appointmentId: string, newEmployeeId: string, version?: string) => Promise<unknown> | void;
   setErrorMessage: (msg: string | null) => void;
   setToastMessage: (msg: string | null) => void;
 }
@@ -106,7 +106,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
       // (as já feitas continuam válidas) e o usuário é avisado de quantas foram feitas.
       if (isFolga && pendingAppointments.length > 0 && onReassignAppointment && reassignToId) {
         for (const app of pendingAppointments) {
-          await onReassignAppointment(app.id, reassignToId);
+          await onReassignAppointment(app.id, reassignToId, app.version);
           transferidos += 1;
         }
       }

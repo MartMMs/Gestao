@@ -155,8 +155,8 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
   router.get('/servicos', async (_req, res) => {
     try {
       const servicos = await prisma.servico.findMany({ where: { ativo: true }, orderBy: [{ ordem: 'asc' }, { nome: 'asc' }] });
-      // Lista de profissionais exclusivos é interna; o catálogo público não precisa dela
-      res.json(servicos.map(({ profissionaisPermitidos: _ids, ...s }) => s));
+      // Profissionais exclusivos e comissão são internos; o catálogo público não precisa deles
+      res.json(servicos.map(({ profissionaisPermitidos: _ids, comissaoPercentual: _comissao, ...s }) => s));
     } catch (error) {
       responderErro(res, error, 'Falha ao buscar catálogo de serviços.');
     }

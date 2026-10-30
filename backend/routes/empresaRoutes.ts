@@ -10,7 +10,7 @@ import { getEmpresaConfig } from '../services/configService';
 import { obterFeriadosNacionais } from '../../shared/feriadosBR';
 import { responderErro, ipDoCliente } from '../lib/http';
 import { registrarAuditoria } from '../lib/auditoria';
-import { apagarCookieSessao, gravarCookieSessao, tokenDaRequisicao } from '../lib/cookies';
+import { apagarCookieSessao, gravarCookieSessao, tokenDaRequisicao, violaCsrf } from '../lib/cookies';
 import type { Eventos } from '../lib/eventos';
 
 // Tentativas por janela: por e-mail+IP (quem erra a própria senha), por IP (força bruta de um ponto) e
@@ -108,7 +108,9 @@ export function createEmpresaRouter(eventos: Eventos) {
   // Logout: o token deixa de valer imediatamente (mesmo que tenha sido copiado)
   router.post('/logout', async (req, res) => {
     try {
-      const { token } = tokenDaRequisicao(req);
+      const { token, viaCookie } = tokenDaRequisicao(req);
+      // Sem o cabeçalho anti-CSRF, outro site não consegue derrubar a sessão com um formulário
+      if (violaCsrf(req, viaCookie)) return res.status(403).json({ erro: 'Requisição recusada.' });
       const jti = token ? await revogarToken(token) : null;
       if (jti) eventos.encerrarSessao(jti);
       apagarCookieSessao(res);

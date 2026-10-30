@@ -26,10 +26,17 @@ const inicioDaSemana = (data: string) => somarDias(data, -diaDaSemanaSegunda(dat
 
 // Mesma leitura de cores da grade do dia
 const corDoAtendimento = (app: Appointment) => {
-  if (app.status === 'completed') return 'bg-outline-variant/60';
+  if (app.status === 'completed') return 'bg-outline';
   if (app.status === 'no_show') return 'bg-error';
   if (app.aguardandoCheckin) return 'bg-violet-500';
   return 'bg-amber-400';
+};
+// A cor não basta sozinha (daltonismo, leitor de tela): o estado também vai por escrito
+const estadoDoAtendimento = (app: Appointment) => {
+  if (app.status === 'completed') return 'concluído';
+  if (app.status === 'no_show') return 'falta';
+  if (app.aguardandoCheckin) return 'totem, aguardando chegada';
+  return 'agendado';
 };
 
 export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, employees, onMudarDataBase, onAbrirDia, onAbrirAtendimento }: AgendaVisaoPeriodoProps) {
@@ -77,11 +84,16 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="flex items-center justify-between mb-3">
-        <button type="button" onClick={() => navegar(-1)} aria-label="Período anterior" className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant">
+        <button type="button" onClick={() => navegar(-1)} aria-label={visao === 'semana' ? 'Semana anterior' : 'Mês anterior'} title={visao === 'semana' ? 'Semana anterior' : 'Mês anterior'} className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant">
           <span className="material-symbols-outlined">chevron_left</span>
         </button>
-        <h4 className="text-sm font-bold uppercase tracking-widest text-primary">{titulo}</h4>
-        <button type="button" onClick={() => navegar(1)} aria-label="Próximo período" className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant">
+        <div className="flex items-center gap-2">
+          <h4 className="text-sm font-bold uppercase tracking-widest text-primary">{titulo}</h4>
+          <button type="button" onClick={() => onMudarDataBase(todayStr)} className="text-[11px] font-bold text-primary border border-primary/30 rounded-full px-2.5 py-0.5 hover:bg-primary/10">
+            Hoje
+          </button>
+        </div>
+        <button type="button" onClick={() => navegar(1)} aria-label={visao === 'semana' ? 'Próxima semana' : 'Próximo mês'} title={visao === 'semana' ? 'Próxima semana' : 'Próximo mês'} className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant">
           <span className="material-symbols-outlined">chevron_right</span>
         </button>
       </div>
@@ -97,11 +109,15 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
             return (
               <div
                 key={dia}
-                className={`rounded-xl border p-1.5 flex flex-col gap-1 ${visao === 'semana' ? 'min-h-[260px]' : 'min-h-[110px]'} ${dia === todayStr ? 'border-primary' : 'border-outline-variant/20'} ${foraDoMes ? 'opacity-40' : 'bg-surface-container-lowest'}`}
+                className={`rounded-xl border p-1.5 flex flex-col gap-1 ${visao === 'semana' ? 'min-h-[260px]' : 'min-h-[110px]'} ${dia === todayStr ? 'border-primary' : 'border-outline-variant/20'} ${foraDoMes ? 'bg-surface-container-low/40' : 'bg-surface-container-lowest'}`}
               >
                 <button type="button" onClick={() => onAbrirDia(dia)} className="flex items-center justify-between text-left hover:text-primary" title="Abrir este dia na grade">
-                  <span className={`text-xs font-bold ${dia === todayStr ? 'text-primary' : 'text-on-surface'}`}>{Number(dia.slice(8))}</span>
-                  {lista.length > 0 && <span className="text-[10px] font-bold text-on-surface-variant">{lista.length} atend.</span>}
+                  {/* Fora do mês só o número esmaece: os atendimentos continuam legíveis */}
+                  <span className={`text-xs font-bold ${dia === todayStr ? 'text-primary' : foraDoMes ? 'text-outline' : 'text-on-surface'}`}>{Number(dia.slice(8))}</span>
+                  <span className="text-[10px] font-bold text-on-surface-variant">
+                    {/* 'Livre' sugeriria vaga mesmo em domingo, feriado ou dia de folga de todos */}
+                    {lista.length === 0 ? 'Sem atendimentos' : `${lista.length} ${lista.length === 1 ? 'atendimento' : 'atendimentos'}`}
+                  </span>
                 </button>
                 {lista.slice(0, maxPorCelula).map((app) => (
                   <button
@@ -109,9 +125,10 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
                     type="button"
                     onClick={() => onAbrirAtendimento(app)}
                     className={`flex gap-1 rounded-lg bg-surface-container-low px-1.5 py-1 text-left hover:bg-primary/10 ${visao === 'semana' ? 'items-start' : 'items-center'}`}
-                    title={`${app.time} · ${app.clientName} · ${app.services.join(', ')} · ${nomes.get(app.assignedEmployeeId) ?? ''}`}
+                    title={`${app.time} · ${app.clientName} · ${app.services.join(', ')} · ${nomes.get(app.assignedEmployeeId) ?? ''} · ${estadoDoAtendimento(app)}`}
+                    aria-label={`${app.time}, ${app.clientName}, com ${nomes.get(app.assignedEmployeeId) ?? 'profissional'}, ${estadoDoAtendimento(app)}`}
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${visao === 'semana' ? 'mt-1' : ''} ${corDoAtendimento(app)}`} />
+                    <span className={`w-2 h-2 rounded-full ring-1 ring-on-surface/25 shrink-0 ${visao === 'semana' ? 'mt-1' : ''} ${corDoAtendimento(app)}`} />
                     {visao === 'semana' ? (
                       // Semana: espaço para ler cliente e profissional sem abrir o atendimento
                       <span className="min-w-0">

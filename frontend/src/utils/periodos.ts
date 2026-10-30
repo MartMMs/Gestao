@@ -4,8 +4,7 @@ export const hojeNoNegocio = () => new Intl.DateTimeFormat('en-CA', { timeZone: 
 export type PeriodoRapido = 'mes' | 'mesPassado' | '30dias' | '12meses';
 
 // Atalhos de período usados no dashboard e no relatório (mesma regra nos dois)
-export const periodoRapido = (tipo: PeriodoRapido) => {
-  const hoje = hojeNoNegocio();
+export const periodoRapido = (tipo: PeriodoRapido, hoje = hojeNoNegocio()) => {
   const [ano, mes] = hoje.split('-').map(Number);
   if (tipo === 'mes') return { de: `${hoje.slice(0, 7)}-01`, ate: hoje };
   if (tipo === 'mesPassado') {

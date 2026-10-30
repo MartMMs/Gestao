@@ -411,9 +411,9 @@ export const useCancelAppointment = (token: string | null) => {
 export const useReassignAppointment = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, newEmployeeId }: { id: string, newEmployeeId: string }) => 
-      fetchApi(`/agendamentos/${id}/reassign`, token, { method: 'PATCH', body: JSON.stringify({ newEmployeeId }) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+    mutationFn: ({ id, newEmployeeId, version }: { id: string, newEmployeeId: string, version?: string }) =>
+      fetchApi(`/agendamentos/${id}/reassign`, token, { method: 'PATCH', body: JSON.stringify({ newEmployeeId, version }) }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
   });
 };
 
@@ -429,7 +429,8 @@ export interface RelatorioFinanceiro {
 }
 
 export const useRelatorioFinanceiro = (token: string | null, de: string, ate: string) => useQuery<RelatorioFinanceiro>({
-  queryKey: ['relatorio-financeiro', de, ate],
+  // Sob o prefixo 'appointments': toda mudança de agenda (mutação ou aviso do socket) recarrega o relatório
+  queryKey: ['appointments', 'relatorio-financeiro', de, ate],
   queryFn: () => fetchApi(`/relatorios/financeiro?de=${encodeURIComponent(de)}&ate=${encodeURIComponent(ate)}`, token),
   enabled: Boolean(token && de && ate),
 });
@@ -441,7 +442,7 @@ export interface AtendimentoDoRelatorio {
 
 export const useAtendimentosDoRelatorio = (token: string | null, colaboradorId: string | null, de: string, ate: string) =>
   useQuery<AtendimentoDoRelatorio[]>({
-    queryKey: ['relatorio-atendimentos', colaboradorId, de, ate],
+    queryKey: ['appointments', 'relatorio-atendimentos', colaboradorId, de, ate],
     queryFn: () => fetchApi(`/relatorios/financeiro/atendimentos?colaboradorId=${encodeURIComponent(colaboradorId ?? '')}&de=${de}&ate=${ate}`, token),
     enabled: Boolean(token && colaboradorId),
   });
@@ -470,7 +471,8 @@ export const useEditAppointment = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: EditAppointmentPayload) => fetchApi(`/agendamentos/${data.id}`, token, { method: 'PUT', body: JSON.stringify(data) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+    // Também no erro: num conflito (409) a agenda passa a mostrar a versão atual, e a próxima tentativa já parte dela
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
   });
 };
 

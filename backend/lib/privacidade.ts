@@ -47,7 +47,14 @@ export const prepararCliente = <T extends ClienteBase>(cliente: T, req: Request,
 export const prepararBloqueio = <T extends { colaboradorId: string; motivo?: string | null }>(bloqueio: T, req: Request): T =>
   usuarioGerenciaAgenda(req) || bloqueio.colaboradorId === getUsuario(req)?.id ? bloqueio : { ...bloqueio, motivo: 'Indisponível' };
 
-type AgendamentoBase = { clienteId: string; observacoesSaude?: string | null; cliente?: ClienteBase | null };
+type AgendamentoBase = {
+  clienteId: string;
+  colaboradorId?: string | null;
+  observacoesSaude?: string | null;
+  valorComissao?: unknown;
+  cliente?: ClienteBase | null;
+  servicos?: { comissaoPercentual?: number | null }[];
+};
 
 // Janela em que um atendimento libera a ficha de saúde ao profissional
 const ACESSO_ANTES_HORAS = 7 * 24; // atendimento marcado para os próximos 7 dias
@@ -89,8 +96,13 @@ export const clientesComAcessoSaude = async (req: Request): Promise<Set<string>>
 export const prepararAgendamento = <T extends AgendamentoBase>(agendamento: T, req: Request, acessoSaude: Set<string>): T => {
   if (!agendamento || usuarioEhSupervisor(req)) return agendamento;
   const podeVerSaude = acessoSaude.has(agendamento.clienteId);
+  // Comissão é dado financeiro da supervisão: cada profissional vê só a dos próprios atendimentos
+  const podeVerComissao = !!agendamento.colaboradorId && agendamento.colaboradorId === getUsuario(req)?.id;
   return {
     ...agendamento,
+    ...('valorComissao' in agendamento && !podeVerComissao ? { valorComissao: null } : {}),
+    // O percentual junto com o valor do atendimento daria a comissão que acabou de ser escondida
+    ...(agendamento.servicos ? { servicos: agendamento.servicos.map(({ comissaoPercentual: _comissao, ...s }) => s) } : {}),
     observacoesSaude: podeVerSaude ? agendamento.observacoesSaude : null,
     ...(agendamento.cliente ? { cliente: prepararCliente(agendamento.cliente, req, podeVerSaude) } : {}),
   };

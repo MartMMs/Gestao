@@ -2,16 +2,17 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { normalizarTexto } from '@shared/validadores';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Client, Service, Bloqueio } from '../../../types';
-import { getBrazilCurrentMinuteOfDay, getBrazilCurrentTimeString, getLocalTodayString, matchesAppointmentSearch, matchesResourceFilter, shiftDateString, type ResourceFilter } from '../../../features/appointments/utils/appointmentCore';
+import { getDuration, getBrazilCurrentMinuteOfDay, getBrazilCurrentTimeString, getLocalTodayString, matchesAppointmentSearch, matchesResourceFilter, shiftDateString, type ResourceFilter } from '../../../features/appointments/utils/appointmentCore';
 import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { BlockModal, BookingModal, EditAppointmentModal, DeleteAppointmentModal } from '../../../features/appointments/components';
+import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { useScheduleModals } from '../../../features/appointments/hooks';
 import { EmployeeScheduleColumn, LegendaEstadosAgenda, ScheduleGridProvider, type ScheduleGridActions, type ScheduleGridContext } from '../../../components/ScheduleGridColumn';
 import { AgendaVisaoPeriodo, type VisaoAgenda } from './AgendaVisaoPeriodo';
 import { ScheduleRulerGrid } from '../../../components/ScheduleRulerGrid';
 import { isTeamMember } from '../../../utils/formatters';
 import { JANELA_AGENDA_DIAS } from '@shared/agendaJanela';
-import { bloqueioDiaInteiro, minutoDentroDoBloqueio } from '@shared/agenda';
+import { bloqueioDiaInteiro, horarioParaMinutos, minutoDentroDoBloqueio, minutosParaHorario } from '@shared/agenda';
 import type { DiaEscala } from '@shared/escala';
 
 const { START_HOUR, END_HOUR, HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
@@ -34,7 +35,7 @@ interface SupervisorEscalaTabProps {
     descricao?: string;
   }>;
   onOpenUpcomingAppointments?: () => void;
-  onReassignAppointment?: (appointmentId: string, newEmployeeId: string) => void;
+  onReassignAppointment?: (appointmentId: string, newEmployeeId: string, version?: string) => Promise<unknown> | void;
   onAddAppointment: (appointment: Omit<Appointment, 'id' | 'status'>) => Promise<boolean | void> | void;
   isAddingAppointment?: boolean;
   onDeleteAppointment: (id: string) => Promise<boolean | void> | void;
@@ -364,17 +365,44 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   // e a versão do registro, para não sobrescrever uma edição feita por outra pessoa nesse meio tempo
   const appointmentsRef = useRef(appointments);
   appointmentsRef.current = appointments;
-  const handleMoveAppointment = useCallback(async (appointmentId: string, newEmployeeId: string, time: string) => {
+  // Soltar o card não grava direto: um arrasto sem querer remarcaria o cliente. A confirmação mostra o antes e o depois.
+  const [movimentoPendente, setMovimentoPendente] = useState<{
+    app: Appointment; empId: string; time: string; resolver: (movido: boolean) => void; rejeitar: (erro: unknown) => void;
+  } | null>(null);
+  const [movendo, setMovendo] = useState(false);
+  const handleMoveAppointment = useCallback((appointmentId: string, newEmployeeId: string, time: string) => {
     const app = appointmentsRef.current.find((a) => a.id === appointmentId);
-    if (!app) throw new Error('Agendamento não encontrado. Atualize a agenda e tente novamente.');
-    const resultado = await onEditAppointment(appointmentId, {
-      date: app.date,
-      time,
-      assignedEmployeeId: newEmployeeId,
-      version: app.version,
-    });
-    if (resultado === false) throw new Error('Não foi possível mover o agendamento.');
-  }, [onEditAppointment]);
+    if (!app) return Promise.reject(new Error('Agendamento não encontrado. Atualize a agenda e tente novamente.'));
+    return new Promise<boolean>((resolver, rejeitar) => setMovimentoPendente({ app, empId: newEmployeeId, time, resolver, rejeitar }));
+  }, []);
+  const confirmarMovimento = async () => {
+    if (!movimentoPendente || movendo) return;
+    const { app, empId, time, resolver, rejeitar } = movimentoPendente;
+    setMovendo(true);
+    try {
+      const resultado = await onEditAppointment(app.id, { date: app.date, time, assignedEmployeeId: empId, version: app.version });
+      if (resultado === false) rejeitar(new Error('Não foi possível mover o agendamento.'));
+      else resolver(true);
+    } catch (error) {
+      rejeitar(error);
+    } finally {
+      setMovendo(false);
+      setMovimentoPendente(null);
+    }
+  };
+  const cancelarMovimento = () => {
+    movimentoPendente?.resolver(false);
+    setMovimentoPendente(null);
+  };
+  const nomeProfissional = (id: string) => employees.find((e) => e.id === id)?.name ?? 'profissional';
+  const descricaoMovimento = (() => {
+    if (!movimentoPendente) return '';
+    const { app, empId, time } = movimentoPendente;
+    const duracao = getDuration(app.services, services);
+    const intervalo = (inicio: string) => `${inicio}–${minutosParaHorario(horarioParaMinutos(inicio) + duracao)}`;
+    const dia = app.date.split('-').reverse().join('/');
+    return `${app.clientName}, ${dia}: de ${intervalo(app.time)} com ${nomeProfissional(app.assignedEmployeeId)} para ${intervalo(time)} com ${nomeProfissional(empId)}.`;
+  })();
 
   const scheduleGridActions = useMemo<ScheduleGridActions>(() => ({
     onGridClick: handleGridClick,
@@ -523,10 +551,19 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
               </button>
             ))}
           </div>
-          <LegendaEstadosAgenda />
+          {/* Semana e mês usam só as cores de agendado, totem, concluído e falta (com o estado por escrito): a legenda é da grade do dia */}
+          {visao === 'dia' && <LegendaEstadosAgenda />}
         </div>
+        {visao !== 'dia' && professionalFilter === OFF_DAY_FILTER && (
+          <p className="text-[11px] text-on-surface-variant mb-2 shrink-0">"Somente de folga" vale só na visão Dia: aqui aparecem os atendimentos de todos.</p>
+        )}
         {visao === 'dia' && (
-          <p className="text-[11px] text-on-surface-variant mb-2 shrink-0">Arraste um atendimento para outro horário ou profissional para remarcar.</p>
+          <p className="text-[11px] text-on-surface-variant mb-2 shrink-0">
+            {/* Arrastar não funciona no toque: o caminho alternativo vale para tablet e teclado */}
+            <span className="[@media(hover:none)]:hidden">Arraste um atendimento para outro horário ou profissional, ou use </span>
+            <span className="hidden [@media(hover:none)]:inline">Use </span>
+            o botão Editar do atendimento para remarcar.
+          </p>
         )}
 
         {isOutsideLoadedWindow && (
@@ -646,6 +683,18 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
           setToastMessage={setToastMessage}
         />
       )}
+      <ConfirmDialog
+        open={Boolean(movimentoPendente)}
+        icon="event_repeat"
+        tone="primary"
+        title="Remarcar atendimento?"
+        description={descricaoMovimento}
+        confirmLabel="Remarcar"
+        confirmingLabel="Remarcando..."
+        isSubmitting={movendo}
+        onConfirm={confirmarMovimento}
+        onClose={cancelarMovimento}
+      />
       {appointmentToDelete && (
         <DeleteAppointmentModal
           appointmentId={appointmentToDelete} onClose={closeDeleteAppointmentModal} onDeleteAppointment={onDeleteAppointment} setToastMessage={setToastMessage} setErrorMessage={setErrorMessage}
