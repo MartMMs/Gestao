@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
+import type { OpcoesLogin } from '../AuthContext';
 
 // Importando a imagem local novamente
 import bgImage from '../assets/login-fundo.jpg';
 
 interface LoginViewProps {
-  onLogin: (email: string, pass: string) => Promise<void>;
+  onLogin: (email: string, pass: string, opcoes?: OpcoesLogin) => Promise<void>;
   onOpenTVPanel: () => void;
   onOpenAutoatendimento?: () => void;
   error: string | null;
@@ -26,6 +27,9 @@ export function LoginView({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [verificandoRobo, setVerificandoRobo] = useState(false);
+  // Campo-isca: invisível para pessoas, preenchido por robôs que completam todo campo do formulário
+  const [site, setSite] = useState('');
   const [emailError, setEmailError] = useState(false);
 
   // Validação em tempo real do formato de e-mail
@@ -51,7 +55,9 @@ export function LoginView({
     }
 
     setIsLoading(true);
-    await onLogin(email, password);
+    await onLogin(email, password, { site, aoVerificarRobo: setVerificandoRobo });
+    // Senha recusada não fica no campo (quem tenta de novo digita do zero; em tela compartilhada, ninguém a reaproveita)
+    setPassword('');
     setIsLoading(false); // Desliga o spinner assim que a tentativa terminar (falhando ou não)
   };
 
@@ -155,6 +161,11 @@ export function LoginView({
               />
             </div>
 
+            <div aria-hidden="true" className="absolute -left-[9999px] h-px w-px overflow-hidden">
+              <label htmlFor="campo_controle">Não preencha este campo</label>
+              <input id="campo_controle" name="campo_controle" type="text" tabIndex={-1} autoComplete="off" value={site} onChange={(e) => setSite(e.target.value)} />
+            </div>
+
             <button 
               type="submit" 
               disabled={isLoading || emailError}
@@ -166,7 +177,7 @@ export function LoginView({
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  Acessando...
+                  {verificandoRobo ? 'Confirmando que você não é um robô...' : 'Acessando...'}
                 </>
               ) : 'Entrar'}
             </button>

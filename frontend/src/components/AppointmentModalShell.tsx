@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { motion } from 'motion/react';
 
 interface AppointmentModalShellProps {
@@ -33,6 +33,7 @@ export function AppointmentModalShell({
 }: AppointmentModalShellProps) {
   // Só fecha pelo fundo quando o clique começa E termina nele (arrastar ao selecionar texto não fecha)
   const cliqueComecouNoFundo = useRef(false);
+  const tituloId = useId();
 
   const fecharComConfirmacao = () => {
     // Enquanto salva, fechar esconderia o resultado (e um erro) do usuário
@@ -62,12 +63,15 @@ export function AppointmentModalShell({
       }}
     >
       <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={tituloId}
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         className="bg-surface-container-lowest p-8 rounded-3xl shadow-xl max-w-lg w-full border border-outline-variant/20 max-h-[90vh] overflow-y-auto"
       >
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-headline text-primary">{title}</h2>
+          <h2 id={tituloId} className="text-2xl font-headline text-primary">{title}</h2>
           <button onClick={fecharComConfirmacao} disabled={isSubmitting} aria-label="Fechar" className="p-2 hover:bg-surface-container rounded-full text-on-surface-variant disabled:opacity-40" type="button">
             <span className="material-symbols-outlined">close</span>
           </button>

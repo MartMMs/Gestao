@@ -17,7 +17,7 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
   const handleShareWhatsApp = () => {
     const nomeNegocio = empresa?.nomeEmpresa || 'Comprovante de Agendamento';
     const text = encodeURIComponent(
-      `✨ *Meu Comprovante - ${nomeNegocio}* ✨\n\n` +
+      `*Meu Comprovante - ${nomeNegocio}*\n\n` +
       `Código: ${voucher.codigoConfirmacao}\n` +
       `Serviço: ${voucher.terapiaNome} (${voucher.duracaoMin} min)\n` +
       `Data: ${voucher.data} às ${voucher.horario}\n` +
@@ -43,7 +43,7 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
           {voucher.statusPagamento === 'aguardando_pagamento' ? 'Reserva Registrada!' : 'Reserva Confirmada com Sucesso!'}
         </span>
         <h2 className="text-2xl sm:text-3xl font-headline text-primary">
-          Seu Momento de Bem-Estar Está Garantido
+          Seu Horário Está Garantido
         </h2>
         <p className="text-xs sm:text-sm text-on-surface-variant font-body">
           Enviamos uma cópia do seu voucher e orientações de check-in para o seu WhatsApp ({voucher.clienteTelefone}).
@@ -79,7 +79,7 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
           </div>
         </div>
 
-        {/* Detalhes do Cliente e Ritual */}
+        {/* Detalhes do Cliente e do Atendimento */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
           <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/15">
             <span className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">

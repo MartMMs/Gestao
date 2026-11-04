@@ -17,20 +17,20 @@ const diferencas = (antes: Valores, depois: Valores) => {
 
 type ClienteAuditoria = Pick<Prisma.TransactionClient, 'registroAuditoria'>;
 
-/**
- * Registra uma alteração sensível. Falha ao registrar não desfaz a operação (já concluída), mas fica no log.
- * `campos` limita o que é comparado (ex.: só preço e comissão de um serviço).
- * Com `db` (transação), o registro é gravado junto com a alteração e uma falha desfaz as duas.
- */
-export const registrarAuditoria = async (
-  req: Request,
-  acao: string,
-  alvo: string,
-  antes: Valores,
-  depois: Valores,
-  campos?: string[],
-  db?: ClienteAuditoria,
-) => {
+export type DadosAuditoria = {
+  acao: string;
+  alvo: string;
+  antes: Valores;
+  depois: Valores;
+  // Limita o que é comparado (ex.: só preço e comissão de um serviço)
+  campos?: string[];
+  // Com a transação da alteração, o registro é gravado junto e uma falha desfaz as duas (usar em dinheiro e
+  // agendamentos). Sem ela, a alteração já foi gravada: a falha do registro só vai para o log.
+  tx?: ClienteAuditoria;
+};
+
+/** Registra uma alteração sensível (só os campos que mudaram, com antes e depois). */
+export const registrarAuditoria = async (req: Request, { acao, alvo, antes, depois, campos, tx: db }: DadosAuditoria) => {
   const filtrar = (v: Valores) => (campos ? Object.fromEntries(campos.map((c) => [c, v[c]])) : v);
   const delta = diferencas(filtrar(antes), filtrar(depois));
   if (!delta.mudou) return;

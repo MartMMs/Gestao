@@ -3,10 +3,9 @@ import { config } from '../env';
 
 // Sessão em cookie HttpOnly: o JavaScript da página não lê o token, então um XSS não consegue roubá-lo
 export const COOKIE_SESSAO = 'gestao_sessao';
-// Cabeçalho exigido em escritas autenticadas por cookie. Outro site não consegue enviá-lo sem passar pelo CORS
-// (preflight), e o CORS só libera as origens do sistema: isso fecha o CSRF sem token extra
-export const CABECALHO_CSRF = 'x-requested-with';
-export const VALOR_CSRF = 'gestao';
+// Escrita autenticada por cookie exige o token anti-CSRF da sessão neste cabeçalho (ver auth.ts: tokenCsrfDaSessao).
+// O token só é entregue ao próprio sistema (resposta do login e GET /csrf, que outro site não consegue ler).
+export const CABECALHO_CSRF = 'x-csrf-token';
 
 const producao = () => process.env.NODE_ENV === 'production';
 
@@ -50,8 +49,4 @@ export const tokenDaRequisicao = (req: Request): { token: string | null; viaCook
   return { token: cookie, viaCookie: Boolean(cookie) };
 };
 
-const METODOS_SEGUROS = new Set(['GET', 'HEAD', 'OPTIONS']);
-
-// Escrita autenticada por cookie precisa do cabeçalho anti-CSRF
-export const violaCsrf = (req: Request, viaCookie: boolean) =>
-  viaCookie && !METODOS_SEGUROS.has(req.method) && req.headers[CABECALHO_CSRF] !== VALOR_CSRF;
+export const METODOS_SEGUROS = new Set(['GET', 'HEAD', 'OPTIONS']);

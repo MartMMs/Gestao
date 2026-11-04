@@ -71,7 +71,8 @@ Base URL: /api
 
 Autenticacao e empresa:
 
-- POST /login (publico; 10 senhas erradas por e-mail bloqueiam por 15 min)
+- POST /login (publico; 10 tentativas por e-mail+aparelho em 15 min; a partir do 5º erro na conta, espera crescente de 1 a 60 s e uma senha conferida por vez em aparelho novo)
+- POST /minha-senha (troca da propria senha, unico caminho para isso; exige a senha atual, com ate 5 conferencias em 15 min por conta; obrigatoria quando a senha foi criada ou redefinida por outra pessoa: ate la a API responde 403 `TROCAR_SENHA`)
 - GET /feriados
 - GET /empresa/config (publico) e PUT /empresa/config (supervisor)
 
@@ -90,10 +91,7 @@ Agendamentos:
 - DELETE /agendamentos/:id
 - PATCH /agendamentos/:id/status
 - PATCH /agendamentos/:id/concluir
-- PATCH /agendamentos/:id/colaborador
 - PATCH /agendamentos/:id/reassign
-- PATCH /agendamentos/:id/servicos/remover
-- GET /agendamentos/relatorio/concluidos
 
 Servicos:
 

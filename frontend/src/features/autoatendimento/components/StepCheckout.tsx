@@ -1,18 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
 import { AutoatendimentoReservaSession, Voucher } from '../../../types';
-import { confirmarPagamentoAutoatendimento } from '../services/autoatendimentoService';
+import { confirmarPagamentoAutoatendimento, type DadosClienteTotem } from '../services/autoatendimentoService';
 import { formatarReais } from '../utils/moeda';
 import { mensagemDeErro } from '../utils/erros';
 
 interface StepCheckoutProps {
   reservation: AutoatendimentoReservaSession;
-  clientData: {
-    nome: string;
-    telefone: string;
-    cpf: string;
-    observacoesSaude: string;
-  };
+  clientData: DadosClienteTotem;
   onPaymentSuccess: (voucher: Voucher) => void;
   onExpired: () => void;
   onBack: () => void;
@@ -135,7 +129,7 @@ export function StepCheckout({
         </h2>
         <p className="text-sm text-on-surface-variant font-body">
           {isSemPagamento
-            ? 'Seu horário e cabine serão confirmados imediatamente. O valor será pago no balcão da recepção.'
+            ? 'Seu horário será confirmado imediatamente. O valor será pago no balcão da recepção.'
             : 'Seu horário está bloqueado com exclusividade no sistema enquanto você conclui o pagamento.'}
         </p>
       </div>
@@ -236,7 +230,7 @@ export function StepCheckout({
             </div>
 
             <p className="text-[11px] text-on-surface-variant">
-              Após {Math.round(totalSeconds / 60)} minutos, o horário e a cabine serão liberados automaticamente para outros clientes.
+              Após {Math.round(totalSeconds / 60)} minutos, o horário será liberado automaticamente para outros clientes.
             </p>
           </div>
 

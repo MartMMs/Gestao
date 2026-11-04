@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CONTAS, E2E_PASSWORD, apagarClienteDeTeste, gerarCpfValido, loginPelaTela } from './credenciais';
+import { CONTAS, E2E_PASSWORD, apagarClienteDeTeste, gerarCpfValido, loginPelaTela, postLogin } from './credenciais';
 
 const apiBase = () => process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:3333/api';
 
@@ -90,7 +90,7 @@ async function loginApi(
   email: string,
   senha: string,
 ): Promise<LoginResult> {
-  const response = await request.post(`${apiBase()}/login`, { data: { email, senha }, headers: { 'X-Auth-Mode': 'token' } });
+  const response = await postLogin(request, { data: { email, senha }, headers: { 'X-Auth-Mode': 'token' } });
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   return {
     ok: response.ok(),

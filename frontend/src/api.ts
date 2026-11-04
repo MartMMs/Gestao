@@ -1,7 +1,9 @@
+import { CODIGO_VERSAO_DESATUALIZADA } from '@shared/statusAgendamento';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Appointment, Bloqueio, Client, Employee, EmployeeUpdate, Service, ServiceEligibilityMode, TurnoSwapRequest, TurnoSwapStatus, ConfiguracaoEmpresa } from './types';
 import { getApiUrl } from './config/api';
 import { redactSensitiveData } from '@shared/redact';
+import { CODIGO_CSRF, CODIGO_TROCAR_SENHA } from '@shared/codigosErro';
 
 // Disparado quando a API recusa o token (sessão expirada); o AuthContext faz logout
 export const SESSAO_EXPIRADA_EVENT = 'auth:sessao-expirada';
@@ -21,6 +23,8 @@ export class ApiError extends Error {
 }
 
 export const isApiError = (error: unknown): error is ApiError => error instanceof ApiError;
+// Outra pessoa (ou outra aba) salvou o atendimento antes: a tela recarrega e pede para conferir
+export const ehVersaoDesatualizada = (error: unknown) => isApiError(error) && error.code === CODIGO_VERSAO_DESATUALIZADA;
 
 const logFrontendApiError = (context: {
   endpoint: string;
@@ -35,26 +39,81 @@ const logFrontendApiError = (context: {
 
 // Sessão do navegador: o token fica num cookie HttpOnly e o app só guarda este marcador de "logado"
 export const SESSAO_COOKIE = 'cookie';
-// Exigido pelo servidor em escritas autenticadas por cookie (proteção CSRF)
-export const CABECALHO_CSRF = { 'X-Requested-With': 'gestao' } as const;
+// Token anti-CSRF da sessão (vem no login ou em GET /csrf): o servidor exige em escritas autenticadas por cookie.
+// Fica só na memória da página; recarregou, busca de novo.
+let tokenCsrf: string | null = null;
+export const definirTokenCsrf = (valor: unknown) => { tokenCsrf = typeof valor === 'string' && valor ? valor : null; };
+export const cabecalhoCsrf = (): Record<string, string> => (tokenCsrf ? { 'X-CSRF-Token': tokenCsrf } : {});
+// Quem esta aba mostra como logado: o cookie é do navegador inteiro, e outra conta pode entrar em outra aba
+let usuarioDaSessao: string | null = null;
+export const definirUsuarioDaSessao = (id: string | null) => { usuarioDaSessao = id; };
+export const SESSAO_TROCADA_EVENT = 'auth:sessao-trocada';
+// A API recusou porque a senha ainda é a provisória: o AuthContext mostra a tela de troca de senha
+export const TROCAR_SENHA_EVENT = 'auth:trocar-senha';
+
+let buscandoCsrf: Promise<string | null> | null = null;
+// Busca o token anti-CSRF da sessão do cookie e devolve de quem é essa sessão
+export const carregarTokenCsrf = () => {
+  buscandoCsrf ??= fetch(`${getApiUrl()}/csrf`, { credentials: 'include' })
+    .then(async (res) => {
+      if (!res.ok) return null;
+      const corpo = await res.json();
+      const dono = typeof corpo.usuarioId === 'string' ? corpo.usuarioId : null;
+      // Só guarda o token se a sessão for de quem esta aba mostra (senão gravaria em nome de outra pessoa)
+      if (!usuarioDaSessao || dono === usuarioDaSessao) definirTokenCsrf(corpo.csrf);
+      return dono;
+    })
+    .catch(() => null)
+    .finally(() => { buscandoCsrf = null; });
+  return buscandoCsrf;
+};
+const sessaoDeOutraConta = (dono: string | null) => Boolean(usuarioDaSessao && dono && dono !== usuarioDaSessao);
+const MENSAGEM_SESSAO_TROCADA = 'Outra conta entrou neste navegador. Esta tela foi fechada sem gravar nada: entre de novo para continuar.';
+const METODOS_ESCRITA = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export const cabecalhosDeAutenticacao = (token: string | null): Record<string, string> => (
   token && token !== SESSAO_COOKIE ? { Authorization: `Bearer ${token}` } : {}
 );
 
-const fetchApi = async (url: string, token: string | null, options: RequestInit = {}) => {
+// Cada login abre uma nova "geração" de sessão. Um 401 de um pedido feito na sessão anterior (resposta atrasada,
+// nova tentativa do React Query) não pode derrubar a sessão que acabou de começar.
+let geracaoSessao = 0;
+export const iniciarNovaSessao = () => { geracaoSessao += 1; };
+export const ehDaSessaoAtual = (geracao: unknown) => geracao === geracaoSessao;
+
+// O cookie agora é de outra conta (login em outra aba): fecha esta tela e não grava nada
+const recusarSessaoTrocada = (): never => {
+  window.dispatchEvent(new CustomEvent(SESSAO_TROCADA_EVENT));
+  throw new ApiError(MENSAGEM_SESSAO_TROCADA, 403, null, 'SESSAO_TROCADA');
+};
+
+export const fetchApi = async (url: string, token: string | null, options: RequestInit = {}) => {
   const method = options.method || 'GET';
-  const headers = {
-    'Content-Type': 'application/json',
-    ...CABECALHO_CSRF,
-    ...cabecalhosDeAutenticacao(token),
-    ...options.headers,
-  };
+  const geracao = geracaoSessao;
+  const escritaPorCookie = token === SESSAO_COOKIE && METODOS_ESCRITA.has(method);
+  // Página recarregada: o token anti-CSRF ainda não foi buscado
+  if (escritaPorCookie && !tokenCsrf && sessaoDeOutraConta(await carregarTokenCsrf())) {
+    recusarSessaoTrocada();
+  }
+  const enviar = () => fetch(`${getApiUrl()}${url}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...cabecalhoCsrf(), ...cabecalhosDeAutenticacao(token), ...options.headers },
+    credentials: 'include',
+  });
 
   let response: Response;
   try {
-    response = await fetch(`${getApiUrl()}${url}`, { ...options, headers, credentials: 'include' });
+    response = await enviar();
+    // Token anti-CSRF velho: só tenta de novo se o cookie ainda for da mesma pessoa. Se outra conta entrou em
+    // outra aba, nada é gravado e a tela é fechada (gravar seria agir em nome da outra pessoa).
+    if (escritaPorCookie && response.status === 403 && (await response.clone().json().catch(() => null))?.code === CODIGO_CSRF) {
+      if (sessaoDeOutraConta(await carregarTokenCsrf())) {
+        recusarSessaoTrocada();
+      }
+      response = await enviar();
+    }
   } catch (error) {
+    if (isApiError(error)) throw error; // recusa deliberada (sessão de outra conta), não falha de rede
     logFrontendApiError({
       endpoint: url,
       method,
@@ -86,8 +145,9 @@ const fetchApi = async (url: string, token: string | null, options: RequestInit 
       responseBody: errorData,
     });
 
+    if (response.status === 403 && code === CODIGO_TROCAR_SENHA) window.dispatchEvent(new CustomEvent(TROCAR_SENHA_EVENT));
     if (response.status === 401 && token) {
-      window.dispatchEvent(new CustomEvent(SESSAO_EXPIRADA_EVENT));
+      window.dispatchEvent(new CustomEvent(SESSAO_EXPIRADA_EVENT, { detail: { geracao } }));
     }
 
     throw new ApiError(message, response.status, requestId, code);
@@ -114,6 +174,7 @@ interface BackendAppointment {
   specialNeeds?: string[];
   observation?: string;
   observacoesSaude?: string | null;
+  observacoesSaudeOculta?: boolean;
   assignedEmployeeId?: string;
   colaboradorId?: string;
   status?: 'scheduled' | 'completed' | 'no_show' | 'cancelled';
@@ -213,6 +274,7 @@ const normalizeAppointment = (appointment: BackendAppointment): Appointment => {
     specialNeeds: appointment.specialNeeds ?? [],
     // O backend guarda as observações em observacoesSaude (protegidas pela regra da ficha de saúde)
     observation: appointment.observation ?? appointment.observacoesSaude ?? '',
+    observacaoOculta: appointment.observacoesSaudeOculta === true,
     assignedEmployeeId: appointment.assignedEmployeeId || appointment.colaboradorId || '',
     status: appointment.status || 'scheduled',
     aguardandoCheckin: appointment.reservaOrigem === 'autoatendimento',
@@ -266,7 +328,7 @@ const normalizeService = (service: BackendService): Service => {
     nome: typeof service.nome === 'string' ? service.nome : 'Serviço',
     preco: Number.isFinite(parsedPrice) && parsedPrice >= 0 ? parsedPrice : 0,
     duracao: Number.isFinite(parsedDuration) && parsedDuration > 0 ? parsedDuration : 60,
-    icone: typeof service.icone === 'string' && service.icone.trim() ? service.icone : 'spa',
+    icone: typeof service.icone === 'string' && service.icone.trim() ? service.icone : 'design_services',
     descricao: typeof service.descricao === 'string' ? service.descricao : '',
     modoElegibilidade: normalizeServiceEligibilityMode(service.modoElegibilidade),
     cargosPermitidos: Array.isArray(service.cargosPermitidos) ? service.cargosPermitidos.filter((value): value is string => typeof value === 'string') : [],
@@ -373,11 +435,11 @@ export const useAppointments = (token: string | null) => useQuery({
   queryKey: ['appointments'],
   queryFn: async () => {
     // O servidor devolve só o último ano: agendas não precisam do arquivo inteiro
-    // (histórico de cliente usa useClientAppointments; relatórios, /agendamentos/relatorio/concluidos)
+    // (histórico de cliente usa useClientAppointments; relatórios, /relatorios/financeiro)
     const appointments = await fetchApi('/agendamentos', token);
-    // O servidor já descarta cancelados e não comparecimentos; o filtro abaixo é só defesa
+    // O servidor já descarta os cancelados (faltas ficam visíveis para poderem ser reabertas); o filtro é só defesa
     return Array.isArray(appointments)
-      ? appointments.map(normalizeAppointment).filter((a) => a.status === 'scheduled' || a.status === 'completed')
+      ? appointments.map(normalizeAppointment).filter((a) => a.status !== 'cancelled')
       : [];
   },
   enabled: !!token,
@@ -394,8 +456,10 @@ export const useAddAppointment = (token: string | null) => {
 export const useCompleteAppointment = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => fetchApi(`/agendamentos/${id}/concluir`, token, { method: 'PATCH' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+    // Com a versão lida pela tela: se outra pessoa mudou o atendimento antes, o servidor recusa (409)
+    mutationFn: ({ id, version }: { id: string; version?: string }) =>
+      fetchApi(`/agendamentos/${id}/concluir`, token, { method: 'PATCH', body: JSON.stringify({ version }) }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
   });
 };
 
@@ -403,8 +467,19 @@ export const useCompleteAppointment = (token: string | null) => {
 export const useCancelAppointment = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => fetchApi(`/agendamentos/${id}/status`, token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+    mutationFn: ({ id, version }: { id: string; version?: string }) =>
+      fetchApi(`/agendamentos/${id}/status`, token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled', version }) }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+  });
+};
+
+// Concluir, marcar falta ou reabrir (status 'scheduled'), sempre com a versão que a tela leu
+export const useChangeAppointmentStatus = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status, version }: { id: string; status: 'completed' | 'no_show' | 'scheduled'; version?: string }) =>
+      fetchApi(`/agendamentos/${id}/status`, token, { method: 'PATCH', body: JSON.stringify({ status, version }) }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['appointments'] }),
   });
 };
 
@@ -420,16 +495,17 @@ export const useReassignAppointment = (token: string | null) => {
 export interface RelatorioFinanceiro {
   periodo: { de: string; ate: string };
   usarComissao: boolean;
-  totais: { concluidos: number; faturamento: number; comissao: number; liquido: number; faltas: number; cancelados: number };
+  totais: { concluidos: number; faturamento: number; comissao: number; liquido: number; faltas: number; semBaixa: number; cancelados: number };
   profissionais: Array<{
     colaboradorId: string; nome: string; ativo: boolean; concluidos: number; faturamento: number;
-    comissao: number; ticketMedio: number; faltas: number; cancelados: number;
+    comissao: number; ticketMedio: number; faltas: number; semBaixa: number; cancelados: number;
   }>;
   servicos: Array<{ nome: string; quantidade: number; faturamento: number }>;
 }
 
 export const useRelatorioFinanceiro = (token: string | null, de: string, ate: string) => useQuery<RelatorioFinanceiro>({
-  // Sob o prefixo 'appointments': toda mudança de agenda (mutação ou aviso do socket) recarrega o relatório
+  // Sob o prefixo 'appointments': toda mudança de agenda (mutação ou aviso do socket) recarrega o relatório, para o
+  // dashboard e o relatório nunca mostrarem números de momentos diferentes (ex.: 12 meses menor que o mês)
   queryKey: ['appointments', 'relatorio-financeiro', de, ate],
   queryFn: () => fetchApi(`/relatorios/financeiro?de=${encodeURIComponent(de)}&ate=${encodeURIComponent(ate)}`, token),
   enabled: Boolean(token && de && ate),
@@ -440,8 +516,10 @@ export interface AtendimentoDoRelatorio {
   servicos: string[]; valor: number; comissao: number;
 }
 
+export interface DetalheDoRelatorio { atendimentos: AtendimentoDoRelatorio[]; truncado: boolean; limite: number }
+
 export const useAtendimentosDoRelatorio = (token: string | null, colaboradorId: string | null, de: string, ate: string) =>
-  useQuery<AtendimentoDoRelatorio[]>({
+  useQuery<DetalheDoRelatorio>({
     queryKey: ['appointments', 'relatorio-atendimentos', colaboradorId, de, ate],
     queryFn: () => fetchApi(`/relatorios/financeiro/atendimentos?colaboradorId=${encodeURIComponent(colaboradorId ?? '')}&de=${de}&ate=${ate}`, token),
     enabled: Boolean(token && colaboradorId),
@@ -479,8 +557,10 @@ export const useEditAppointment = (token: string | null) => {
 export const useDeleteAppointment = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => fetchApi(`/agendamentos/${id}`, token, { method: 'DELETE' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+    // Com a versão: não apaga um atendimento que alguém acabou de alterar
+    mutationFn: ({ id, version }: { id: string; version?: string }) => fetchApi(`/agendamentos/${id}`, token, { method: 'DELETE', body: JSON.stringify({ version }) }),
+    // Também no erro: num conflito (409) a agenda recarrega e a próxima tentativa já leva a versão nova
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
   });
 };
 

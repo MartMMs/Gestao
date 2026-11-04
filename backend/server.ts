@@ -8,7 +8,7 @@ import { createAutoatendimentoRouter } from './routes/autoatendimentoRoutes';
 import { prisma } from './db';
 import { getJwtSecret } from './auth';
 import { configurarSocket, criarEventos } from './lib/eventos';
-import { responderErro } from './lib/http';
+import { hostDaRequisicao, responderErro } from './lib/http';
 import { redactSensitiveData } from '../shared/redact';
 import { ESCOPOS } from '../shared/escopos';
 
@@ -26,16 +26,25 @@ const app = express();
 const server = http.createServer(app);
 
 // CORS_ORIGINS="https://app.exemplo.com,http://192.168.0.10:3000" define as origens aceitas (obrigatório em produção).
-// Sem a variável (só fora de produção), aceita a própria máquina e a rede local (totens, TVs, celulares da equipe),
-// inclusive subdomínios de localhost (ex.: autoatendimento.localhost para testar o totem sem DNS).
+// Sem a variável (só fora de produção), aceita a própria máquina (inclusive subdomínios de localhost, ex.:
+// autoatendimento.localhost) e, na rede local, só o mesmo IP onde a API roda (o front servido por esta máquina
+// e aberto nos totens, TVs e celulares). Outra máquina da rede não lê respostas com o cookie de quem está logado.
 const origensPermitidas = config.corsOrigins;
 const REDE_LOCAL = /^https?:\/\/((?:[a-z0-9-]+\.)?localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/;
-const origemPermitida = (origem: string | undefined) => (origensPermitidas.length > 0
+const PROPRIA_MAQUINA = /^((?:[a-z0-9-]+\.)?localhost|127\.\d+\.\d+\.\d+)$/;
+const origemDaRedeAceita = (origem: string, hostDaApi: string | undefined) => {
+  if (!REDE_LOCAL.test(origem)) return false;
+  const hostDaOrigem = new URL(origem).hostname;
+  return PROPRIA_MAQUINA.test(hostDaOrigem) || (Boolean(hostDaApi) && hostDaOrigem === hostDaApi);
+};
+const origemPermitida = (origem: string | undefined, hostDaApi?: string) => (origensPermitidas.length > 0
   ? Boolean(origem && origensPermitidas.includes(origem))
-  : !origem || REDE_LOCAL.test(origem));
+  : !origem || origemDaRedeAceita(origem, hostDaApi));
 const corsOptions: CorsOptions = {
   origin: origensPermitidas.length > 0
     ? origensPermitidas
+    // Só para o socket.io (o HTTP usa a regra do mesmo host, abaixo). Conexão sem sessão é pública (totem, TV);
+    // com o cookie da sessão, a origem é conferida com origemPermitida em configurarSocket, que é a barreira real
     : (origem, callback) => callback(null, !origem || REDE_LOCAL.test(origem)),
   // Cookie de sessão nas chamadas do front (que fica em outra origem: porta ou subdomínio diferente)
   credentials: true,
@@ -59,7 +68,12 @@ app.use((_req, res, next) => {
   next();
 });
 
-app.use(cors(corsOptions));
+app.use(cors((req, callback) => callback(null, {
+  ...corsOptions,
+  origin: origensPermitidas.length > 0
+    ? origensPermitidas
+    : origemPermitida(req.headers.origin, hostDaRequisicao(req.headers.host)),
+})));
 // Guarda o corpo bruto para validar a assinatura do webhook de pagamento
 app.use(express.json({
   limit: '100kb',
@@ -108,6 +122,12 @@ setInterval(manutencaoAgenda, 5 * 60 * 1000);
 
 // Porta definida no .env (padrão 3333)
 const PORT = config.porta;
+// Rede de segurança: uma promessa rejeitada sem tratamento (ex.: erro em middleware async, que o Express 4 não
+// captura) é registrada em vez de derrubar a API para todo mundo
+process.on('unhandledRejection', (motivo) => {
+  console.error('[API] Promessa rejeitada sem tratamento:', redactSensitiveData(motivo));
+});
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor escutando em todas as interfaces na porta ${PORT}`);
 });

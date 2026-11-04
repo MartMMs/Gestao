@@ -2,8 +2,9 @@ import { Request, Response } from 'express';
 import { redactSensitiveData } from '../../shared/redact';
 
 // Erro com status HTTP e mensagem pronta para o usuário
+// `codigo` (opcional) é estável para o front decidir o que fazer sem depender do texto da mensagem
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public codigo?: string) {
     super(message);
   }
 }
@@ -16,6 +17,13 @@ export class ServicoIndisponivelError extends HttpError {
   }
 }
 
+// 40P01 (impasse) chega como P2010 com meta.code numa consulta crua (travarChave, FOR UPDATE) e sem código num
+// update comum (só no texto do erro); P2034 é o conflito de serialização
+export const conflitoDeTransacao = (error: unknown) => {
+  const { code, meta, message } = (error ?? {}) as { code?: string; meta?: { code?: string }; message?: string };
+  return code === 'P2034' || meta?.code === '40P01' || /40P01|deadlock detected/.test(String(message));
+};
+
 // Responde erros conhecidos com a mensagem deles; os demais viram 500 genérico (detalhes só no log).
 // Usado pelas rotas e pelo middleware global de erros do servidor (fonte única da tradução erro -> HTTP).
 export const responderErro = (res: Response, error: unknown, mensagemPadrao: string) => {
@@ -24,15 +32,15 @@ export const responderErro = (res: Response, error: unknown, mensagemPadrao: str
     console.error(`[API] ${mensagemPadrao} (após a resposta):`, redactSensitiveData(error));
     return res;
   }
-  if (error instanceof HttpError) return res.status(error.status).json({ erro: error.message });
+  if (error instanceof HttpError) return res.status(error.status).json({ erro: error.message, ...(error.codigo ? { code: error.codigo } : {}) });
   const tipo = (error as { type?: string })?.type;
   if (tipo === 'entity.parse.failed') return res.status(400).json({ erro: 'Dados enviados em formato inválido.' });
   if (tipo === 'entity.too.large') return res.status(413).json({ erro: 'Dados enviados excedem o tamanho permitido.' });
   const codigo = (error as { code?: string })?.code;
   if (codigo === 'P2025') return res.status(404).json({ erro: 'Registro não encontrado.' });
-  // Conflito de gravação simultânea que esgotou as novas tentativas (ver transacaoSerializavel)
-  if (codigo === 'P2034') {
-    return res.status(409).json({ erro: 'A agenda mudou enquanto você salvava. Tente salvar novamente.' });
+  // Espera longa por uma trava (P2028: a transação passou do tempo) ou impasse que esgotou as novas tentativas
+  if (codigo === 'P2028' || conflitoDeTransacao(error)) {
+    return res.status(503).json({ erro: 'Outra operação está alterando estes dados agora. Tente salvar de novo em instantes.' });
   }
   console.error(`[API] ${mensagemPadrao}:`, redactSensitiveData(error));
   return res.status(500).json({ erro: mensagemPadrao });
@@ -46,3 +54,7 @@ export const ipDoCliente = (req: Request) => {
   const ip = (req.ip || req.socket.remoteAddress || 'desconhecido').replace(/^::ffff:/, '');
   return ip.includes(':') ? `${ip.split(':').slice(0, 4).join(':')}::/64` : ip;
 };
+
+// Host (sem porta) em que a requisição chegou: o front da rede local é servido pela mesma máquina.
+// Mesma leitura no HTTP (server.ts) e no socket (eventos.ts)
+export const hostDaRequisicao = (host: string | undefined) => host?.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');

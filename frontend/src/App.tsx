@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { Suspense, lazy, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { horarioParaMinutos } from '@shared/agenda';
 import { flushSync } from 'react-dom';
 import { Layout } from './components/Layout';
@@ -6,14 +6,15 @@ import { useQueryClient } from '@tanstack/react-query';
 import { getBrazilCurrentMinuteOfDay, getLocalTodayString } from './features/appointments/utils/appointmentCore';
 import { useAuth } from './AuthContext';
 import { LoginView } from './components/LoginView';
+import { TrocarSenhaView } from './components/TrocarSenhaView';
 import io from 'socket.io-client';
 import { getSocketUrl } from './config/api';
 import { aplicarAjusteEscala, gerarEscalaComRegras, type DiaEscala } from './utils/escalaCalculator';
 import { analisarConformidadeCLT } from './utils/cltValidator';
 import { AuditorModal } from './components/AuditorModal';
-import { Employee, Appointment, Service, Client, Role, TurnoSwapRequest, TurnoSwapStatus, ServiceEligibilityMode, EmployeeUpdate } from './types'; // Tipos mais fortes
+import { Appointment, Service, Client, Role, TurnoSwapRequest, TurnoSwapStatus, ServiceEligibilityMode, EmployeeUpdate } from './types'; // Tipos mais fortes
 import {
-  useAppointments, useAddAppointment, useCompleteAppointment,
+  useAppointments, useAddAppointment, useCompleteAppointment, useChangeAppointmentStatus,
   useCancelAppointment, useReassignAppointment, useEditAppointment, useDeleteAppointment,
   useEmployees, useAddEmployee, useDeleteEmployee, useEditEmployee,
   useServices, useAddService, useEditService, useDeleteService,
@@ -140,7 +141,7 @@ const normalizeServicePayload = (service: ServicePayload): { data?: Omit<Service
       nome,
       preco,
       duracao,
-      icone: icone || 'spa',
+      icone: icone || 'design_services',
       descricao: descricao || '',
       modoElegibilidade,
       cargosPermitidos,
@@ -267,6 +268,17 @@ export default function App() {
     };
   }, []);
 
+  // Outra conta (ou ninguém) depois do Sair: nada do que a anterior carregou fica na memória (a carteira da supervisão
+  // traz telefone, CPF e observações; quem entra em seguida no mesmo computador não pode vê-la nem por um instante)
+  // Só ao sair (havia alguém e não há mais): limpar na entrada cancelaria as buscas iniciais e a tela não sairia do
+  // "Carregando". Troca de conta em outra aba passa pelo Sair (encerrarPorTrocaDeConta)
+  const usuarioDosDadosRef = useRef(currentUser?.id);
+  useEffect(() => {
+    const anterior = usuarioDosDadosRef.current;
+    usuarioDosDadosRef.current = currentUser?.id;
+    if (anterior && anterior !== currentUser?.id) queryClient.clear();
+  }, [currentUser?.id, queryClient]);
+
   useEffect(() => {
     if (!token || !hasUnauthorizedBootstrapError) return;
 
@@ -375,6 +387,7 @@ export default function App() {
   const { mutateAsync: completeAppointment } = useCompleteAppointment(token);
   const { mutateAsync: cancelAppointment } = useCancelAppointment(token);
   const { mutateAsync: reassignAppointment } = useReassignAppointment(token);
+  const { mutateAsync: changeAppointmentStatus } = useChangeAppointmentStatus(token);
   const { mutateAsync: editAppointment } = useEditAppointment(token);
   const { mutateAsync: deleteAppointment } = useDeleteAppointment(token);
   const { mutateAsync: addEmployee } = useAddEmployee(token);
@@ -392,6 +405,19 @@ export default function App() {
   const { mutateAsync: saveScaleOverride } = useSaveScaleOverride(token);
   const { mutateAsync: swapScaleDays } = useSwapScaleDays(token);
   const { mutateAsync: replicateScaleDays } = useReplicateScaleDays(token);
+
+  // Concluir e cancelar levam a versão que a tela mostra (as telas passam só o id)
+  const appointmentsRef = useRef(appointments);
+  appointmentsRef.current = appointments;
+  const versaoDe = (id: string) => appointmentsRef.current.find((a) => a.id === id)?.version;
+  const handleComplete = useCallback((id: string) => completeAppointment({ id, version: versaoDe(id) }), [completeAppointment]);
+  // Exclusão e cancelamento pelo diálogo: a versão é a de quando ele abriu (ver DeleteAppointmentModal)
+  const handleCancel = useCallback((id: string, version?: string) => cancelAppointment({ id, version: version ?? versaoDe(id) }), [cancelAppointment]);
+  const handleDelete = useCallback((id: string, version?: string) => deleteAppointment({ id, version: version ?? versaoDe(id) }), [deleteAppointment]);
+  const handleAlterarStatus = useCallback(
+    (app: Appointment, status: 'completed' | 'no_show' | 'scheduled') => changeAppointmentStatus({ id: app.id, status, version: app.version }),
+    [changeAppointmentStatus],
+  );
 
   // Estável entre renders: a agenda repassa este callback às colunas memoizadas
   const handleReassign = useCallback((appointmentId: string, newEmployeeId: string, version?: string) => {
@@ -480,6 +506,9 @@ export default function App() {
       </Suspense>
     );
   }
+
+  // Senha provisória: só a tela de troca, antes de qualquer parte do portal
+  if (currentUser?.trocarSenha) return <TrocarSenhaView />;
 
   if (!currentUser) {
     return (
@@ -612,9 +641,9 @@ export default function App() {
             onDeleteService={deleteService}
             onAddAppointment={addAppointment}
             isAddingAppointment={isAddingAppointment}
-            onDeleteAppointment={deleteAppointment}
+            onDeleteAppointment={handleDelete}
             onEditAppointment={handleEditAppointment}
-            onCompleteAppointment={completeAppointment}
+            onAlterarStatus={handleAlterarStatus}
             onEditClient={handleEditClient}
             onDeleteClient={deleteClient}
             onAddBloqueio={addBloqueio}
@@ -637,11 +666,9 @@ export default function App() {
             onAddAppointment={addAppointment}
             isAddingAppointment={isAddingAppointment}
             onEditAppointment={handleEditAppointment}
-            onDeleteAppointment={cancelAppointment}
+            onDeleteAppointment={handleCancel}
             onEditClient={handleEditClient}
-            onCompleteAppointment={completeAppointment}
-            onAddBloqueio={addBloqueio}
-            onDeleteBloqueio={deleteBloqueio}
+            onCompleteAppointment={handleComplete}
             onSubmitTurnoSwapRequest={handleAddTurnoSwapRequest}
           />
         )}

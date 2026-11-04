@@ -5,7 +5,7 @@ import { Service, ServiceEligibilityMode } from '../../../types';
 import { isApiError, useCompanyConfig, useToggleServiceActive } from '../../../api';
 import { useAuth } from '../../../AuthContext';
 
-const CATEGORIAS_SUGERIDAS = ['Massagens', 'Estética Facial', 'Estética Corporal', 'Banhos e Ofurô', 'Day Spa', 'Terapias Holísticas', 'Outros'];
+const CATEGORIAS_SUGERIDAS = ['Atendimento', 'Consulta', 'Avaliação', 'Procedimento', 'Pacote', 'Outros'];
 
 interface SupervisorServicosTabProps {
   services: Service[];
@@ -202,7 +202,7 @@ export function SupervisorServicosTab({
                 <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-primary/80"></div>
                 <div className="flex items-center gap-4 pl-2 min-w-0">
                   <div className="w-12 h-12 bg-primary-container/20 rounded-full flex items-center justify-center text-primary shrink-0">
-                    <span className="material-symbols-outlined">{srv.icone || 'spa'}</span>
+                    <span className="material-symbols-outlined">{srv.icone || 'design_services'}</span>
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex justify-between items-start gap-2">
@@ -250,7 +250,7 @@ export function SupervisorServicosTab({
           {filteredServices.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-center bg-surface-container-lowest border border-outline-variant/20 rounded-3xl border-dashed">
               <div className="w-16 h-16 bg-primary-container/30 text-primary rounded-full flex items-center justify-center mb-4">
-                <span className="material-symbols-outlined text-3xl">spa</span>
+                <span className="material-symbols-outlined text-3xl">design_services</span>
               </div>
               <h4 className="text-lg font-headline text-on-surface mb-2">Seu menu de serviços está vazio.</h4>
               <p className="text-sm text-on-surface-variant max-w-xs">Adicione ou busque seu primeiro tratamento utilizando o painel.</p>
@@ -278,7 +278,7 @@ export function SupervisorServicosTab({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Nome do Tratamento</label>
-              <input required type="text" value={newServiceName} onChange={e => setNewServiceName(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all" placeholder="Ex: Massagem com Pedras" />
+              <input required type="text" value={newServiceName} onChange={e => setNewServiceName(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all" placeholder="Ex: Avaliação inicial" />
             </div>
             <div className="md:col-span-2">
               <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Categoria do Serviço</label>
@@ -331,7 +331,7 @@ export function SupervisorServicosTab({
                   value={serviceAllowedCargosInput}
                   onChange={(e) => setServiceAllowedCargosInput(e.target.value)}
                   className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm"
-                  placeholder="Ex: Massoterapeuta, Esteticista"
+                  placeholder="Ex: Atendente, Técnico, Consultor"
                 />
                 {availableCargos.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">

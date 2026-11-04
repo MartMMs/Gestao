@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { AutoatendimentoConfig } from '../../../types';
 import {
   fetchAutoatendimentoConfig,
@@ -21,8 +21,8 @@ export function AutoatendimentoAdminTab() {
     tempoLockMinutos: 10,
     permitirCancelamento: true,
     tempoMinimoCancelamentoHoras: 4,
-    instrucoesCheckin: 'Chegue com 15 minutos de antecedência para desfrutar do nosso lounge com chá de boas-vindas e aromaterapia.',
-    mensagemBoasVindas: 'Bem-vindo ao Serenidade Spa & Resort. Reserve seu momento de bem-estar.',
+    instrucoesCheckin: 'Chegue com 15 minutos de antecedência e apresente-se na recepção.',
+    mensagemBoasVindas: 'Bem-vindo! Reserve seu horário.',
   });
 
   const [loading, setLoading] = useState(true);
@@ -435,10 +435,10 @@ export function AutoatendimentoAdminTab() {
               <option value={5}>5 minutos (Checkout Rápido)</option>
               <option value={10}>10 minutos (Recomendado para Spas)</option>
               <option value={15}>15 minutos (Maior tranquilidade no Pix)</option>
-              <option value={20}>20 minutos (Relaxado)</option>
+              <option value={20}>20 minutos (Folgado)</option>
             </select>
             <p className="text-[10px] text-outline-variant">
-              Tempo que o horário e a cabine ficam reservados para o cliente concluir o agendamento.
+              Tempo que o horário e o espaço ficam reservados para o cliente concluir o agendamento.
             </p>
           </div>
         </div>
@@ -464,7 +464,7 @@ export function AutoatendimentoAdminTab() {
               rows={3}
               value={config.instrucoesCheckin || ''}
               onChange={(e) => setConfig({ ...config, instrucoesCheckin: e.target.value })}
-              placeholder="Ex: Chegue com 15 minutos de antecedência na recepção para o ritual de boas-vindas..."
+              placeholder="Ex: Chegue com 15 minutos de antecedência e apresente-se na recepção."
               className="w-full bg-surface-container-low border border-outline-variant/30 rounded-2xl p-3.5 text-xs text-on-surface focus:ring-1 focus:ring-primary"
             />
           </div>

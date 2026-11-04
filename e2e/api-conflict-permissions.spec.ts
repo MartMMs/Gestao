@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { CONTAS, E2E_PASSWORD } from './credenciais';
+import { CONTAS, E2E_PASSWORD, postLogin } from './credenciais';
 
 const apiBase = () => process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:3333/api';
 
 async function login(request: import('@playwright/test').APIRequestContext, email: string, senha: string) {
-  const res = await request.post(`${apiBase()}/login`, {
+  const res = await postLogin(request, {
     data: { email, senha },
     // Sem este cabeçalho o token vai só no cookie HttpOnly (fluxo do navegador)
     headers: { 'X-Auth-Mode': 'token' },

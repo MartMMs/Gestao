@@ -1,5 +1,6 @@
 import { instanteNoFuso } from '../../shared/agenda';
 import { mascararTelefone } from '../lib/privacidade';
+import { getEmpresaConfig } from './configService';
 
 export interface VoucherData {
   reservaId: string;
@@ -50,7 +51,7 @@ class CommunicationService {
     orientacoesCheckIn?: string[];
   }): VoucherData {
     const hash = data.id.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase();
-    const codigoConfirmacao = `SPA-${hash}`;
+    const codigoConfirmacao = `AG-${hash}`;
 
     return {
       reservaId: data.id,
@@ -69,14 +70,14 @@ class CommunicationService {
       politicaCancelamento: data.politicaCancelamento || 'Cancelamento gratuito até 4 horas antes do horário agendado. Tolerância de atraso de 10 minutos.',
       orientacoesCheckIn: data.orientacoesCheckIn || [
         'Chegue com 15 minutos de antecedência na recepção.',
-        'Aproveite nosso lounge de descompressão com água saborizada e chá exclusivo.',
-        'Utilize trajes confortáveis; fornecemos roupão e toalhas higienizadas.',
-        'Caso tenha novas condições de saúde ou desconforto, informe seu terapeuta no início.',
+        'Se algo mudou desde a reserva (saúde, restrições, preferências), avise o profissional no início do atendimento.',
       ],
     };
   }
 
   async enqueueTransactionalNotifications(voucher: VoucherData): Promise<void> {
+    // Nome da clínica configurado (nunca uma marca fixa no código)
+    const empresa = (await getEmpresaConfig()).nomeEmpresa;
     const agora = new Date();
     const dataSessao = instanteNoFuso(voucher.data, voucher.horario);
     const aguardandoPagamento = voucher.statusPagamento === 'aguardando_pagamento';
@@ -87,7 +88,7 @@ class CommunicationService {
       tipo: 'confirmacao_imediata',
       canal: 'whatsapp',
       destinatario: voucher.clienteTelefone,
-      conteudo: `✨ *Serenidade Spa & Resort* ✨\nOlá, ${voucher.clienteNome}! ${aguardandoPagamento ? 'Recebemos sua reserva! Ela será confirmada assim que o pagamento for aprovado.' : 'Sua reserva foi confirmada com sucesso!'}\n\n📋 *Código:* ${voucher.codigoConfirmacao}\n🌿 *Terapia:* ${voucher.terapiaNome}\n🗓️ *Data:* ${voucher.data} às ${voucher.horario}\n🏠 *Espaço:* ${voucher.salaNome}\n👤 *Terapeuta:* ${voucher.terapeutaNome}\n\nRecomendamos chegar 15 minutos antes para seu ritual de boas-vindas. Esperamos por você!`,
+      conteudo: `*${empresa}*\nOlá, ${voucher.clienteNome}! ${aguardandoPagamento ? 'Recebemos sua reserva! Ela será confirmada assim que o pagamento for aprovado.' : 'Sua reserva foi confirmada com sucesso!'}\n\n📋 *Código:* ${voucher.codigoConfirmacao}\n🌿 *Terapia:* ${voucher.terapiaNome}\n🗓️ *Data:* ${voucher.data} às ${voucher.horario}\n🏠 *Espaço:* ${voucher.salaNome}\n👤 *Terapeuta:* ${voucher.terapeutaNome}\n\nRecomendamos chegar 15 minutos antes para seu ritual de boas-vindas. Esperamos por você!`,
       status: 'enviado',
       agendadoPara: agora,
       enviadoEm: agora,
@@ -103,7 +104,7 @@ class CommunicationService {
         tipo: 'lembrete_24h',
         canal: 'whatsapp',
         destinatario: voucher.clienteTelefone,
-        conteudo: `🌿 *Lembrete Serenidade Spa*: Seu momento de relaxamento (${voucher.terapiaNome}) está agendado para amanhã às ${voucher.horario}. Estamos preparando tudo com carinho!`,
+        conteudo: `*Lembrete ${empresa}*: seu atendimento (${voucher.terapiaNome}) está agendado para amanhã às ${voucher.horario}. Até lá!`,
         status: 'agendado',
         agendadoPara: data24hAntes,
       });
@@ -118,7 +119,7 @@ class CommunicationService {
         tipo: 'lembrete_2h',
         canal: 'whatsapp',
         destinatario: voucher.clienteTelefone,
-        conteudo: `🌸 *Seu ritual no Serenidade Spa começa em 2 horas!* Lembramos que sua cabine é a *${voucher.salaNome}*. Até breve!`,
+        conteudo: `*Seu horário em ${empresa} começa em 2 horas.* Local: *${voucher.salaNome}*. Até breve!`,
         status: 'agendado',
         agendadoPara: data2hAntes,
       });

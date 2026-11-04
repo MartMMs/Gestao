@@ -249,11 +249,16 @@ class RedisManager {
     return await this.memoriaOuFalha().del(key);
   }
 
-  // Devolve uma tentativa ao contador (ex.: login que deu certo não deve contar contra o IP)
+  // Devolve uma tentativa ao contador (ex.: login que deu certo não deve contar contra o IP).
+  // Só se a chave ainda existir: um DECR depois de ela expirar criaria um contador -1 sem validade, que nunca
+  // mais expira e acumula erros para sempre (o IP da recepção ficaria bloqueado de vez).
   async devolverTentativa(key: string): Promise<void> {
     try {
       if (this.isConnected && this.client) {
-        await this.client.decr(key);
+        await this.client.eval(
+          "if redis.call('EXISTS', KEYS[1]) == 1 and tonumber(redis.call('GET', KEYS[1])) > 0 then return redis.call('DECR', KEYS[1]) end return 0",
+          1, key,
+        );
         return;
       }
     } catch {
@@ -265,10 +270,11 @@ class RedisManager {
   async rateLimit(key: string, maxRequests = 40, windowSeconds = 60): Promise<{ allowed: boolean; remaining: number }> {
     try {
       if (this.isConnected && this.client) {
-        const count = await this.client.incr(key);
-        if (count === 1) {
-          await this.client.expire(key, windowSeconds);
-        }
+        // Atômico, e a validade é posta sempre que faltar (não só no 1º incremento): um contador nunca fica eterno
+        const count = Number(await this.client.eval(
+          "local c = redis.call('INCR', KEYS[1]) if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end return c",
+          1, key, String(windowSeconds),
+        ));
         return {
           allowed: count <= maxRequests,
           remaining: Math.max(0, maxRequests - count),
@@ -285,6 +291,24 @@ class RedisManager {
       allowed: count <= maxRequests,
       remaining: Math.max(0, maxRequests - count),
     };
+  }
+
+  // Contador com janela deslizante: cada incremento renova a validade (expira só depois de `windowSeconds` sem uso).
+  // Para erros de login: enquanto o ataque continua, o contador não zera no meio dele
+  async incrementarRenovando(key: string, windowSeconds: number): Promise<number> {
+    try {
+      if (this.isConnected && this.client) {
+        return Number(await this.client.eval(
+          "local c = redis.call('INCR', KEYS[1]) redis.call('EXPIRE', KEYS[1], ARGV[1]) return c",
+          1, key, String(windowSeconds),
+        ));
+      }
+    } catch {
+      // Fallback
+    }
+    const count = await this.memoriaOuFalha().incr(key);
+    await this.memoriaOuFalha().expire(key, windowSeconds);
+    return count;
   }
 
   isUsingRedis(): boolean {

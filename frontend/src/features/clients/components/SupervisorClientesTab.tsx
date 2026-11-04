@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { normalizarTexto } from '@shared/validadores';
 import { motion } from 'motion/react';
 import { Appointment, Client, Service } from '../../../types';
@@ -378,9 +378,11 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
         title="Excluir Cliente?"
         description="Clientes com atendimentos marcados não podem ser excluídos. Se houver histórico, nome, contato, CPF e ficha de saúde são apagados e os atendimentos ficam sem identificação. Não pode ser desfeito."
         confirmLabel="Excluir"
+        confirmingLabel="Excluindo..."
         cancelLabel="Cancelar"
         icon="warning"
-        onClose={() => setClientToDelete(null)}
+        isSubmitting={isSaving}
+        onClose={() => { if (!isSaving) setClientToDelete(null); }}
         onConfirm={handleDeleteConfirm}
       />
 

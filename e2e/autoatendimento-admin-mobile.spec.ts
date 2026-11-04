@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { CONTAS, E2E_PASSWORD, apiBase, apagarClienteDeTeste, escolherDiaFuturoNoTotem, loginPelaTela, nomeClienteTeste } from './credenciais';
+import { PrismaClient } from '@prisma/client';
+import { VERSAO_CONSENTIMENTO_GERAL } from '../shared/consentimento';
+import { CONTAS, E2E_PASSWORD, apiBase, apagarClienteDeTeste, loginPelaTela, nomeClienteTeste, reservarHorarioNoTotem, postLogin } from './credenciais';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -43,7 +45,7 @@ test.describe('Autoatendimento - Modo Admin, Agendamento Sem Pagamento & Mobile'
   });
 
   test('Administrador desliga a cobrança online para o modo sem pagamento', async ({ request }) => {
-    const login = await request.post(`${apiBase()}/login`, {
+    const login = await postLogin(request, {
       data: { email: CONTAS.admin, senha: E2E_PASSWORD },
       headers: { 'X-Auth-Mode': 'token' },
     });
@@ -91,24 +93,24 @@ test.describe('Autoatendimento - Modo Admin, Agendamento Sem Pagamento & Mobile'
       await page.waitForTimeout(500);
       await page.screenshot({ path: test.info().outputPath('13_mobile_03_horarios.png') });
 
-      // Seleciona o primeiro slot livre (não desabilitado)
-      await escolherDiaFuturoNoTotem(page);
-      await escolherDiaFuturoNoTotem(page);
-    const slotButton = page.locator('button:has(span:has-text(":")):not([disabled])').first();
-      await expect(slotButton).toBeVisible({ timeout: 10_000 });
-      await slotButton.click();
-
-      const btnLock = page.getByRole('button', { name: /Garantir Reserva/i });
-      await expect(btnLock).toBeEnabled({ timeout: 10_000 });
-      await btnLock.click();
+      // Horário livre sorteado (com nova tentativa se outra execução pegar antes)
+      await reservarHorarioNoTotem(page);
 
       // 4. Anamnese no Mobile
-      await expect(page.getByRole('heading', { name: /Ficha Personalizada do Spa/i })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole('heading', { name: /Seus dados para o atendimento/i })).toBeVisible({ timeout: 15_000 });
       await page.locator('input[placeholder*="Mariana" i]').fill(nomeCliente);
       await page.locator('input[placeholder*="98765" i]').fill('(11) 97777-6655');
+      // Empresa do segmento "geral" (o do banco de testes): nada de perguntas de spa nem de saúde detalhada
+      await expect(page.getByText('Informações para o atendimento')).toBeVisible();
+      await expect(page.getByText('Tem alguma alergia?')).toBeVisible();
+      await expect(page.getByText(/Experiência Aromática|Pressão Desejada na Massagem|Está gestante\?/)).toHaveCount(0);
       await page.screenshot({ path: test.info().outputPath('14_mobile_04_anamnese.png') });
 
       const btnIrPagamento = page.getByRole('button', { name: /Ir para Pagamento|Revisar e Confirmar/i });
+      // Sem a autorização de uso dos dados (LGPD) a reserva não avança
+      await btnIrPagamento.click();
+      await expect(page.getByText('Para continuar, marque a autorização de uso dos seus dados.')).toBeVisible();
+      await page.getByRole('checkbox', { name: /Autorizo .* a usar meus dados pessoais/i }).check();
       await btnIrPagamento.click();
 
       // 5. Etapa 4: Confirmação Direta SEM PAGAMENTO (Pagar no Local)
@@ -122,10 +124,22 @@ test.describe('Autoatendimento - Modo Admin, Agendamento Sem Pagamento & Mobile'
       await btnConfirmar.click();
 
       // 6. Voucher no Mobile com status "A Pagar na Recepção"
-      await expect(page.getByRole('heading', { name: /Seu Momento de Bem-Estar/i })).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByRole('heading', { name: /Seu Horário Está Garantido/i })).toBeVisible({ timeout: 20_000 });
       // O serviço do seed de CI custa R$ 0: sem pagamento exigido, o voucher mostra "Sem custo" (pago, seria "A Pagar na Recepção")
       await expect(page.getByText(/^(A Pagar na Recepção.*|Sem custo)$/i)).toBeVisible();
       await page.screenshot({ path: test.info().outputPath('16_mobile_06_voucher_no_local.png') });
+
+      // Prova do consentimento (LGPD): data e versão do texto que o cliente leu ficam gravadas no agendamento
+      if (process.env.E2E_DATABASE_URL) {
+        const prisma = new PrismaClient({ datasourceUrl: process.env.E2E_DATABASE_URL });
+        try {
+          const ag = await prisma.agendamento.findFirst({ where: { cliente: { nome: { startsWith: nomeCliente } } }, orderBy: { atualizadoEm: 'desc' } });
+          expect(ag?.consentimentoDadosEm).toBeTruthy();
+          expect(ag?.consentimentoVersao).toBe(VERSAO_CONSENTIMENTO_GERAL);
+        } finally {
+          await prisma.$disconnect();
+        }
+      }
 
       await context.close();
     } finally {

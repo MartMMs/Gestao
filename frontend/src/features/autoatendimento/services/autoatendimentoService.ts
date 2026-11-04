@@ -1,5 +1,5 @@
 import { getApiUrl } from '../../../config/api';
-import { CABECALHO_CSRF } from '../../../api';
+import { cabecalhoCsrf, carregarTokenCsrf } from '../../../api';
 import {
   Service,
   AutoatendimentoDisponibilidadeResponse,
@@ -42,12 +42,13 @@ export async function updateAutoatendimentoConfig(
   config: Partial<AutoatendimentoConfig>
 ): Promise<AutoatendimentoConfig> {
   // Autenticado pelo cookie de sessão da equipe (o totem público nunca envia credenciais)
+  if (!Object.keys(cabecalhoCsrf()).length) await carregarTokenCsrf();
   const res = await fetchTotem(`${getBaseUrl()}/config`, {
     method: 'PUT',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...CABECALHO_CSRF,
+      ...cabecalhoCsrf(),
     },
     body: JSON.stringify(config),
   });
@@ -111,7 +112,8 @@ export async function reservarSlotAutoatendimento(params: {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    throw new Error(data.erro || 'Não foi possível reservar este horário.');
+    // status junto: a tela só manda "escolher outro" quando o horário foi ocupado (409), não num 429 ou 400
+    throw Object.assign(new Error(data.erro || 'Não foi possível reservar este horário.'), { status: res.status });
   }
 
   return data;
@@ -130,14 +132,21 @@ export async function consultarSessaoAutoatendimento(
   return data;
 }
 
+// Dados que o cliente digita na identificação e seguem até a confirmação
+export type DadosClienteTotem = {
+  nome: string;
+  telefone: string;
+  cpf: string;
+  observacoesSaude: string;
+  // Autorização LGPD marcada na identificação: o servidor recusa a reserva sem ela
+  consentimento: true;
+  // Versão do texto aceito (shared/consentimento.ts), gravada como prova
+  consentimentoVersao: string;
+};
+
 export async function confirmarPagamentoAutoatendimento(params: {
   sessionToken: string;
-  cliente: {
-    nome: string;
-    telefone: string;
-    cpf?: string;
-    observacoesSaude?: string;
-  };
+  cliente: DadosClienteTotem;
   metodoPagamento: 'pix' | 'cartao' | 'presencial_no_local';
   tipoPagamento: 'sinal' | 'integral' | 'local';
 }): Promise<{ sucesso: boolean; agendamentoId: string; voucher: Voucher }> {

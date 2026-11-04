@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { horarioParaMinutos, minutoDentroDoBloqueio } from '@shared/agenda';
 import { useToast } from '../hooks/useToast';
-import { Employee, Appointment, Service, Client, Bloqueio } from '../types';
+import { Employee, Appointment, Service, Client } from '../types';
 import { getBrazilCurrentMinuteOfDay, getLocalTodayString, getDuration, matchesAppointmentSearch } from '../features/appointments/utils/appointmentCore';
 import { SCHEDULE_CONFIG } from '../config/scheduleConfig';
 import { SupervisorClientesTab } from '../features/clients/components';
@@ -24,11 +24,8 @@ interface CollaboratorViewProps {
   onAddAppointment: (appointment: Omit<Appointment, 'id' | 'status'>) => Promise<boolean | void> | void;
   isAddingAppointment?: boolean;
   onEditAppointment?: (id: string, appointment: Partial<Appointment>) => Promise<boolean | void> | void;
-  onDeleteAppointment?: (id: string) => Promise<boolean | void> | void;
+  onDeleteAppointment?: (id: string, version?: string) => Promise<boolean | void> | void;
   onEditClient?: (id: string, clientData: Partial<Client>) => Promise<boolean | void> | void;
-  onDeleteClient?: (id: string) => Promise<boolean | void> | void;
-  onAddBloqueio?: (b: Omit<Bloqueio, 'id'>) => Promise<boolean | void>;
-  onDeleteBloqueio?: (id: string) => Promise<boolean | void>;
   onSubmitTurnoSwapRequest?: (payload: TrocaTurnoPayload) => Promise<boolean | void> | boolean | void;
 }
 
@@ -44,9 +41,6 @@ export function CollaboratorView({
   onEditAppointment,
   onDeleteAppointment,
   onEditClient,
-  onDeleteClient,
-  onAddBloqueio,
-  onDeleteBloqueio,
   onSubmitTurnoSwapRequest,
 }: CollaboratorViewProps) {
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
@@ -304,7 +298,7 @@ export function CollaboratorView({
               })}
               {filteredAppointmentsForSelectedDate.length === 0 && myBlockers.length === 0 && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center opacity-60 pointer-events-none">
-                  <span className="material-symbols-outlined text-5xl text-outline-variant mb-2">relax</span>
+                  <span className="material-symbols-outlined text-5xl text-outline-variant mb-2">event_available</span>
                   <p className="text-sm font-medium text-on-surface-variant">Nenhum agendamento para este dia.</p>
                 </div>
               )}
@@ -420,7 +414,9 @@ export function CollaboratorView({
 
       {appointmentToDelete && onDeleteAppointment && (
         <DeleteAppointmentModal
+          key={appointmentToDelete}
           appointmentId={appointmentToDelete}
+          version={appointments.find((a) => a.id === appointmentToDelete)?.version}
           onClose={closeDeleteAppointmentModal}
           onDeleteAppointment={onDeleteAppointment}
           setToastMessage={setToastMessage}

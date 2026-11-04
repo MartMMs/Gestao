@@ -24,7 +24,7 @@ test.describe('Aba de Autoatendimento (Totem / Self-Service)', () => {
     await expect(btnAvancar).toBeEnabled();
     await btnAvancar.click();
 
-    // Valida transição para o Passo 2: Horário & Cabine
+    // Valida transição para o Passo 2: Horário & Espaço
     await expect(page.getByRole('heading', { name: /Disponibilidade em Tempo Real/i })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(/Datas Disponíveis/i)).toBeVisible();
 

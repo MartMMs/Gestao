@@ -44,7 +44,7 @@ export const gerarSenhaProvisoria = () => {
 };
 
 // E-mail de acesso gerado a partir do nome; homônimos recebem sufixo numérico (ana.silva2@...)
-export const gerarEmailUnico = (nomeCompleto: string, emailsExistentes: string[], dominio = 'serenidade.com') => {
+export const gerarEmailUnico = (nomeCompleto: string, emailsExistentes: string[], dominio = 'equipe.local') => {
   const partes = normalizarTexto(nomeCompleto)
     .replace(/[^a-z\s]/g, ' ')
     .split(/\s+/)

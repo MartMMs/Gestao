@@ -29,6 +29,12 @@ const lerTrustProxy = (valor: string | undefined): number | string[] | undefined
   return texto.split(',').map((ip) => ip.trim()).filter(Boolean);
 };
 
+// Limite numérico: inteiro maior que zero, senão o padrão (um negativo travaria todo login com 429)
+const inteiroPositivo = (valor: string | undefined, padrao: number) => {
+  const numero = Number(valor);
+  return Number.isInteger(numero) && numero > 0 ? numero : padrao;
+};
+
 // Configuração lida uma vez; o restante do servidor usa este objeto em vez de process.env
 export const config = {
   producao,
@@ -39,8 +45,13 @@ export const config = {
   redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
   limpezaAgendamentosDias: Number(process.env.LIMPEZA_AGENDAMENTOS_DIAS ?? 30),
   totemMaxReservasPorIp: Number(process.env.TOTEM_MAX_RESERVAS_POR_IP) || 5,
-  // Reservas futuras ativas feitas pelo totem com o mesmo telefone (freia agenda lotada por clientes fantasmas)
-  totemMaxReservasPorTelefone: Number(process.env.TOTEM_MAX_RESERVAS_POR_TELEFONE) || 2,
+  // Teto diário por IP: o de 10 min sozinho deixa um robô lotar a agenda num dia. O totem da recepção (todos os
+  // clientes atrás do mesmo IP) pode precisar de um valor maior
+  totemMaxReservasPorIpDia: inteiroPositivo(process.env.TOTEM_MAX_RESERVAS_POR_IP_DIA, 40),
+  // Erros de login por IP antes do bloqueio de 15 min (no CI todos os testes saem do mesmo IP)
+  loginMaxTentativasIp: inteiroPositivo(process.env.LOGIN_MAX_TENTATIVAS_IP, 60),
+  // Desafios de prova de trabalho emitidos por IP por minuto (toda uma recepção atrás do mesmo IP divide este teto)
+  loginMaxDesafiosPorMinutoIp: inteiroPositivo(process.env.LOGIN_MAX_DESAFIOS_POR_MINUTO_IP, 120),
   totemMaxRequisicoesPorMinuto: Number(process.env.TOTEM_MAX_REQUISICOES_POR_MINUTO) || 60,
   pagamentoWebhookSecret: process.env.PAYMENT_WEBHOOK_SECRET || '',
 };
@@ -74,5 +85,8 @@ export const validarConfigProducao = (): string[] => {
   const erros: string[] = [];
   if (config.corsOrigins.length === 0) erros.push('CORS_ORIGINS é obrigatório em produção (ex.: https://app.suaempresa.com).');
   if (!process.env.REDIS_URL) erros.push('REDIS_URL é obrigatório em produção (limites de tentativas e travas do totem).');
+  // Valores do CI (1000) copiados para o servidor deixariam a força bruta por IP praticamente livre
+  if (config.loginMaxTentativasIp > 200) erros.push('LOGIN_MAX_TENTATIVAS_IP acima de 200 não é aceito em produção.');
+  if (config.loginMaxDesafiosPorMinutoIp > 300) erros.push('LOGIN_MAX_DESAFIOS_POR_MINUTO_IP acima de 300 não é aceito em produção.');
   return erros;
 };

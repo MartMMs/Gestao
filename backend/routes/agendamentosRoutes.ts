@@ -3,14 +3,15 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { getUsuario, usuarioEhSupervisor, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { HttpError, ipDoCliente, responderErro, type Notificar } from '../lib/http';
-import { transacaoSerializavel, travarChave } from '../lib/transacao';
-import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, mensagemNomeDuplicado } from '../lib/clientes';
-import { ORIGEM_COLABORADOR, ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN, clientesComAcessoSaude, prepararAgendamento } from '../lib/privacidade';
-import { validarDisponibilidadeProfissional } from '../services/agendaService';
+import { transacaoComTravas, travarAgenda, travarAgendamento, travarChave } from '../lib/transacao';
+import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, mensagemNomeDuplicado, travarNomeCliente } from '../lib/clientes';
+import { ORIGEM_COLABORADOR, ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN, clientesComAcessoSaude, podeVerSaude, prepararAgendamento } from '../lib/privacidade';
+import { atendimentoSobrepostoDoCliente, validarDisponibilidadeProfissional } from '../services/agendaService';
 import { buscarServicosPorNome } from '../services/servicoService';
-import { comissaoDosServicos, recalcularValores, valorDosServicos } from '../lib/valores';
+import { comissaoDosServicos, mesmosServicos, recalcularValores, valorDosServicos } from '../lib/valores';
 import { lerDesde } from '../lib/periodo';
 import { registrarAuditoria } from '../lib/auditoria';
+import { CODIGO_FORA_DA_AGENDA, CODIGO_VERSAO_AUSENTE, CODIGO_VERSAO_DESATUALIZADA, statusFechado } from '../../shared/statusAgendamento';
 import { LIMITE_HISTORICO_CLIENTE } from '../../shared/agendaJanela';
 import {
   HORA_FECHAMENTO,
@@ -46,15 +47,35 @@ const gerenciaAgenda = usuarioGerenciaAgenda;
 
 const garantirPermissao = (req: Request, colaboradorId: string) => {
   if (!gerenciaAgenda(req) && getUsuario(req)?.id !== colaboradorId) {
-    throw new HttpError(403, 'Você só pode alterar os seus próprios atendimentos.');
+    throw new HttpError(403, 'Você só pode alterar os seus próprios atendimentos.', CODIGO_FORA_DA_AGENDA);
   }
 };
 
-const MENSAGEM_VERSAO_DESATUALIZADA = 'Este agendamento foi alterado por outra pessoa enquanto você editava. Feche e abra de novo para ver a versão atual.';
+const MENSAGEM_VERSAO_DESATUALIZADA = 'Este agendamento mudou desde que a tela foi carregada (outra pessoa ou outra aba salvou antes). A agenda foi atualizada: confira e tente de novo.';
 
-// Versão informada (atualizadoEm que a tela leu) diferente da atual: outra pessoa salvou antes
-const conferirVersao = (atualizadoEm: Date, versao: unknown) => {
-  if (typeof versao === 'string' && versao && atualizadoEm.toISOString() !== versao) throw new HttpError(409, MENSAGEM_VERSAO_DESATUALIZADA);
+// Toda escrita num agendamento leva a versão que a tela leu (atualizadoEm): sem ela não dá para saber se
+// outra pessoa salvou antes, e quem salvasse por último apagaria a alteração dela
+const exigirVersao = (versao: unknown): string => {
+  if (typeof versao !== 'string' || !versao) {
+    throw new HttpError(428, 'Versão do agendamento ausente. Atualize a agenda e tente de novo.', CODIGO_VERSAO_AUSENTE);
+  }
+  return versao;
+};
+const conferirVersao = (atualizadoEm: Date, versao: string) => {
+  if (atualizadoEm.toISOString() !== versao) throw new HttpError(409, MENSAGEM_VERSAO_DESATUALIZADA, CODIGO_VERSAO_DESATUALIZADA);
+};
+
+// Como o atendimento aparece no histórico de alterações: pelo código do cliente, nunca pelo nome (o nome
+// sumiria do cadastro na exclusão, mas ficaria no histórico)
+const alvoDoAtendimento = (ag: { data: Date; cliente?: { codigo: number } | null; colaborador?: { nome: string } | null }) => {
+  const { data, horario } = partesNoFuso(ag.data);
+  return `Atendimento do cliente #${ag.cliente?.codigo ?? '?'} com ${ag.colaborador?.nome ?? 'profissional'} em ${data.split('-').reverse().join('/')} ${horario}`;
+};
+
+// Mesma pessoa não está em dois lugares ao mesmo tempo (regra da agenda interna em services/agendaService)
+const conflitoDoCliente = async (tx: Prisma.TransactionClient, clienteId: string, inicio: Date, duracaoMin: number, ignorarId?: string) => {
+  const outro = await atendimentoSobrepostoDoCliente(tx, clienteId, inicio, duracaoMin, ignorarId);
+  if (outro) throw new HttpError(409, `Este cliente já tem atendimento às ${partesNoFuso(outro.data).horario} com ${outro.colaborador.nome}, no mesmo período.`);
 };
 
 // Lê data (YYYY-MM-DD) e horário (HH:MM) do corpo; aceita o formato legado com data ISO completa
@@ -115,6 +136,11 @@ const resolverCliente = async (
     ? normalizarTelefone(dados.contact) || undefined
     : undefined;
   const cpf = typeof dados.cpf === 'string' && !valorMascarado(dados.cpf) ? apenasDigitos(dados.cpf) || undefined : undefined;
+  // Texto sem nenhum dígito ("telefone", "abc") é erro de digitação: avisa em vez de descartar o campo calado
+  if (typeof dados.contact === 'string' && dados.contact.trim() && dados.contact !== SEM_CONTATO && !valorMascarado(dados.contact) && !telefone) {
+    throw new HttpError(400, MENSAGEM_TELEFONE_INVALIDO);
+  }
+  if (typeof dados.cpf === 'string' && dados.cpf.trim() && !valorMascarado(dados.cpf) && !cpf) throw new HttpError(400, MENSAGEM_CPF_INVALIDO);
   const observacao = typeof dados.clientObservation === 'string' ? dados.clientObservation.slice(0, LIMITE_OBSERVACAO) : undefined;
 
   // Telefone/CPF só são validados quando serão gravados (cliente novo ou edição por supervisor)
@@ -148,16 +174,32 @@ const resolverCliente = async (
   // Só o cliente aberto na edição tem o cadastro alterado; quem foi achado por CPF/telefone é outra ficha
   // Ficha anonimizada nunca volta a receber nome, telefone ou CPF (isso a reidentificaria)
   const editandoCadastro = Boolean(cliente && clienteAtualId && cliente.id === clienteAtualId && !cliente.removidoEm);
+  if (!cliente && nome) await travarNomeCliente(tx, nome);
   if (!cliente && gerenciaAgenda(req)) {
     // CPF identifica a pessoa; telefone pode ser compartilhado (família), então só vale se o nome também conferir
-    if (cpf && cpfValido(cpf)) cliente = await tx.cliente.findFirst({ where: { cpf: { in: variantesCpf(cpf) } } });
+    if (cpf && cpfValido(cpf)) {
+      // Dois envios com o mesmo CPF e nomes diferentes não pegam a mesma trava de nome
+      await travarChave(tx, `cliente-cpf:${cpf}`);
+      cliente = await tx.cliente.findFirst({ where: { cpf: { in: variantesCpf(cpf) } } });
+    }
     if (!cliente && telefone && telefoneValido(telefone)) {
       const mesmoTelefone = await tx.cliente.findMany({ where: { telefone: { in: variantesTelefone(telefone) } } });
       cliente = mesmoTelefone.find((c) => !nome || normalizarNome(c.nome) === normalizarNome(nome)) ?? null;
     }
   }
 
+  if (cliente) {
+    // Relido depois da trava (a mesma da exclusão): um cadastro excluído no meio da marcação não recebe o atendimento
+    await travarChave(tx, `cliente:${cliente.id}`);
+    cliente = await tx.cliente.findUnique({ where: { id: cliente.id } });
+    if (!cliente || cliente.removidoEm) throw new HttpError(409, 'O cadastro deste cliente acabou de ser excluído. Informe os dados do cliente novamente.');
+  }
   if (!cliente) {
+    // Na edição, quem não gerencia a agenda não troca o cliente (a tela trava o campo; a API também): um nome novo
+    // criaria outro cadastro e tiraria o atendimento da ficha certa
+    if (clienteAtualId && !gerenciaAgenda(req)) {
+      throw new HttpError(403, 'Só a recepção ou a supervisão trocam o cliente de um atendimento.');
+    }
     validarContato();
     if (nome.length < 2) throw new HttpError(400, 'Informe o nome do cliente.');
     if (normalizarNome(nome) === normalizarNome(NOME_CLIENTE_REMOVIDO)) throw new HttpError(400, 'Este nome é reservado para cadastros excluídos. Informe o nome do cliente.');
@@ -165,7 +207,7 @@ const resolverCliente = async (
     if (homonimo) {
       // Quem não gerencia a agenda não vê a carteira toda: a mensagem não confirma nome nem código
       throw new HttpError(409, gerenciaAgenda(req)
-        ? mensagemNomeDuplicado(homonimo)
+        ? mensagemNomeDuplicado(homonimo, 'marcacao')
         : 'Já existe um cadastro com esse nome. Peça à recepção para vincular o cliente ao atendimento.');
     }
     return tx.cliente.create({
@@ -176,7 +218,7 @@ const resolverCliente = async (
   const atualizacao: Prisma.ClienteUpdateInput = {};
   if (!editandoCadastro) {
     // Cliente escolhido na busca ou achado por CPF/telefone: o agendamento usa a ficha como está
-    const podeEditarSaudeFicha = supervisor || acessoSaude.has(cliente.id);
+    const podeEditarSaudeFicha = podeVerSaude(req, cliente.id, acessoSaude);
     return podeEditarSaudeFicha && !cliente.removidoEm && observacao !== undefined && observacao !== cliente.observacao
       ? tx.cliente.update({ where: { id: cliente.id }, data: { observacao } })
       : cliente;
@@ -188,7 +230,7 @@ const resolverCliente = async (
     if (homonimo) {
       // Quem não gerencia a agenda não vê a carteira toda: a mensagem não confirma nome nem código
       throw new HttpError(409, gerenciaAgenda(req)
-        ? mensagemNomeDuplicado(homonimo)
+        ? mensagemNomeDuplicado(homonimo, 'edicao')
         : 'Já existe um cadastro com esse nome. Peça à recepção para vincular o cliente ao atendimento.');
     }
     atualizacao.nome = nome.slice(0, 120);
@@ -199,7 +241,7 @@ const resolverCliente = async (
   if (supervisor) validarContato();
   if (supervisor && telefone && telefone !== cliente.telefone) atualizacao.telefone = telefone;
   if (supervisor && cpf && cpf !== cliente.cpf) atualizacao.cpf = cpf;
-  const podeEditarSaude = supervisor || acessoSaude.has(cliente.id);
+  const podeEditarSaude = podeVerSaude(req, cliente.id, acessoSaude);
   if (podeEditarSaude && observacao !== undefined && observacao !== cliente.observacao) atualizacao.observacao = observacao;
   return Object.keys(atualizacao).length > 0
     ? tx.cliente.update({ where: { id: cliente.id }, data: atualizacao })
@@ -232,9 +274,9 @@ export function createAgendamentosRouter(notificar: Notificar) {
       const agendamentos = await prisma.agendamento.findMany({
         where: {
           ...(gerenciaAgenda(req) ? {} : { colaboradorId: getUsuario(req)?.id }),
-          // Status vazio é tratado como "scheduled" (padrão da coluna). A agenda mostra só ativos e concluídos;
-          // o histórico do cliente também mostra as faltas (no_show), só esconde os cancelados.
-          OR: [{ status: { in: clienteId ? ['scheduled', 'completed', 'no_show'] : ['scheduled', 'completed'] } }, { status: null }],
+          // Status vazio é tratado como "scheduled" (padrão da coluna). Agenda e histórico mostram ativos,
+          // concluídos e faltas (a falta fica visível e pode ser reaberta); só os cancelados ficam de fora.
+          OR: [{ status: { in: ['scheduled', 'completed', 'no_show'] } }, { status: null }],
           ...filtroPeriodo,
         },
         include: INCLUDE_COMPLETO,
@@ -255,21 +297,6 @@ export function createAgendamentosRouter(notificar: Notificar) {
     }
   });
 
-  router.get('/agendamentos/relatorio/concluidos', verificarToken, async (req, res) => {
-    try {
-      // Recepção/supervisão veem o relatório da equipe; colaborador, só os próprios atendimentos
-      const concluidos = await prisma.agendamento.findMany({
-        where: { status: 'completed', ...(gerenciaAgenda(req) ? {} : { colaboradorId: getUsuario(req)?.id }) },
-        include: INCLUDE_COMPLETO,
-        orderBy: { data: 'desc' },
-      });
-      const acesso = await clientesComAcessoSaude(req);
-      res.json(concluidos.map((ag) => prepararAgendamento(ag, req, acesso)));
-    } catch (error) {
-      responderErro(res, error, 'Erro ao gerar relatório');
-    }
-  });
-
   router.post('/agendamentos', verificarToken, async (req, res) => {
     try {
       const colaboradorId = req.body.collaboratorId || req.body.assignedEmployeeId;
@@ -282,8 +309,8 @@ export function createAgendamentosRouter(notificar: Notificar) {
       const inicio = instanteNoFuso(data, horario);
       const acessoSaude = await clientesComAcessoSaude(req);
 
-      const novo = await transacaoSerializavel(async (tx) => {
-        await travarChave(tx, `agenda:${colaboradorId}:${data}`);
+      const novo = await transacaoComTravas(async (tx) => {
+        await travarAgenda(tx, colaboradorId);
 
         const servicos = await buscarServicosPorNome(tx, req.body.serviceNames ?? req.body.services);
         const erroHorario = validarHorarioAgendamento(data, horario, duracaoTotal(servicos), { agora: new Date() });
@@ -293,6 +320,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
         if (indisponivel) throw new HttpError(indisponivel.status, indisponivel.erro);
 
         const cliente = await resolverCliente(tx, req, req.body, { acessoSaude });
+        await conflitoDoCliente(tx, cliente.id, inicio, duracaoTotal(servicos));
         return tx.agendamento.create({
           data: {
             data: inicio,
@@ -342,38 +370,53 @@ export function createAgendamentosRouter(notificar: Notificar) {
       const acessoSaude = await clientesComAcessoSaude(req);
 
       // Sem a versão não dá para saber se outra pessoa salvou antes: quem salvasse por último apagaria a alteração dela
-      const versaoEsperada = typeof req.body.version === 'string' ? req.body.version : undefined;
-      if (!versaoEsperada) return res.status(428).json({ erro: 'Versão do agendamento ausente. Atualize a agenda e tente de novo.' });
+      const versaoEsperada = exigirVersao(req.body.version);
 
-      const atualizado = await transacaoSerializavel(async (tx) => {
-        await travarChave(tx, `agenda:${novoColaboradorId}:${data}`);
+      const atualizado = await transacaoComTravas(async (tx) => {
+        await travarAgenda(tx, novoColaboradorId);
+        await travarAgendamento(tx, id);
 
         // Relido dentro da transação: valores e serviços são calculados sobre o estado atual, não sobre a leitura de antes
-        const antigo = await tx.agendamento.findUnique({ where: { id }, include: { servicos: true } });
+        const antigo = await tx.agendamento.findUnique({
+          where: { id }, include: { servicos: true, cliente: { select: { codigo: true } }, colaborador: { select: { nome: true } } },
+        });
         if (!antigo) throw new HttpError(404, 'Agendamento não encontrado.');
+        // Conferido de novo depois da trava da exclusão: a observação de saúde não volta para uma ficha excluída
+        await travarChave(tx, `cliente:${antigo.clienteId}`);
+        if (!(await tx.cliente.findFirst({ where: { id: antigo.clienteId, removidoEm: null }, select: { id: true } }))) {
+          throw new HttpError(409, 'O cadastro deste cliente foi excluído; o atendimento fica apenas no histórico.');
+        }
         // Quem abriu o formulário antes de outra pessoa salvar não sobrescreve a alteração dela
         conferirVersao(antigo.atualizadoEm, versaoEsperada);
 
         const nomesServicos = req.body.serviceNames ?? req.body.services ?? antigo.servicos.map((s) => s.nome);
         const servicos = await buscarServicosPorNome(tx, nomesServicos, { jaVinculados: antigo.servicos.map((s) => s.id) });
-        const duracao = duracaoTotal(servicos);
-        if (mudouHorario && inicio.getTime() !== antigo.data.getTime()) {
-          const erroHorario = validarHorarioAgendamento(data, horario, duracao, { agora: new Date() });
-          if (erroHorario) throw new HttpError(400, erroHorario);
-        } else if (horarioParaMinutos(horario) + duracao > HORA_FECHAMENTO * 60) {
-          // Mesmo sem mudar o horário, novos serviços não podem empurrar o fim para depois do fechamento
-          throw new HttpError(400, `Com esses serviços o atendimento terminaria depois do fechamento (${HORA_FECHAMENTO_TEXTO}).`);
-        }
-
         // Concluído, falta ou cancelado é registro fechado (entra no faturamento e na comissão): só as observações mudam
-        const encerrado = antigo.status !== null && antigo.status !== 'scheduled';
-        const mesmosServicos = servicos.length === antigo.servicos.length && servicos.every((s) => antigo.servicos.some((a) => a.id === s.id));
-        if (encerrado && (inicio.getTime() !== antigo.data.getTime() || novoColaboradorId !== antigo.colaboradorId || !mesmosServicos)) {
+        const encerrado = statusFechado(antigo.status);
+        const servicosIguais = mesmosServicos(servicos, antigo.servicos);
+        if (encerrado && (inicio.getTime() !== antigo.data.getTime() || novoColaboradorId !== antigo.colaboradorId || !servicosIguais)) {
           throw new HttpError(409, 'Atendimento já encerrado (concluído, falta ou cancelado): não dá para mudar horário, profissional ou serviços.');
         }
+        // Serviços definem valor e comissão: depois que o atendimento começou, o próprio profissional não os troca
+        // (senão ajustaria a própria comissão antes de concluir). A recepção corrige, e fica no histórico.
+        if (!servicosIguais && !gerenciaAgenda(req) && antigo.data.getTime() <= Date.now()) {
+          throw new HttpError(403, 'Depois do início do atendimento, só a recepção ou a supervisão alteram os serviços.');
+        }
 
-        const indisponivel = await validarDisponibilidadeProfissional(tx, novoColaboradorId, inicio, servicos, { ignorarAgendamentoId: id });
-        if (indisponivel) throw new HttpError(indisponivel.status, indisponivel.erro);
+        // Encerrado não ocupa mais a agenda: corrigir a observação não pode esbarrar em horário reocupado,
+        // escala nova ou profissional desligado
+        if (!encerrado) {
+          const duracao = duracaoTotal(servicos);
+          if (mudouHorario && inicio.getTime() !== antigo.data.getTime()) {
+            const erroHorario = validarHorarioAgendamento(data, horario, duracao, { agora: new Date() });
+            if (erroHorario) throw new HttpError(400, erroHorario);
+          } else if (horarioParaMinutos(horario) + duracao > HORA_FECHAMENTO * 60) {
+            // Mesmo sem mudar o horário, novos serviços não podem empurrar o fim para depois do fechamento
+            throw new HttpError(400, `Com esses serviços o atendimento terminaria depois do fechamento (${HORA_FECHAMENTO_TEXTO}).`);
+          }
+          const indisponivel = await validarDisponibilidadeProfissional(tx, novoColaboradorId, inicio, servicos, { ignorarAgendamentoId: id });
+          if (indisponivel) throw new HttpError(indisponivel.status, indisponivel.erro);
+        }
 
         const dados: Prisma.AgendamentoUncheckedUpdateInput = {
           data: inicio,
@@ -382,9 +425,15 @@ export function createAgendamentosRouter(notificar: Notificar) {
           // Só muda quando a lista de serviços muda ou um dos campos está vazio (ver shared/valores.ts)
           ...recalcularValores(antigo, servicos),
         };
-        // Observações ficam sob a regra da ficha de saúde: quem recebe o campo mascarado não pode sobrescrevê-lo
-        if (req.body.observation !== undefined && (usuarioEhSupervisor(req) || acessoSaude.has(antigo.clienteId))) {
-          dados.observacoesSaude = lerObservacao(req.body.observation);
+        // Observações ficam sob a regra da ficha de saúde. Sem acesso, o campo chega vazio (mascarado) e é ignorado;
+        // texto novo é recusado com erro explícito, nunca descartado em silêncio com "atualizado"
+        if (req.body.observation !== undefined) {
+          const observacao = lerObservacao(req.body.observation);
+          if (podeVerSaude(req, antigo.clienteId, acessoSaude)) dados.observacoesSaude = observacao;
+          // Qualquer texto é recusado, mesmo igual ao gravado: aceitar o igual deixaria confirmar a observação escondida por chute
+          else if (observacao !== null) {
+            throw new HttpError(403, 'Você não tem acesso à ficha de saúde deste cliente, então não pode alterar as observações. Peça à supervisão ou ao profissional do atendimento.');
+          }
         }
         // Remarcado pelo próprio profissional: a nova data não renova o acesso à ficha de saúde
         if (!gerenciaAgenda(req) && inicio.getTime() !== antigo.data.getTime()) dados.reservaOrigem = ORIGEM_COLABORADOR;
@@ -395,7 +444,18 @@ export function createAgendamentosRouter(notificar: Notificar) {
           // Cliente trocado pelo próprio colaborador não libera a ficha de saúde (ver clientesComAcessoSaude)
           if (cliente.id !== antigo.clienteId && !gerenciaAgenda(req)) dados.reservaOrigem = ORIGEM_COLABORADOR;
         }
-        return tx.agendamento.update({ where: { id }, data: dados, include: INCLUDE_COMPLETO });
+        const clienteFinal = typeof dados.clienteId === 'string' ? dados.clienteId : antigo.clienteId;
+        if (!encerrado && (inicio.getTime() !== antigo.data.getTime() || !servicosIguais || clienteFinal !== antigo.clienteId)) {
+          await conflitoDoCliente(tx, clienteFinal, inicio, duracaoTotal(servicos), id);
+        }
+        const atualizado = await tx.agendamento.update({ where: { id }, data: dados, include: INCLUDE_COMPLETO });
+        // Valor e comissão são dinheiro: toda mudança fica no histórico de alterações (na mesma transação)
+        await registrarAuditoria(req, {
+          acao: 'agendamento.valores', alvo: alvoDoAtendimento(antigo), tx,
+          antes: { valorTotal: antigo.valorTotal, valorComissao: antigo.valorComissao },
+          depois: { valorTotal: atualizado.valorTotal, valorComissao: atualizado.valorComissao },
+        });
+        return atualizado;
       });
 
       notificar();
@@ -405,7 +465,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
     }
   });
 
-  const alterarStatus = async (req: Request, id: string, status: unknown, versao: unknown) => {
+  const alterarStatus = async (req: Request, id: string, status: unknown, versaoRecebida: unknown) => {
     if (!(STATUS_AGENDAMENTO as readonly unknown[]).includes(status)) {
       throw new HttpError(400, `Status inválido. Use: ${STATUS_AGENDAMENTO.join(', ')}.`);
     }
@@ -413,34 +473,45 @@ export function createAgendamentosRouter(notificar: Notificar) {
     const agendamento = await prisma.agendamento.findUnique({ where: { id }, include: INCLUDE_COMPLETO });
     if (!agendamento) throw new HttpError(404, 'Agendamento não encontrado.');
     garantirPermissao(req, agendamento.colaboradorId);
+    const statusAtual = agendamento.status ?? 'scheduled';
+    // Pedido repetido (duplo clique) que já chegou ao destino: devolve o registro como está, sem erro
+    if (statusAtual === status) return agendamento;
+    const versao = exigirVersao(versaoRecebida);
     conferirVersao(agendamento.atualizadoEm, versao);
 
-    const erroTransicao = erroTransicaoStatus(agendamento.status ?? 'scheduled', status as string, agendamento.data, usuarioEhSupervisor(req), gerenciaAgenda(req));
+    const erroTransicao = erroTransicaoStatus(statusAtual, status as string, agendamento.data, usuarioEhSupervisor(req), gerenciaAgenda(req));
     if (erroTransicao) throw new HttpError(409, erroTransicao);
-    if (agendamento.status === status) return agendamento;
 
     const reativando = status === 'scheduled';
     if (reativando && agendamento.cliente?.removidoEm) {
       throw new HttpError(409, 'O cadastro deste cliente foi excluído. Para atendê-lo de novo, faça um novo agendamento com os dados dele.');
     }
     if (!reativando) {
-      return prisma.agendamento.update({ where: { id }, data: { status: status as string }, include: INCLUDE_COMPLETO });
+      // Grava só se ninguém mudou o registro desde a leitura: concluir e marcar falta ao mesmo tempo não
+      // pode terminar com o último vencendo sem passar pela regra de transição
+      const { count } = await prisma.agendamento.updateMany({
+        where: { id, status: agendamento.status, atualizadoEm: agendamento.atualizadoEm },
+        data: { status: status as string },
+      });
+      const atual = await prisma.agendamento.findUniqueOrThrow({ where: { id }, include: INCLUDE_COMPLETO });
+      // Duas requisições iguais em paralelo: a segunda encontra o destino já gravado e não é erro
+      if (count === 0 && atual.status !== status) throw new HttpError(409, MENSAGEM_VERSAO_DESATUALIZADA, CODIGO_VERSAO_DESATUALIZADA);
+      return atual;
     }
     // Reabrir um registro fechado volta a permitir mudar horário, profissional e serviços (e o faturamento):
-    // exige a versão (ninguém reabre em cima da alteração de outra pessoa) e fica no histórico de alterações
-    if (typeof versao !== 'string' || !versao) throw new HttpError(428, 'Versão do agendamento ausente. Atualize a agenda e tente de novo.');
-    // Reativar exige que o horário ainda esteja livre (senão vira overbooking)
-    return transacaoSerializavel(async (tx) => {
-      await travarChave(tx, `agenda:${agendamento.colaboradorId}:${partesNoFuso(agendamento.data).data}`);
-      const atual = await tx.agendamento.findUnique({ where: { id }, select: { atualizadoEm: true } });
+    // fica no histórico de alterações. Reativar exige que o horário ainda esteja livre (senão vira overbooking).
+    return transacaoComTravas(async (tx) => {
+      await travarAgenda(tx, agendamento.colaboradorId);
+      await travarAgendamento(tx, id);
+      // Relido dentro da transação: disponibilidade e auditoria partem do estado atual
+      const atual = await tx.agendamento.findUnique({ where: { id }, include: INCLUDE_COMPLETO });
       if (!atual) throw new HttpError(404, 'Agendamento não encontrado.');
       conferirVersao(atual.atualizadoEm, versao);
-      const indisponivel = await validarDisponibilidadeProfissional(tx, agendamento.colaboradorId, agendamento.data, agendamento.servicos, { ignorarAgendamentoId: id });
+      const indisponivel = await validarDisponibilidadeProfissional(tx, atual.colaboradorId, atual.data, atual.servicos, { ignorarAgendamentoId: id });
       if (indisponivel) throw new HttpError(409, `Não é possível reativar: ${indisponivel.erro}`);
+      await conflitoDoCliente(tx, atual.clienteId, atual.data, duracaoTotal(atual.servicos), id);
       const reaberto = await tx.agendamento.update({ where: { id }, data: { status: 'scheduled' }, include: INCLUDE_COMPLETO });
-      const { data: dia, horario } = partesNoFuso(agendamento.data);
-      const alvo = `Atendimento de ${agendamento.cliente?.nome ?? 'cliente'} com ${agendamento.colaborador?.nome ?? 'profissional'} em ${dia.split('-').reverse().join('/')} ${horario}`;
-      await registrarAuditoria(req, 'agendamento.reaberto', alvo, { status: agendamento.status }, { status: 'scheduled' }, undefined, tx);
+      await registrarAuditoria(req, { acao: 'agendamento.reaberto', alvo: alvoDoAtendimento(atual), antes: { status: atual.status }, depois: { status: 'scheduled' }, tx });
       return reaberto;
     });
   };
@@ -493,15 +564,21 @@ export function createAgendamentosRouter(notificar: Notificar) {
     if (!gerenciaAgenda(req)) throw new HttpError(403, 'Apenas a recepção ou supervisores podem realocar atendimentos.');
     if (typeof destinoId !== 'string' || !destinoId) throw new HttpError(400, 'Informe o colaborador de destino.');
 
-    return transacaoSerializavel(async (tx) => {
+    const versaoEsperada = exigirVersao(versao);
+
+    return transacaoComTravas(async (tx) => {
+      // Trava do destino antes da linha: a mesma ordem da edição (agenda, depois agendamento), sem impasse entre elas
+      await travarAgenda(tx, destinoId);
+      await travarAgendamento(tx, id);
       const agendamento = await tx.agendamento.findUnique({ where: { id }, include: { servicos: true } });
       if (!agendamento) throw new HttpError(404, 'Agendamento não encontrado.');
-      conferirVersao(agendamento.atualizadoEm, versao);
+      conferirVersao(agendamento.atualizadoEm, versaoEsperada);
       // Mesma regra da edição: registro fechado não troca de profissional (mudaria o dono do faturamento e da comissão)
-      if (agendamento.status !== null && agendamento.status !== 'scheduled') {
+      if (statusFechado(agendamento.status)) {
         throw new HttpError(409, 'Atendimento já encerrado (concluído, falta ou cancelado): não dá para mudar o profissional.');
       }
-      await travarChave(tx, `agenda:${destinoId}:${partesNoFuso(agendamento.data).data}`);
+      // Mesmo profissional: nada muda (e a versão não avança, para não derrubar quem está editando em outra aba)
+      if (destinoId === agendamento.colaboradorId) return tx.agendamento.findUniqueOrThrow({ where: { id }, include: INCLUDE_COMPLETO });
 
       const indisponivel = await validarDisponibilidadeProfissional(tx, destinoId, agendamento.data, agendamento.servicos, { ignorarAgendamentoId: id });
       if (indisponivel) throw new HttpError(indisponivel.status, indisponivel.erro);
@@ -521,10 +598,25 @@ export function createAgendamentosRouter(notificar: Notificar) {
   });
 
   // Exclusão definitiva (apenas supervisores). Para desmarcar mantendo histórico, use o status "cancelled".
+  // Concluído e falta são registro do que aconteceu (faturamento, comissão, faltas): não se apagam, se reabrem.
   router.delete('/agendamentos/:id', verificarSupervisorToken, async (req, res) => {
     try {
-      const removido = await prisma.agendamento.deleteMany({ where: { id: req.params.id } });
-      if (removido.count === 0) return res.status(404).json({ erro: 'Agendamento não encontrado. Ele pode já ter sido excluído.' });
+      const { id } = req.params;
+      await prisma.$transaction(async (tx) => {
+        const ag = await tx.agendamento.findUnique({
+          where: { id }, include: { cliente: { select: { codigo: true } }, colaborador: { select: { nome: true } } },
+        });
+        if (!ag) throw new HttpError(404, 'Agendamento não encontrado. Ele pode já ter sido excluído.');
+        if (ag.status === 'completed' || ag.status === 'no_show') {
+          throw new HttpError(409, 'Atendimento concluído ou com falta não pode ser excluído: ele entra no faturamento e nas faltas. Reabra-o antes, se foi registrado por engano.');
+        }
+        // A tela sempre manda a versão (não apaga um atendimento que alguém acabou de alterar). Scripts e limpezas de
+        // teste podem omiti-la: só supervisor exclui, e concluído/falta já são barrados acima
+        if (typeof req.body?.version === 'string' && req.body.version) conferirVersao(ag.atualizadoEm, req.body.version);
+        const removido = await tx.agendamento.deleteMany({ where: { id, atualizadoEm: ag.atualizadoEm } });
+        if (removido.count === 0) throw new HttpError(409, MENSAGEM_VERSAO_DESATUALIZADA, CODIGO_VERSAO_DESATUALIZADA);
+        await registrarAuditoria(req, { acao: 'agendamento.excluido', alvo: alvoDoAtendimento(ag), antes: { status: ag.status ?? 'scheduled' }, depois: { status: 'excluído' }, tx });
+      });
       notificar();
       res.json({ mensagem: 'Agendamento excluído com sucesso' });
     } catch (error) {

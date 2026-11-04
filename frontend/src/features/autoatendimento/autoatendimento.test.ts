@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { VERSAO_CONSENTIMENTO_SAUDE } from '@shared/consentimento';
 import {
   fetchAutoatendimentoServicos,
   fetchAutoatendimentoDisponibilidade,
@@ -152,6 +153,8 @@ describe('Autoatendimento Service & Business Logic', () => {
         telefone: '(11) 98888-7777',
         cpf: '123.456.789-00',
         observacoesSaude: 'Pressão alta controlada',
+        consentimento: true,
+        consentimentoVersao: VERSAO_CONSENTIMENTO_SAUDE,
       },
       metodoPagamento: 'pix',
       tipoPagamento: 'sinal',

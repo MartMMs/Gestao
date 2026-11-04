@@ -12,7 +12,15 @@ const listaDeTextos = (valor: unknown): string[] => {
   return Array.from(new Set(valor.filter((v): v is string => typeof v === 'string').map((v) => v.trim()).filter(Boolean)));
 };
 
-const numeroOuNaN = (valor: unknown) => (valor === '' || valor === null || valor === undefined ? NaN : Number(valor));
+// Só número de verdade: tipo number finito ou texto como "50", "49,90" ou "49.90". Nada de true, [50], "0x10" ou "1e3",
+// que Number() aceitaria em silêncio.
+const NUMERO_TEXTO = /^\s*\d+(?:[.,]\d+)?\s*$/;
+const numeroOuNaN = (valor: unknown) => {
+  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : NaN;
+  if (typeof valor === 'string' && NUMERO_TEXTO.test(valor)) return Number(valor.replace(',', '.'));
+  return NaN;
+};
+const PRECO_MAXIMO = 100_000;
 
 const validarServico = (entrada: unknown) => {
   const payload = (entrada && typeof entrada === 'object' ? entrada : {}) as Record<string, unknown>;
@@ -24,10 +32,10 @@ const validarServico = (entrada: unknown) => {
   const categoria = typeof payload?.categoria === 'string' ? payload.categoria.trim() : '';
   const tempoHigienizacaoMin = payload?.tempoHigienizacaoMin === undefined || payload?.tempoHigienizacaoMin === ''
     ? 0
-    : Number(payload.tempoHigienizacaoMin);
+    : numeroOuNaN(payload.tempoHigienizacaoMin);
   const comissaoPercentual = payload?.comissaoPercentual === undefined || payload?.comissaoPercentual === null || payload?.comissaoPercentual === ''
     ? null
-    : Number(payload.comissaoPercentual);
+    : numeroOuNaN(payload.comissaoPercentual);
 
   if (payload?.modoElegibilidade !== undefined && !(MODOS_ELEGIBILIDADE as readonly unknown[]).includes(payload.modoElegibilidade)) {
     return { erro: 'Modo de elegibilidade inválido.' };
@@ -39,7 +47,11 @@ const validarServico = (entrada: unknown) => {
 
   if (nome.length < 3) return { erro: 'O nome do serviço deve ter ao menos 3 caracteres.' };
   if (nome.length > 80) return { erro: 'O nome do serviço deve ter no máximo 80 caracteres.' };
-  if (!Number.isFinite(preco) || preco < 0) return { erro: 'Informe um preço válido (número maior ou igual a zero).' };
+  if (!Number.isFinite(preco) || preco < 0 || preco > PRECO_MAXIMO) {
+    return { erro: `Informe um preço válido: um número de 0 a ${PRECO_MAXIMO.toLocaleString('pt-BR')}.` };
+  }
+  // Tolerância de ponto flutuante: 19.9 * 100 dá 1990.0000000000002, e R$ 19,90 é um preço válido
+  if (Math.abs(Math.round(preco * 100) - preco * 100) > 1e-6) return { erro: 'O preço aceita no máximo 2 casas decimais (centavos).' };
   if (!Number.isInteger(duracao) || duracao < 5 || duracao > 480 || duracao % 5 !== 0) {
     return { erro: 'A duração deve ser um número inteiro entre 5 e 480 minutos (múltiplos de 5).' };
   }
@@ -48,7 +60,7 @@ const validarServico = (entrada: unknown) => {
   if (!Number.isInteger(tempoHigienizacaoMin) || tempoHigienizacaoMin < 0 || tempoHigienizacaoMin > 120) {
     return { erro: 'O tempo de higienização deve ser um número inteiro entre 0 e 120 minutos.' };
   }
-  const ordem = payload?.ordem === undefined || payload?.ordem === '' ? 0 : Number(payload.ordem);
+  const ordem = payload?.ordem === undefined || payload?.ordem === '' ? 0 : numeroOuNaN(payload.ordem);
   if (!Number.isInteger(ordem) || ordem < 0 || ordem > 999) return { erro: 'A ordem no catálogo deve ser um número inteiro entre 0 e 999.' };
   if (categoria.length > 60) return { erro: 'A categoria deve ter no máximo 60 caracteres.' };
   if (comissaoPercentual !== null && (!Number.isFinite(comissaoPercentual) || comissaoPercentual < 0 || comissaoPercentual > 100)) {
@@ -66,7 +78,7 @@ const validarServico = (entrada: unknown) => {
 
   return {
     data: {
-      nome, preco, duracao, icone: icone || 'spa', descricao, categoria, tempoHigienizacaoMin, comissaoPercentual, ordem,
+      nome, preco: Math.round(preco * 100) / 100, duracao, icone: icone || 'design_services', descricao, categoria, tempoHigienizacaoMin, comissaoPercentual, ordem,
       modoElegibilidade, cargosPermitidos, habilidadesPermitidas, profissionaisPermitidos,
     },
   };
@@ -84,7 +96,10 @@ export function createServicosRouter(notificar: Notificar) {
     try {
       const servicos = await prisma.servico.findMany({ orderBy: [{ ordem: 'asc' }, { nome: 'asc' }] });
       // Percentual de comissão é política da supervisão (com o valor do atendimento, daria a comissão dos colegas)
-      res.json(usuarioEhSupervisor(req) ? servicos : servicos.map(({ comissaoPercentual: _comissao, ...s }) => s));
+      // Lista de profissionais exclusivos também é interna (o catálogo do totem já a esconde)
+      res.json(usuarioEhSupervisor(req)
+        ? servicos
+        : servicos.map(({ comissaoPercentual: _comissao, profissionaisPermitidos: _ids, ...s }) => s));
     } catch (error) {
       responderErro(res, error, 'Erro ao buscar serviços');
     }
@@ -102,6 +117,8 @@ export function createServicosRouter(notificar: Notificar) {
       if (await nomeEmUso(validacao.data.nome)) return res.status(409).json({ erro: 'Já existe um serviço com este nome.' });
 
       const servico = await prisma.servico.create({ data: validacao.data });
+      // Serviço que já nasce com preço e comissão entra no histórico, como as alterações depois
+      await registrarAuditoria(req, { acao: 'servico.criado', alvo: `Serviço ${servico.nome}`, antes: {}, depois: servico, campos: ['preco', 'comissaoPercentual'] });
       notificar();
       res.status(201).json(servico);
     } catch (error) {
@@ -125,7 +142,7 @@ export function createServicosRouter(notificar: Notificar) {
       if (await nomeEmUso(validacao.data.nome, id)) return res.status(409).json({ erro: 'Já existe um serviço com este nome.' });
 
       const servico = await prisma.servico.update({ where: { id }, data: validacao.data });
-      await registrarAuditoria(req, 'servico.alterado', `Serviço ${servico.nome}`, anterior, servico, ['nome', 'preco', 'comissaoPercentual', 'duracao']);
+      await registrarAuditoria(req, { acao: 'servico.alterado', alvo: `Serviço ${servico.nome}`, antes: anterior, depois: servico, campos: ['nome', 'preco', 'comissaoPercentual', 'duracao'] });
       notificar();
       res.json(servico);
     } catch (error) {
@@ -141,7 +158,10 @@ export function createServicosRouter(notificar: Notificar) {
       const anterior = await prisma.servico.findUnique({ where: { id: req.params.id } });
       if (!anterior) return res.status(404).json({ erro: 'Serviço não encontrado.' });
       await prisma.servico.update({ where: { id: anterior.id }, data: { ativo: req.body.ativo } });
-      await registrarAuditoria(req, req.body.ativo ? 'servico.reativado' : 'servico.tirado_de_linha', `Serviço ${anterior.nome}`, anterior, { ativo: req.body.ativo }, ['ativo']);
+      await registrarAuditoria(req, {
+        acao: req.body.ativo ? 'servico.reativado' : 'servico.tirado_de_linha', alvo: `Serviço ${anterior.nome}`,
+        antes: anterior, depois: { ativo: req.body.ativo }, campos: ['ativo'],
+      });
       notificar();
       res.json({ mensagem: req.body.ativo ? 'Serviço voltou ao catálogo.' : 'Serviço tirado de linha. Ele continua no histórico.' });
     } catch (error) {
@@ -159,7 +179,7 @@ export function createServicosRouter(notificar: Notificar) {
       const anterior = await prisma.servico.findUnique({ where: { id } });
       if (!anterior) return res.status(404).json({ erro: 'Serviço não encontrado.' });
       await prisma.servico.delete({ where: { id } });
-      await registrarAuditoria(req, 'servico.excluido', `Serviço ${anterior.nome}`, { existe: true, preco: anterior.preco }, { existe: false, preco: null });
+      await registrarAuditoria(req, { acao: 'servico.excluido', alvo: `Serviço ${anterior.nome}`, antes: { existe: true, preco: anterior.preco }, depois: { existe: false, preco: null } });
       notificar();
       res.json({ mensagem: 'Serviço excluído' });
     } catch (error) {

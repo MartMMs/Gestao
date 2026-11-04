@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { prisma } from '../db';
 import { config as ambiente } from '../env';
 import { registrarAuditoria } from '../lib/auditoria';
+import { valoresGravados } from '../lib/valores';
 import { usuarioEhAdmin, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { redisService } from '../services/redisService';
 import { communicationService } from '../services/communicationService';
@@ -49,7 +50,7 @@ import {
   partesNoFuso,
   validarHorarioAgendamento,
 } from '../../shared/agenda';
-import { normalizarTelefone } from '../../shared/validadores';
+import { normalizarTelefone, semSufixoDoTotem } from '../../shared/validadores';
 import { ESCOPOS } from '../../shared/escopos';
 
 const TTL_RESULTADO_SEGUNDOS = 15 * 60;
@@ -60,6 +61,10 @@ const MAX_RESERVAS_POR_IP = ambiente.totemMaxReservasPorIp;
 // Requisições por minuto por IP nas rotas públicas do totem
 const MAX_REQUISICOES_POR_MINUTO = ambiente.totemMaxRequisicoesPorMinuto;
 const JANELA_RESERVAS_SEGUNDOS = 10 * 60;
+const MAX_RESERVAS_POR_IP_DIA = ambiente.totemMaxReservasPorIpDia;
+// Uma reserva do totem não ocupa mais que isto (até 10 serviços somados travariam um profissional o dia todo)
+const DURACAO_MAXIMA_TOTEM_MIN = 4 * 60;
+const MENSAGEM_DURACAO_MAXIMA = `Pelo totem, cada reserva pode ter até ${DURACAO_MAXIMA_TOTEM_MIN / 60} horas. Escolha menos serviços ou fale com a recepção.`;
 
 const limiteDeData = () => {
   const limite = new Date(Date.now() + HORIZONTE_RESERVA_DIAS * 86_400_000);
@@ -143,7 +148,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         return res.status(403).json({ erro: 'Apenas o administrador pode alterar a cobrança de pagamento do totem.' });
       }
       const config = await prisma.configuracaoAutoatendimento.update({ where: { id: 'default' }, data: dados });
-      await registrarAuditoria(req, 'totem.cobranca', 'Cobrança do totem', atual, config, ['exigirPagamento', 'percentualSinal']);
+      await registrarAuditoria(req, { acao: 'totem.cobranca', alvo: 'Cobrança do totem', antes: atual, depois: config, campos: ['exigirPagamento', 'percentualSinal'] });
       eventos.emitirConfigAutoatendimento(comDisponibilidadePagamento(config));
       eventos.notificarMudanca();
       res.json(comDisponibilidadePagamento(config));
@@ -183,6 +188,8 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
 
       const servicos = await buscarServicosPorId(prisma, lerIdsServicos(req.query.servicoIds, req.query.servicoId));
       const resumo = resumoServicos(servicos);
+      // Avisa já na escolha (não só ao reservar) que a soma dos serviços passa do limite do totem
+      if (resumo.duracaoTotalSlot > DURACAO_MAXIMA_TOTEM_MIN) return res.status(400).json({ erro: MENSAGEM_DURACAO_MAXIMA });
 
       const [colaboradores, salas, agendamentos, escalas] = await Promise.all([
         prisma.colaborador.findMany({
@@ -295,6 +302,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
 
       const servicos = await buscarServicosPorId(prisma, lerIdsServicos(req.body.servicoIds, req.body.servicoId));
       const resumo = resumoServicos(servicos);
+      if (resumo.duracaoTotalSlot > DURACAO_MAXIMA_TOTEM_MIN) return res.status(400).json({ erro: MENSAGEM_DURACAO_MAXIMA });
       const erroHorario = validarHorarioAgendamento(data, horario, resumo.duracaoTotalSlot, {
         agora: new Date(),
         intervaloMin: INTERVALO_SLOT_TOTEM_MIN,
@@ -313,6 +321,13 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       const lockKeys = await travarHorario(data, inicioMin, resumo.duracaoTotalSlot, terapeuta.id, sala.id, sessionToken, ttlSegundos);
       if (!lockKeys) {
         return res.status(409).json({ erro: 'Este horário acabou de ser selecionado por outro cliente. Por favor, escolha outro.' });
+      }
+      // Teto de 24 h: conta só horários de fato segurados (tentativa recusada ou horário tomado não gastam a cota,
+      // então ninguém tira o totem do ar por um dia com pedidos inválidos)
+      const reservasDoDia = await redisService.rateLimit(`ratelimit:reservas-dia:${ip}`, MAX_RESERVAS_POR_IP_DIA, 24 * 3600);
+      if (!reservasDoDia.allowed) {
+        await liberarReserva(sessionToken, { lockKeys });
+        return res.status(429).json({ erro: 'Este dispositivo atingiu o limite de reservas das últimas 24 horas. Para marcar mais, fale com a recepção.' });
       }
 
       // Sem gateway conectado, nada é cobrado online (ver pagamentoOnlineDisponivel)
@@ -577,15 +592,16 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       const { data, horario } = partesNoFuso(ag.data);
       res.json(communicationService.generateVoucher({
         id: ag.id,
-        clienteNome: ag.cliente.nome,
+        // O voucher vai para o cliente: sem o sufixo interno de cadastro à parte
+        clienteNome: semSufixoDoTotem(ag.cliente.nome),
         clienteTelefone: ag.cliente.telefone || '',
         terapiaNome: ag.servicos.map((s) => s.nome).join(' + ') || 'Atendimento',
         duracaoMin: ag.servicos.reduce((soma, s) => soma + (s.duracao || 60), 0) || 60,
         data,
         horario,
         terapeutaNome: ag.colaborador.nome,
-        salaNome: ag.sala?.nome || 'Cabine Principal',
-        valorTotal: ag.valorTotal ?? ag.servicos.reduce((soma, s) => soma + s.preco, 0),
+        salaNome: ag.sala?.nome || 'A definir na recepção',
+        valorTotal: valoresGravados(ag).valor,
         valorSinal: ag.valorSinal || 0,
         statusPagamento: ag.statusPagamento || 'pendente',
       }));

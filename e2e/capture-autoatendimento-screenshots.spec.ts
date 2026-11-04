@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { apagarClienteDeTeste, escolherDiaFuturoNoTotem, nomeClienteTeste } from './credenciais';
+import { apagarClienteDeTeste, nomeClienteTeste, reservarHorarioNoTotem } from './credenciais';
 
 test('Capturar capturas de tela completas do fluxo de Autoatendimento', async ({ page, request }) => {
   const nomeCliente = nomeClienteTeste('Mariana Alencar');
@@ -21,29 +21,20 @@ test('Capturar capturas de tela completas do fluxo de Autoatendimento', async ({
     await cardTerapia.click();
     await page.screenshot({ path: test.info().outputPath('03_terapia_selecionada.png') });
 
-    // 4. Avança para a Etapa 2: Horários & Cabine
+    // 4. Avança para a Etapa 2: Horários & Espaço
     const btnAvancar = page.getByRole('button', { name: /Escolher Horário/i });
     await expect(btnAvancar).toBeEnabled();
     await btnAvancar.click();
     await expect(page.getByRole('heading', { name: /Disponibilidade em Tempo Real/i })).toBeVisible({ timeout: 15_000 });
     await page.waitForTimeout(1000);
-    await page.screenshot({ path: test.info().outputPath('04_horarios_e_cabines.png') });
+    await page.screenshot({ path: test.info().outputPath('04_horarios.png') });
 
-    // 5. Seleciona o primeiro slot com vaga livre
-    await escolherDiaFuturoNoTotem(page);
-    const slotButton = page.locator('button:has(span:has-text(":")):not([disabled])').first();
-    await expect(slotButton).toBeVisible({ timeout: 15_000 });
-    await slotButton.click();
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: test.info().outputPath('05_slot_selecionado.png') });
-
-    // 6. Clica em Garantir Reserva (10 min) disparando o lock no Redis
-    const btnLock = page.getByRole('button', { name: /Garantir Reserva/i });
-    await expect(btnLock).toBeEnabled({ timeout: 10_000 });
-    await btnLock.click();
+    // 5 e 6. Escolhe um horário livre e garante a reserva (lock no Redis), com nova tentativa se precisar
+    await reservarHorarioNoTotem(page);
+    await page.screenshot({ path: test.info().outputPath('05_slot_reservado.png') });
 
     // 7. Etapa 3: Identificação & Anamnese
-    await expect(page.getByRole('heading', { name: /Ficha Personalizada do Spa/i })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: /Seus dados para o atendimento/i })).toBeVisible({ timeout: 15_000 });
     await page.locator('input[placeholder*="Mariana" i]').fill(nomeCliente);
     await page.locator('input[placeholder*="98765" i]').fill('(11) 98765-4321');
     await page.screenshot({ path: test.info().outputPath('06_identificacao_anamnese.png') });
@@ -51,6 +42,7 @@ test('Capturar capturas de tela completas do fluxo de Autoatendimento', async ({
     // 8. Avança para Etapa 4: Garantia & Pagamento (Timer de 10 min + Pix)
     const btnIrPagamento = page.getByRole('button', { name: /Ir para Pagamento|Revisar e Confirmar/i });
     await expect(btnIrPagamento).toBeEnabled();
+    await page.getByRole('checkbox', { name: /Autorizo .* a usar meus dados pessoais/i }).check();
     await btnIrPagamento.click();
 
     // O título muda conforme a configuração: pagamento online ou pagamento na recepção
@@ -63,10 +55,10 @@ test('Capturar capturas de tela completas do fluxo de Autoatendimento', async ({
     await expect(btnConfirmar).toBeVisible({ timeout: 10_000 });
     await btnConfirmar.click();
 
-    // 10. Etapa 5: Voucher Oficial do Spa
-    await expect(page.getByRole('heading', { name: /Seu Momento de Bem-Estar/i })).toBeVisible({ timeout: 20_000 });
+    // 10. Etapa 5: Comprovante da reserva
+    await expect(page.getByRole('heading', { name: /Seu Horário Está Garantido/i })).toBeVisible({ timeout: 20_000 });
     await page.waitForTimeout(1000);
-    await page.screenshot({ path: test.info().outputPath('08_voucher_digital_spa.png') });
+    await page.screenshot({ path: test.info().outputPath('08_comprovante.png') });
   } finally {
     // Remove o cliente e o agendamento criados pelo teste
     await apagarClienteDeTeste(request, nomeCliente);

@@ -24,6 +24,8 @@ model Colaborador {
   diasTrabalho  String?       @default("1,2,3,4,5,6")
   // Incrementada ao trocar senha/e-mail ou reativar a conta: tokens com versão antiga deixam de valer
   versaoToken   Int           @default(0)
+  // Senha criada ou redefinida por outra pessoa (supervisão, linha de comando): a própria pessoa troca no 1º acesso
+  trocarSenha   Boolean       @default(false)
   agendamentos  Agendamento[]
   bloqueios     Bloqueio[]
   trocasTurno   SolicitacaoTroca[]
@@ -77,6 +79,10 @@ model Sala {
 model Agendamento {
   id               String      @id @default(uuid())
   data             DateTime
+  // Totem: quando o cliente autorizou o uso dos dados pessoais e de saúde (prova do consentimento, LGPD art. 8º e 11)
+  consentimentoDadosEm DateTime?
+  // Versão do texto de consentimento aceito (shared/consentimento.ts)
+  consentimentoVersao  String?
   status           String?     @default("scheduled")
   colaboradorId    String
   clienteId        String

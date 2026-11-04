@@ -1,3 +1,4 @@
+import { valorDoAtendimento } from '../utils/valorAtendimento';
 import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { normalizarTexto } from '@shared/validadores';
 import { NO_SCALE_OVERRIDES } from '../features/scale/components/SupervisorEscalaTab';
@@ -106,9 +107,9 @@ export interface SupervisorViewProps {
   onDeleteService: (id: string) => Promise<unknown> | void;
   onAddAppointment: (appointment: AppointmentCreatePayload) => Promise<boolean | void> | void;
   isAddingAppointment?: boolean;
-  onDeleteAppointment: (id: string) => Promise<boolean | void> | void;
+  onDeleteAppointment: (id: string, version?: string) => Promise<boolean | void> | void;
   onEditAppointment: (id: string, appointment: Partial<Appointment>) => Promise<boolean | void> | void;
-  onCompleteAppointment: (id: string) => void;
+  onAlterarStatus: (appointment: Appointment, status: 'completed' | 'no_show' | 'scheduled') => Promise<unknown>;
   onEditClient?: (id: string, clientData: Partial<Client>) => Promise<boolean | void> | void;
   onDeleteClient?: (id: string) => Promise<boolean | void> | void;
   onAddBloqueio?: (b: Omit<Bloqueio, 'id'>) => Promise<boolean>;
@@ -121,7 +122,7 @@ export interface SupervisorViewProps {
   onReplicateScaleDays?: (payload: ScaleReplicatePayload) => Promise<boolean | void> | void;
 }
 
-export function SupervisorView({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onReassign, onAddEmployee, onDeleteEmployee, onEditEmployee, onAddService, onEditService, onDeleteService, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onCompleteAppointment, onEditClient, onDeleteClient, onAddBloqueio, onDeleteBloqueio, turnoSwapRequests = [], onUpdateTurnoSwapRequestStatus, onOpenUpcomingAppointments, onSaveScaleOverride, onSwapScaleDays, onReplicateScaleDays }: SupervisorViewProps) {
+export function SupervisorView({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onReassign, onAddEmployee, onDeleteEmployee, onEditEmployee, onAddService, onEditService, onDeleteService, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onAlterarStatus, onEditClient, onDeleteClient, onAddBloqueio, onDeleteBloqueio, turnoSwapRequests = [], onUpdateTurnoSwapRequestStatus, onOpenUpcomingAppointments, onSaveScaleOverride, onSwapScaleDays, onReplicateScaleDays }: SupervisorViewProps) {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'escala' | 'planejamento' | 'equipe' | 'servicos' | 'clientes' | 'autoatendimento' | 'relatorios'>(() => {
     if (typeof window === 'undefined') return 'dashboard';
     const saved = window.sessionStorage.getItem('supervisor-active-tab');
@@ -155,7 +156,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePrice, setNewServicePrice] = useState('');
   const [newServiceDuration, setNewServiceDuration] = useState('60');
-  const SERVICE_ICONS = ['self_improvement', 'waves', 'face', 'water_drop', 'spa'];
+  const SERVICE_ICONS = ['design_services', 'event_available', 'content_cut', 'medical_services', 'fitness_center', 'spa'];
   const [newServiceIcon, setNewServiceIcon] = useState(SERVICE_ICONS[0]);
   const [newServiceDescription, setNewServiceDescription] = useState('');
   const [serviceEligibilityMode, setServiceEligibilityMode] = useState<ServiceEligibilityMode>('livre');
@@ -171,6 +172,18 @@ export function SupervisorView({ employees, appointments, services, clients, sca
   // Estado para controlar o Toast de sucesso
   const { toastMessage, setToastMessage } = useToast();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Esc fecha o aviso de erro (como nos outros diálogos)
+  useEffect(() => {
+    if (!errorMessage) return;
+    // Captura + stopPropagation (como o ConfirmDialog): o Esc fecha só o aviso, não o formulário por baixo
+    const aoTeclar = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setErrorMessage(null);
+    };
+    window.addEventListener('keydown', aoTeclar, true);
+    return () => window.removeEventListener('keydown', aoTeclar, true);
+  }, [errorMessage]);
 
   // Estado e regras da Grade de Escalas
   const planejamento = usePlanejamentoEscala({
@@ -352,18 +365,20 @@ export function SupervisorView({ employees, appointments, services, clients, sca
     .filter(Boolean)))
     .sort((a, b) => a.localeCompare(b)), [employees]);
 
-  const { viewingEmployeeRevenue, viewingEmployeeNoShows } = useMemo(() => {
-    if (!viewingEmployee) return { viewingEmployeeRevenue: 0, viewingEmployeeNoShows: 0 };
-    
-    const servicePriceMap = new Map(services.map(s => [s.nome, Number(s.preco) || 0]));
+  const { viewingEmployeeRevenue, viewingEmployeeNoShows, viewingEmployeeSemBaixa } = useMemo(() => {
+    if (!viewingEmployee) return { viewingEmployeeRevenue: 0, viewingEmployeeNoShows: 0, viewingEmployeeSemBaixa: 0 };
     let revenue = 0;
     let noShows = 0;
+    let semBaixa = 0;
     for (const app of appointments) {
       if (app.assignedEmployeeId !== viewingEmployee.id) continue;
-      if (app.status === 'completed') revenue += app.services.reduce((acc, sName) => acc + (servicePriceMap.get(sName) || 0), 0);
-      else if (app.status === 'scheduled' && app.date < todayStr) noShows += 1;
+      // Falta gravada e "sem baixa" ficam separados, como no relatório. Aqui "sem baixa" é pelo dia (dias passados),
+      // como na grade do dia; o relatório também conta os de hoje que já terminaram
+      if (app.status === 'completed') revenue += valorDoAtendimento(app, services);
+      else if (app.status === 'no_show') noShows += 1;
+      else if (app.status === 'scheduled' && app.date < todayStr) semBaixa += 1;
     }
-    return { viewingEmployeeRevenue: revenue, viewingEmployeeNoShows: noShows };
+    return { viewingEmployeeRevenue: revenue, viewingEmployeeNoShows: noShows, viewingEmployeeSemBaixa: semBaixa };
   }, [viewingEmployee, appointments, services]);
 
   return (
@@ -376,7 +391,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
                 </h1>
                 <p className="text-sm text-on-surface-variant font-body">
                   {activeModule === 'operacional' 
-                    ? (activeTab === 'escala' ? 'Agenda operacional da recepção em tempo real.' : 'Gestão operacional do Spa com foco em produtividade e qualidade.') 
+                    ? (activeTab === 'escala' ? 'Agenda operacional da recepção em tempo real.' : 'Gestão operacional com foco em produtividade e qualidade.') 
                     : 'Gestão da equipe, controle de ponto e jornadas contratuais.'}
                 </p>
           </div>
@@ -436,7 +451,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
             isAddingAppointment={isAddingAppointment}
             onDeleteAppointment={onDeleteAppointment}
             onEditAppointment={onEditAppointment}
-            onCompleteAppointment={onCompleteAppointment}
+            onAlterarStatus={onAlterarStatus}
             onEditClient={onEditClient}
             onAddBloqueio={onAddBloqueio}
             onDeleteBloqueio={onDeleteBloqueio}
@@ -699,10 +714,13 @@ export function SupervisorView({ employees, appointments, services, clients, sca
                    </p>
                  </div>
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
-                   <p className="text-[10px] font-bold text-outline uppercase tracking-widest">Faltas / Atrasos</p>
+                   <p className="text-[10px] font-bold text-outline uppercase tracking-widest">Faltas</p>
                    <div className="flex items-center gap-1 text-2xl font-headline text-error">
                      {viewingEmployeeNoShows} <span className="material-symbols-outlined text-xl mb-0.5">event_busy</span>
                    </div>
+                   {viewingEmployeeSemBaixa > 0 && (
+                     <p className="text-[11px] text-on-surface-variant mt-1">+ {viewingEmployeeSemBaixa} sem baixa (dia passado, ninguém concluiu nem marcou falta)</p>
+                   )}
                  </div>
               </div>
 
@@ -829,15 +847,18 @@ export function SupervisorView({ employees, appointments, services, clients, sca
         {errorMessage && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-100 p-4">
             <motion.div 
+              role="alertdialog" aria-modal="true" aria-labelledby="erro-supervisao-titulo" aria-describedby="erro-supervisao-texto"
               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
               className="bg-surface-container-lowest/90 backdrop-blur-2xl p-8 rounded-3xl shadow-2xl max-w-sm w-full border border-error/30 text-center"
             >
               <div className="w-16 h-16 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="material-symbols-outlined text-3xl text-error">error</span>
+                <span className="material-symbols-outlined text-3xl text-error" aria-hidden="true">error</span>
               </div>
-              <h2 className="text-2xl font-headline text-error mb-2">Ops! Falha na Reserva</h2>
-              <p className="text-on-surface-variant text-sm mb-6">{errorMessage}</p>
+              {/* Título neutro: este aviso serve a toda a supervisão (concluir, reabrir, cadastros), não só a reservas */}
+              <h2 id="erro-supervisao-titulo" className="text-2xl font-headline text-error mb-2">Não foi possível</h2>
+              <p id="erro-supervisao-texto" className="text-on-surface-variant text-sm mb-6">{errorMessage}</p>
               <button 
+                autoFocus
                 onClick={() => setErrorMessage(null)}
                 className="w-full bg-surface-container hover:bg-surface-container-high text-on-surface py-3 rounded-xl font-bold text-sm uppercase tracking-wider transition-colors"
               >

@@ -47,6 +47,8 @@ export interface Employee {
   completedServices: number;
   diasTrabalho?: string;
   bloqueios?: Bloqueio[];
+  // Senha provisória (criada ou redefinida por outra pessoa): o portal só abre depois da troca
+  trocarSenha?: boolean;
 }
 
 // Alteração de um profissional; `password` redefine a senha de acesso
@@ -64,6 +66,8 @@ export interface Appointment {
   guests: number;
   specialNeeds: string[];
   observation?: string;
+  // Observações escondidas de quem não tem acesso à ficha de saúde do cliente (o campo fica travado)
+  observacaoOculta?: boolean;
   assignedEmployeeId: string;
   status: 'scheduled' | 'completed' | 'cancelled' | 'no_show';
   // Reserva feita no totem que ainda aguarda o check-in da recepção (só então libera a ficha de saúde)
@@ -120,28 +124,6 @@ export interface TurnoSwapRequest {
   atualizadoEm: string;
 }
 
-
-export const AVAILABLE_SERVICES = [
-  'Massagem Relaxante',
-  'Massagem Terapêutica',
-  'Limpeza de Pele',
-  'Drenagem Linfática',
-  'Sessão de Yoga',
-  'Aromaterapia'
-];
-
-export const SERVICE_DURATIONS: Record<string, number> = {
-  'Massagem Relaxante': 60,
-  'Massagem Terapêutica': 90,
-  'Limpeza de Pele': 45,
-  'Drenagem Linfática': 60,
-  'Sessão de Yoga': 60,
-  'Aromaterapia': 30
-};
-
-export const SPECIAL_NEEDS_OPTIONS = [
-  'Mobilidade Reduzida'
-];
 
 export interface AutoatendimentoSlot {
   horario: string;

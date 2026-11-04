@@ -6,7 +6,6 @@ import { SupervisorDashboardTab } from '../features/dashboard/components';
 import { SupervisorClientesTab } from '../features/clients/components';
 import { SupervisorEquipeTab } from '../features/team/components';
 import { SupervisorServicosTab } from '../features/services/components';
-import { gerarSenhaProvisoria } from '../utils/formatters';
 import { AutoatendimentoAdminTab } from '../features/autoatendimento/components';
 import { CompanySettingsTab } from '../features/company/components/CompanySettingsTab';
 import { RelatorioFinanceiroTab } from '../features/reports/components';
@@ -69,7 +68,6 @@ interface AdminViewProps {
   onAddService: (service: ServicePayload) => Promise<boolean | string | void>;
   onEditService: (id: string, service: ServicePayload) => Promise<boolean | string | void>;
   onDeleteService: (id: string) => Promise<unknown> | void;
-  onAddClient?: (client: Omit<Client, 'id'>) => void;
   onEditClient?: (id: string, client: Partial<Client>) => void;
   onDeleteClient?: (id: string) => void;
   token?: string | null;
@@ -86,7 +84,6 @@ export function AdminView({
   onAddService,
   onEditService,
   onDeleteService,
-  onAddClient,
   onEditClient,
   onDeleteClient,
   token,
@@ -110,30 +107,11 @@ export function AdminView({
   const [serviceAllowedSkillsInput, setServiceAllowedSkillsInput] = useState('');
   const [serviceAllowedProfessionalsInput, setServiceAllowedProfessionalsInput] = useState('');
 
-  // Gestão de Equipe
-  const [employeeSearchTerm, setEmployeeSearchTerm] = useState('');
-  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
-  const [newEmpName, setNewEmpName] = useState('');
-  const [newEmpEmail, setNewEmpEmail] = useState('');
-  const [newEmpSpecialty, setNewEmpSpecialty] = useState('');
-  const [newEmpRole, setNewEmpRole] = useState<'collaborator' | 'supervisor' | 'admin'>('collaborator');
-  const [newEmpCargo, setNewEmpCargo] = useState('');
-  const [newEmpDiasTrabalho, setNewEmpDiasTrabalho] = useState<string[]>(['1', '2', '3', '4', '5', '6']);
-  const [newEmpSkillsInput, setNewEmpSkillsInput] = useState('');
-
-  // Clientes
-  const [clientSearchTerm, setClientSearchTerm] = useState('');
-  const [editingClientId, setEditingClientId] = useState<string | null>(null);
-  const [newClientName, setNewClientName] = useState('');
-  const [newClientPhone, setNewClientPhone] = useState('');
-  const [newClientCpf, setNewClientCpf] = useState('');
-  const [newClientObservation, setNewClientObservation] = useState('');
 
   // Toast
   const { toastMessage, setToastMessage } = useToast();
 
   const [erroPainel, setErroPainel] = useState<string | null>(null);
-  const [senhaCriada, setSenhaCriada] = useState<{ email: string; senha: string } | null>(null);
 
   const showToast = (msg: string | null) => {
     setToastMessage(msg);
@@ -210,62 +188,6 @@ export function AdminView({
     setServiceAllowedProfessionalsInput((service.profissionaisPermitidos || []).join(', '));
   };
 
-  const handleEmployeeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const skills = newEmpSkillsInput.split(',').map((s) => s.trim()).filter(Boolean);
-    try {
-
-    if (editingEmployeeId) {
-      const resultado = await onEditEmployee(editingEmployeeId, {
-        name: newEmpName,
-        email: newEmpEmail,
-        specialty: newEmpSpecialty,
-        role: newEmpRole,
-        cargo: newEmpCargo,
-        diasTrabalho: newEmpDiasTrabalho.join(','),
-        habilidades: skills,
-      });
-      if (typeof resultado === 'string' || resultado === false) {
-        setErroPainel(typeof resultado === 'string' ? resultado : 'Não foi possível atualizar o colaborador.');
-        return;
-      }
-      showToast('Colaborador atualizado com sucesso!');
-    } else {
-      const senhaProvisoria = gerarSenhaProvisoria();
-      const resultado = await onAddEmployee({
-        name: newEmpName,
-        email: newEmpEmail,
-        password: senhaProvisoria,
-        specialty: newEmpSpecialty,
-        role: newEmpRole,
-        cargo: newEmpCargo,
-        avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${newEmpName}`,
-        diasTrabalho: newEmpDiasTrabalho.join(','),
-        habilidades: skills,
-      });
-      if (typeof resultado === 'string' || resultado === false) {
-        setErroPainel(typeof resultado === 'string' ? resultado : 'Não foi possível adicionar o colaborador.');
-        return;
-      }
-      setSenhaCriada({ email: newEmpEmail, senha: senhaProvisoria });
-    }
-    setErroPainel(null);
-    cancelEmpEdit();
-    } catch (error) {
-      setErroPainel(error instanceof Error ? error.message : 'Não foi possível salvar o colaborador.');
-    }
-  };
-
-  const cancelEmpEdit = () => {
-    setEditingEmployeeId(null);
-    setNewEmpName('');
-    setNewEmpEmail('');
-    setNewEmpSpecialty('');
-    setNewEmpRole('collaborator');
-    setNewEmpCargo('');
-    setNewEmpDiasTrabalho(['1', '2', '3', '4', '5', '6']);
-    setNewEmpSkillsInput('');
-  };
 
   const formatDuration = (min: number) => {
     const h = Math.floor(min / 60);
@@ -289,17 +211,10 @@ export function AdminView({
         </motion.div>
       )}
 
-      {(erroPainel || senhaCriada) && (
-        <div role="alert" className={`fixed top-20 right-8 z-50 max-w-sm px-5 py-4 rounded-2xl shadow-xl text-xs font-bold ${erroPainel ? 'bg-error text-on-error' : 'bg-primary text-on-primary'}`}>
-          {erroPainel ? erroPainel : (
-            <>
-              <p>Membro adicionado. Repasse o acesso:</p>
-              <p className="mt-1 select-all">{senhaCriada!.email}</p>
-              <p className="mt-1 select-all">Senha provisória: {senhaCriada!.senha}</p>
-              <p className="mt-1 font-normal">Anote agora: a senha não será exibida de novo.</p>
-            </>
-          )}
-          <button type="button" className="mt-3 underline" onClick={() => { setErroPainel(null); setSenhaCriada(null); }}>Fechar</button>
+      {erroPainel && (
+        <div role="alert" className="fixed top-20 right-8 z-50 max-w-sm px-5 py-4 rounded-2xl shadow-xl text-xs font-bold bg-error text-on-error">
+          {erroPainel}
+          <button type="button" className="mt-3 block underline" onClick={() => setErroPainel(null)}>Fechar</button>
         </div>
       )}
 

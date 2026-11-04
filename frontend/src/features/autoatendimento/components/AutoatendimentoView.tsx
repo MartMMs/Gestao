@@ -8,6 +8,7 @@ import {
   fetchAutoatendimentoConfig,
   fetchAutoatendimentoEmpresa,
   cancelarReservaAutoatendimento,
+  type DadosClienteTotem,
 } from '../services/autoatendimentoService';
 import { StepCatalog } from './StepCatalog';
 import { StepSchedule } from './StepSchedule';
@@ -37,12 +38,7 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
   const [selectedServices, setSelectedServices] = useState<Service[]>([]);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [reservation, setReservation] = useState<AutoatendimentoReservaSession | null>(null);
-  const [clientData, setClientData] = useState<{
-    nome: string;
-    telefone: string;
-    cpf: string;
-    observacoesSaude: string;
-  } | null>(null);
+  const [clientData, setClientData] = useState<DadosClienteTotem | null>(null);
   const [voucher, setVoucher] = useState<Voucher | null>(null);
 
   // Modal de expiração
@@ -158,12 +154,7 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
     setCurrentStep(3);
   };
 
-  const handleIdentificationSubmit = (data: {
-    nome: string;
-    telefone: string;
-    cpf: string;
-    observacoesSaude: string;
-  }) => {
+  const handleIdentificationSubmit = (data: DadosClienteTotem) => {
     setClientData(data);
     setCurrentStep(4);
   };
@@ -434,6 +425,8 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
                 )}
                 <StepIdentification
                   reservation={reservation}
+                  nomeEmpresa={empresa?.nomeEmpresa}
+                  segmento={empresa?.segmento}
                   onSubmit={handleIdentificationSubmit}
                   onBack={handleStepBackFromId}
                 />

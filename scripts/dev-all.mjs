@@ -39,6 +39,7 @@ function run(name, command, args, options = {}) {
     cwd: options.cwd || process.cwd(),
     stdio: ['inherit', 'pipe', 'pipe'],
     shell: false,
+    detached: process.platform !== 'win32',
     env: process.env,
   });
 
@@ -136,21 +137,34 @@ async function waitForPortOpen(port, options = {}) {
 
 let shuttingDown = false;
 
+function killChildTree(child, signal) {
+  if (!child || child.exitCode !== null) return;
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // fallback to direct child.kill below
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // ignore if already exited
+  }
+}
+
 function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
 
   for (const child of children) {
-    if (!child.killed) {
-      child.kill('SIGTERM');
-    }
+    killChildTree(child, 'SIGTERM');
   }
 
   setTimeout(() => {
     for (const child of children) {
-      if (!child.killed) {
-        child.kill('SIGKILL');
-      }
+      killChildTree(child, 'SIGKILL');
     }
     process.exit(exitCode);
   }, 1000);

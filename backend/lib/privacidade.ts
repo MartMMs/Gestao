@@ -33,13 +33,13 @@ export const mascararTelefone = (telefone?: string | null) => {
 
 type ClienteBase = { id: string; cpf?: string | null; telefone?: string | null; observacao?: string | null };
 
-export const prepararCliente = <T extends ClienteBase>(cliente: T, req: Request, podeVerSaude: boolean): T => {
+export const prepararCliente = <T extends ClienteBase>(cliente: T, req: Request, veSaude: boolean): T => {
   if (!cliente || usuarioEhSupervisor(req)) return cliente;
   return {
     ...cliente,
     cpf: mascararCpf(cliente.cpf),
     telefone: mascararTelefone(cliente.telefone),
-    observacao: podeVerSaude ? cliente.observacao : null,
+    observacao: veSaude ? cliente.observacao : null,
   };
 };
 
@@ -93,9 +93,13 @@ export const clientesComAcessoSaude = async (req: Request): Promise<Set<string>>
   return new Set(ags.map((a) => a.clienteId));
 };
 
+// Quem vê e altera a ficha de saúde (e as observações) de um cliente: a supervisão, ou quem tem acesso a ele agora
+export const podeVerSaude = (req: Request, clienteId: string, acessoSaude: Set<string>) =>
+  usuarioEhSupervisor(req) || acessoSaude.has(clienteId);
+
 export const prepararAgendamento = <T extends AgendamentoBase>(agendamento: T, req: Request, acessoSaude: Set<string>): T => {
   if (!agendamento || usuarioEhSupervisor(req)) return agendamento;
-  const podeVerSaude = acessoSaude.has(agendamento.clienteId);
+  const veSaude = podeVerSaude(req, agendamento.clienteId, acessoSaude);
   // Comissão é dado financeiro da supervisão: cada profissional vê só a dos próprios atendimentos
   const podeVerComissao = !!agendamento.colaboradorId && agendamento.colaboradorId === getUsuario(req)?.id;
   return {
@@ -103,7 +107,9 @@ export const prepararAgendamento = <T extends AgendamentoBase>(agendamento: T, r
     ...('valorComissao' in agendamento && !podeVerComissao ? { valorComissao: null } : {}),
     // O percentual junto com o valor do atendimento daria a comissão que acabou de ser escondida
     ...(agendamento.servicos ? { servicos: agendamento.servicos.map(({ comissaoPercentual: _comissao, ...s }) => s) } : {}),
-    observacoesSaude: podeVerSaude ? agendamento.observacoesSaude : null,
-    ...(agendamento.cliente ? { cliente: prepararCliente(agendamento.cliente, req, podeVerSaude) } : {}),
+    observacoesSaude: veSaude ? agendamento.observacoesSaude : null,
+    // A tela trava o campo em vez de mostrá-lo vazio e editável (o servidor recusa texto novo; vazio é ignorado)
+    observacoesSaudeOculta: !veSaude,
+    ...(agendamento.cliente ? { cliente: prepararCliente(agendamento.cliente, req, veSaude) } : {}),
   };
 };

@@ -189,7 +189,7 @@ export function StepCatalog({
                     isSelected ? 'bg-primary text-on-primary' : 'bg-primary/10 border border-primary/20 text-primary'
                   }`}>
                     <span className="material-symbols-outlined text-2xl sm:text-3xl">
-                      {service.icone || 'spa'}
+                      {service.icone || 'design_services'}
                     </span>
                   </div>
                   <div className="text-right">

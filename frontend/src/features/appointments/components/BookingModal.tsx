@@ -652,7 +652,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
             detailsPlaceholder="Ex: Preferências do cliente..."
             detailsAction={(
               <button type="button" onClick={() => setShowAnamnese(true)} className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors bg-surface-container text-on-surface-variant hover:bg-surface-container-high">
-                + Ficha de Anamnese
+                + Ficha do Cliente
               </button>
             )}
           />

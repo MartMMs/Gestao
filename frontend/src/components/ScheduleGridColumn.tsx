@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useMemo } from 'react';
-import { horarioParaMinutos, horarioValido } from '@shared/agenda';
+import { horarioParaMinutos, horarioValido, instanteNoFuso } from '@shared/agenda';
 import { Appointment, Employee, Service } from '../types';
 import { getDuration } from '../features/appointments/utils/appointmentCore';
-import { isApiError } from '../api';
 
 export interface ScheduleGridContext {
   receptionDate: string;
@@ -17,13 +16,16 @@ export interface ScheduleGridContext {
   employeeUnavailableReasons?: Record<string, string>;
 }
 
+export type AcaoDeStatus = 'concluir' | 'falta' | 'reabrir';
+
 export interface ScheduleGridActions {
   onGridClick: (e: React.MouseEvent<HTMLDivElement>, empId: string) => void;
   onDeleteBloqueio?: (id: string) => Promise<boolean | void> | void;
   onReassignAppointment?: (appointmentId: string, newEmployeeId: string, version?: string) => Promise<unknown> | void;
   // Arrastar e soltar: novo profissional e novo horário (HH:MM) de uma vez; o servidor valida conflitos
-  onMoveAppointment?: (appointmentId: string, newEmployeeId: string, time: string) => Promise<boolean | void> | void;
-  onCompleteAppointment: (id: string) => void;
+  onMoveAppointment?: (appointmentId: string, newEmployeeId: string, time: string) => void;
+  // Concluir, marcar falta ou reabrir: abre a confirmação (quem chama mostra o resultado ou o erro)
+  onAcaoDeStatus: (appointment: Appointment, acao: AcaoDeStatus) => void;
   onEditAppointmentClick: (appointment: Appointment) => void;
   onDeleteAppointmentClick: (id: string) => void;
   setToastMessage: (msg: string | null) => void;
@@ -51,7 +53,7 @@ const DRAG_GRAB_OFFSET = 'application/x-grab-offset';
 const DRAG_DURACAO = 'application/x-duracao';
 const PASSO_ARRASTE_MIN = 15;
 
-type EstadoVisual = 'agendado' | 'totem' | 'aguardando' | 'em_atendimento' | 'finalizado' | 'falta';
+type EstadoVisual = 'agendado' | 'totem' | 'aguardando' | 'em_atendimento' | 'sem_baixa' | 'finalizado' | 'falta';
 
 // Cor de cada estado do atendimento na grade (a legenda usa a mesma tabela)
 const ESTILO_ESTADO: Record<EstadoVisual, { card: string; side: string; text: string }> = {
@@ -59,6 +61,7 @@ const ESTILO_ESTADO: Record<EstadoVisual, { card: string; side: string; text: st
   totem: { card: 'bg-violet-500/15 border-violet-400/45 shadow-sm', side: 'bg-violet-500', text: 'text-violet-700 dark:text-violet-300' },
   aguardando: { card: 'bg-sky-500/15 border-sky-400/45 shadow-sm', side: 'bg-sky-400', text: 'text-sky-700 dark:text-sky-300' },
   em_atendimento: { card: 'bg-emerald-500/15 border-emerald-400/45 shadow-sm', side: 'bg-emerald-400', text: 'text-emerald-700 dark:text-emerald-300' },
+  sem_baixa: { card: 'bg-error-container/10 border-error/50 border-dashed shadow-sm', side: 'bg-error/50', text: 'text-error' },
   finalizado: { card: 'bg-surface-container-low/80 border-outline-variant/30', side: 'bg-outline', text: 'text-on-surface-variant line-through' },
   falta: { card: 'bg-error-container/25 border-error/45 shadow-sm', side: 'bg-error', text: 'text-error' },
 };
@@ -68,8 +71,9 @@ const ROTULO_ESTADO: Record<EstadoVisual, string> = {
   totem: 'Totem · aguardando chegada',
   aguardando: 'Chega em 15 min',
   em_atendimento: 'Em atendimento',
+  sem_baixa: 'Sem baixa (conclua ou marque falta)',
   finalizado: 'Concluído',
-  falta: 'Falta / atrasado',
+  falta: 'Falta',
 };
 
 // Legenda das cores da grade
@@ -121,7 +125,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
     onDeleteBloqueio,
     onReassignAppointment,
     onMoveAppointment,
-    onCompleteAppointment,
+    onAcaoDeStatus,
     onEditAppointmentClick,
     onDeleteAppointmentClick,
     setToastMessage,
@@ -162,9 +166,8 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
 
     try {
       if (onMoveAppointment) {
-        // false = a pessoa desistiu na confirmação
-        if ((await onMoveAppointment(appointmentId, emp.id, horario)) === false) return;
-        setToastMessage(mesmoProfissional ? `Agendamento remarcado para ${horario}.` : `Agendamento movido para ${emp.name} às ${horario}.`);
+        // Abre a confirmação; quem confirma grava e mostra o resultado
+        onMoveAppointment(appointmentId, emp.id, horario);
         return;
       }
       // Sem remarcação disponível (ex.: tela do colaborador), soltar só troca o profissional
@@ -172,10 +175,8 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
       await onReassignAppointment(appointmentId, emp.id);
       setToastMessage(`Agendamento movido para ${emp.name}.`);
     } catch (error) {
-      // Versão desatualizada: não há formulário para "fechar e abrir", e a agenda já foi recarregada (ver useEditAppointment)
-      const msg = isApiError(error) && error.status === 409 && /alterado por outra pessoa/.test(error.message)
-        ? 'Este atendimento mudou enquanto você arrastava. A agenda foi atualizada: confira e tente de novo.'
-        : error instanceof Error ? error.message : 'Erro ao realocar agendamento.';
+      // Versão desatualizada inclusive: a mensagem do servidor já diz que a agenda foi atualizada
+      const msg = error instanceof Error ? error.message : 'Erro ao realocar agendamento.';
       setErrorMessage(msg); // Exibe o modal vermelho com a explicação do conflito CLT
     }
   };
@@ -229,9 +230,11 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
 
       {empAppointments.map((app) => {
         const isCompleted = app.status === 'completed';
-        const appDateTime = new Date(`${app.date}T${app.time}:00`);
+        // Instante no fuso do negócio (o navegador pode estar em outro fuso)
+        const appDateTime = instanteNoFuso(app.date, app.time);
         const isPastDay = app.date < todayStr;
-        const isNoShow = !isCompleted && isPastDay;
+        // Falta é o status gravado; agendado de dia passado sem baixa é outro estado ("sem baixa", abaixo)
+        const isNoShow = app.status === 'no_show';
 
         const inicioMin = horarioParaMinutos(app.time);
         const top = (inicioMin - startHour * 60) * minuteHeight;
@@ -239,7 +242,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
         const height = Math.max(durationMins * minuteHeight, 36);
         const fimMin = inicioMin + durationMins;
         const horaFim = `${String(Math.floor(fimMin / 60)).padStart(2, '0')}:${String(fimMin % 60).padStart(2, '0')}`;
-        const delayMinutes = (!isCompleted && isTodayView && currentMinute > appDateTime)
+        const delayMinutes = (app.status === 'scheduled' && isTodayView && currentMinute > appDateTime)
           ? Math.floor((currentMinute.getTime() - appDateTime.getTime()) / 60000)
           : 0;
 
@@ -247,12 +250,17 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
         const endTime = startTime + durationMins * 60 * 1000;
         const nowTime = currentMinute.getTime();
         const fifteenMinutes = 15 * 60 * 1000;
+        const jaComecou = app.status === 'scheduled' && (isPastDay || (isTodayView && nowTime >= startTime));
 
         let visualStatus: EstadoVisual = 'agendado';
         if (isCompleted) {
           visualStatus = 'finalizado';
         } else if (isNoShow) {
           visualStatus = 'falta';
+        } else if (isPastDay) {
+          // Dia que já passou e ninguém deu baixa. Equivale a semBaixaVencido (shared/statusAgendamento.ts), mas a
+          // grade de outros dias usa um relógio congelado (FROZEN_MINUTE), então decide pelo dia
+          visualStatus = 'sem_baixa';
         } else if (isTodayView) {
           if (nowTime < startTime - fifteenMinutes) {
             visualStatus = 'agendado';
@@ -261,7 +269,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
           } else if (nowTime >= startTime && nowTime <= endTime) {
             visualStatus = 'em_atendimento';
           } else if (nowTime > endTime) {
-            visualStatus = 'falta';
+            visualStatus = 'sem_baixa';
           }
         }
         // Reserva do totem ainda sem check-in: cor própria até a recepção confirmar a chegada
@@ -293,23 +301,47 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
           >
             <div className={`absolute top-0 bottom-0 left-0 w-1 ${sideColorClass}`}></div>
             <div className="pl-2 pr-1 py-1 flex flex-col h-full">
-              <div className="flex justify-between items-start">
+              {/* No mouse, os botões flutuam sobre o card ao passar o cursor; no toque (sempre visíveis) eles entram na
+                  linha do horário, para não cobrir o nome do cliente */}
+              <div className="flex justify-between items-start flex-wrap gap-0.5">
                 <span className={`text-[10px] font-bold leading-none whitespace-nowrap ${visualStyle.text}`}>{app.time}–{horaFim}</span>
-                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity bg-surface-container-lowest/90 rounded-full shadow-sm p-0.5 border border-outline-variant/20 absolute right-1 top-1 z-30">
-                  {!isCompleted && (
+                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 [@media(hover:none)]:static [@media(hover:none)]:shadow-none transition-opacity bg-surface-container-lowest/90 rounded-full shadow-sm p-0.5 border border-outline-variant/20 absolute right-1 top-1 z-30">
+                  {/* Concluir e falta só depois do início (o servidor também confere) */}
+                  {jaComecou && (
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onCompleteAppointment(app.id);
-                        setToastMessage('Ok!');
-                      }}
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onAcaoDeStatus(app, 'concluir'); }}
                       className="text-on-surface-variant hover:text-primary p-1 rounded-full"
+                      title="Concluir" aria-label={`Concluir o atendimento de ${app.clientName}`}
                     >
-                      <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                      <span className="material-symbols-outlined text-[14px]" aria-hidden="true">check_circle</span>
                     </button>
                   )}
-                  <button onClick={(e) => { e.stopPropagation(); onEditAppointmentClick(app); }} className="text-on-surface-variant hover:text-primary p-1 rounded-full"><span className="material-symbols-outlined text-[14px]">edit</span></button>
-                  <button onClick={(e) => { e.stopPropagation(); onDeleteAppointmentClick(app.id); }} className="text-on-surface-variant hover:text-error p-1 rounded-full"><span className="material-symbols-outlined text-[14px]">cancel</span></button>
+                  {jaComecou && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onAcaoDeStatus(app, 'falta'); }}
+                      className="text-on-surface-variant hover:text-error p-1 rounded-full"
+                      title="Marcar falta" aria-label={`Marcar falta de ${app.clientName}`}
+                    >
+                      <span className="material-symbols-outlined text-[14px]" aria-hidden="true">person_off</span>
+                    </button>
+                  )}
+                  {(isCompleted || isNoShow) && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onAcaoDeStatus(app, 'reabrir'); }}
+                      className="text-on-surface-variant hover:text-primary p-1 rounded-full"
+                      title="Reabrir (registrado por engano)" aria-label={`Reabrir o atendimento de ${app.clientName}`}
+                    >
+                      <span className="material-symbols-outlined text-[14px]" aria-hidden="true">undo</span>
+                    </button>
+                  )}
+                  <button type="button" onClick={(e) => { e.stopPropagation(); onEditAppointmentClick(app); }} className="text-on-surface-variant hover:text-primary p-1 rounded-full" title="Editar" aria-label={`Editar o atendimento de ${app.clientName}`}><span className="material-symbols-outlined text-[14px]" aria-hidden="true">edit</span></button>
+                  {/* Concluído e falta não se excluem (entram no faturamento e nas faltas): reabrem */}
+                  {!isCompleted && !isNoShow && (
+                    <button type="button" onClick={(e) => { e.stopPropagation(); onDeleteAppointmentClick(app.id); }} className="text-on-surface-variant hover:text-error p-1 rounded-full" title="Excluir ou cancelar" aria-label={`Excluir ou cancelar o atendimento de ${app.clientName}`}><span className="material-symbols-outlined text-[14px]" aria-hidden="true">cancel</span></button>
+                  )}
                 </div>
               </div>
               <h5 className={`font-bold text-on-surface text-[11px] leading-tight mt-0.5 break-words ${height > 52 ? 'line-clamp-2' : 'truncate'}`} title={app.clientName}>{app.clientName}</h5>
@@ -324,7 +356,6 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
                 <div className="mt-auto flex gap-1 pt-1 border-t border-outline-variant/10">
                   <span className="bg-surface-container text-on-surface-variant text-[8px] px-1 rounded font-bold uppercase tracking-wide">{ROTULO_ESTADO[visualStatus]}</span>
                   {delayMinutes > 0 && <span className="bg-error/10 text-error text-[8px] px-1 rounded font-bold">{delayMinutes}m atraso</span>}
-                  {isNoShow && <span className="bg-error/10 text-error text-[8px] px-1 rounded font-bold">Falta</span>}
                 </div>
               )}
             </div>

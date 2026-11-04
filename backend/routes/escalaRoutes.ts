@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { getUsuario, usuarioEhSupervisor, verificarSupervisorToken, verificarToken } from '../auth';
 import { HttpError, responderErro, type Notificar } from '../lib/http';
-import { transacaoSerializavel, travarChave } from '../lib/transacao';
+import { transacaoComTravas, travarAgenda, travarChave } from '../lib/transacao';
 import { dataValida, horarioParaMinutos, partesNoFuso, TURNO_PADRAO, TURNO_REGEX } from '../../shared/agenda';
 import { agendamentosDoDia } from '../services/agendaService';
 import { aplicarAjusteEscala, gerarEscalaComRegras, type TipoEscala as TipoContrato } from '../../shared/escala';
@@ -44,6 +44,8 @@ const gravarDia = (tx: Prisma.TransactionClient, colaboradorId: string, data: st
 // Mesmas regras da troca de turno aprovada: dias passados não mudam (a escala vira registro do que aconteceu) e
 // um dia com atendimentos marcados não pode virar folga sem que eles sejam realocados antes.
 const gravarDiaValidado = async (tx: Prisma.TransactionClient, colaboradorId: string, data: string, dia: DiaEscala) => {
+  // A mesma trava da marcação: sem ela, uma marcação simultânea entraria num dia que está virando folga
+  await travarAgenda(tx, colaboradorId);
   if (data < partesNoFuso(new Date()).data) {
     throw new HttpError(409, `Não é possível alterar a escala de ${data.split('-').reverse().join('/')}: a data já passou.`);
   }
@@ -135,7 +137,7 @@ export function createEscalaRouter(notificar: Notificar) {
       const tipo = normalizarTipo(req.body.tipo);
       const dia = normalizarDia({ tipo, turno: req.body.turno, descricao: req.body.descricao })!;
 
-      const { salvo, alertasClt } = await transacaoSerializavel(async (tx) => {
+      const { salvo, alertasClt } = await transacaoComTravas(async (tx) => {
         await travarChave(tx, `escala:${chaveEscala(colaboradorId, data)}`);
         const gravado = await gravarDiaValidado(tx, colaboradorId, data, dia);
         return { salvo: gravado, alertasClt: await alertasCltDoMes(tx, colaboradorId, data) };
@@ -158,7 +160,7 @@ export function createEscalaRouter(notificar: Notificar) {
       await garantirColaborador(from.colaboradorId);
       await garantirColaborador(to.colaboradorId);
 
-      const resultado = await transacaoSerializavel(async (tx) => {
+      const resultado = await transacaoComTravas(async (tx) => {
         const chaves = [chaveEscala(from.colaboradorId, from.data), chaveEscala(to.colaboradorId, to.data)].sort();
         for (const chave of chaves) await travarChave(tx, `escala:${chave}`);
 
@@ -196,8 +198,10 @@ export function createEscalaRouter(notificar: Notificar) {
         return res.status(400).json({ erro: `Informe a data de origem e até ${MAX_DATAS_REPLICACAO} datas de destino válidas.` });
       }
 
-      const replicados = await transacaoSerializavel(async (tx) => {
-        await travarChave(tx, `escala:${chaveEscala(colaboradorId, data)}`);
+      const replicados = await transacaoComTravas(async (tx) => {
+        // Origem e destinos, em ordem: um swap ou outra replicação no mesmo dia não sobrescreve o que esta gravou
+        const chaves = [...new Set([data, ...targetDates as string[]])].map((d) => chaveEscala(colaboradorId, d)).sort();
+        for (const chave of chaves) await travarChave(tx, `escala:${chave}`);
         const salvo = await tx.escalaOverride.findUnique({ where: { key: chaveEscala(colaboradorId, data) } });
         const origem = normalizarDia(salvo) ?? normalizarDia(source);
         if (!origem) throw new HttpError(404, 'Dia de origem não encontrado para replicação.');
@@ -251,7 +255,7 @@ export function createEscalaRouter(notificar: Notificar) {
       if (!motivo) return res.status(400).json({ erro: 'Informe o motivo da troca.' });
 
       // A trava por colaborador impede que dois envios simultâneos (duas abas, nova tentativa da rede) dupliquem o pedido
-      const troca = await transacaoSerializavel(async (tx) => {
+      const troca = await transacaoComTravas(async (tx) => {
         await travarChave(tx, `troca:${colaboradorId}`);
         const pendenteIgual = await tx.solicitacaoTroca.findFirst({
           where: { colaboradorId, dataOriginal, dataSolicitada, status: 'pendente' },
@@ -277,10 +281,17 @@ export function createEscalaRouter(notificar: Notificar) {
       }
       const respostaObservacao = typeof req.body.respostaObservacao === 'string' ? req.body.respostaObservacao.slice(0, 500) : null;
 
-      const troca = await transacaoSerializavel(async (tx) => {
+      const troca = await transacaoComTravas(async (tx) => {
+        // Aprovar e rejeitar ao mesmo tempo: o segundo espera e encontra a solicitação já respondida
+        await travarChave(tx, `troca-resposta:${req.params.id}`);
         const atual = await tx.solicitacaoTroca.findUnique({ where: { id: req.params.id } });
         if (!atual) throw new HttpError(404, 'Solicitação não encontrada.');
         if (atual.status !== 'pendente') throw new HttpError(409, 'Esta solicitação já foi respondida.');
+        // Os dois dias que a aprovação grava, em ordem (como no swap), antes da trava da agenda
+        if (status === 'aprovada') {
+          const chaves = [atual.dataOriginal, atual.dataSolicitada].map((d) => chaveEscala(atual.colaboradorId, d)).sort();
+          for (const chave of chaves) await travarChave(tx, `escala:${chave}`);
+        }
         // Aprovar depois das datas reescreveria a escala retroativamente; rejeitar continua permitido
         if (status === 'aprovada') {
           const hoje = partesNoFuso(new Date()).data;
@@ -291,6 +302,7 @@ export function createEscalaRouter(notificar: Notificar) {
 
         if (status === 'aprovada') {
           // O dia original vira folga: não pode haver atendimentos marcados nele
+          await travarAgenda(tx, atual.colaboradorId);
           const marcados = await agendamentosDoDia(tx, atual.dataOriginal, { colaboradorId: atual.colaboradorId });
           if (marcados.length > 0) {
             throw new HttpError(409, `O colaborador tem ${marcados.length} atendimento(s) em ${atual.dataOriginal.split('-').reverse().join('/')}. Realoque-os antes de aprovar a troca.`);

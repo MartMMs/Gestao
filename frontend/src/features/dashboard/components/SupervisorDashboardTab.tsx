@@ -18,7 +18,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
   // Faturamento, faltas e destaque do mês vêm do mesmo cálculo do relatório financeiro (servidor, fuso do negócio,
   // valores gravados): os números do dashboard e do relatório batem
   const { token } = useAuth();
-  // Recalculados quando o dia muda: aba aberta na virada do mês passa a mostrar o mês novo
+  // Recalculados no próximo desenho depois da virada do dia (a agenda redesenha a cada aviso de mudança)
   const hoje = hojeNoNegocio();
   const mes = useMemo(() => periodoRapido('mes', hoje), [hoje]);
   const ano = useMemo(() => periodoRapido('12meses', hoje), [hoje]);
@@ -49,6 +49,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
     return emp && melhor ? { ...emp, monthlyCount: melhor.concluidos } : null;
   }, [relatorioMes, employees]);
   const monthlyNoShows = relatorioMes?.totais.faltas ?? 0;
+  const monthlySemBaixa = relatorioMes?.totais.semBaixa ?? 0;
   const totalRevenue = (revenueFilter === 'month' ? relatorioMes : relatorioAno)?.totais.faturamento ?? 0;
 
   const { last7DaysData } = useMemo(() => {
@@ -125,6 +126,12 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
             <p className="text-4xl font-headline text-error">{monthlyNoShows}</p>
             <span className="material-symbols-outlined text-error text-2xl">event_busy</span>
           </div>
+          {/* Pendência da recepção, separada da falta confirmada: ainda dá para concluir ou marcar falta */}
+          {monthlySemBaixa > 0 && (
+            <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium mt-1">
+              + {monthlySemBaixa} sem baixa (conclua ou marque falta na agenda)
+            </p>
+          )}
         </div>
       </div>
 
@@ -145,7 +152,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
                         style={{ height: `${(day.revenue / last7DaysData.maxRev) * 100}%` }}
                       >
                         <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-surface-container-highest text-on-surface text-[10px] font-bold py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap shadow-md">
-                          R$ {day.revenue.toFixed(2)}
+                          {day.revenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         </div>
                       </div>
                     </div>

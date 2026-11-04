@@ -415,7 +415,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
 
                   let heatClass = 'bg-surface-container-lowest text-outline-variant/30 border-outline-variant/20';
                   let icon = 'horizontal_rule';
-                  let tooltip = 'Sem operação (Spa fechado)';
+                  let tooltip = 'Sem operação (fechado)';
 
                   if (isWorkingDay && !hasVital) {
                     heatClass = 'bg-orange-100 text-orange-800 border-orange-300';

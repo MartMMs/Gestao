@@ -22,6 +22,8 @@ interface AppointmentScheduleFieldsProps {
   detailsLabel?: string;
   detailsPlaceholder?: string;
   detailsAction?: React.ReactNode;
+  // Só as observações travadas (ex.: sem acesso à ficha de saúde), independente de `disabled`
+  detailsDisabled?: boolean;
   employeeHelperText?: string;
 }
 
@@ -48,6 +50,7 @@ export function AppointmentScheduleFields({
   detailsLabel = 'Detalhes',
   detailsPlaceholder = '',
   detailsAction,
+  detailsDisabled = false,
   employeeHelperText,
 }: AppointmentScheduleFieldsProps) {
   return (
@@ -144,8 +147,9 @@ export function AppointmentScheduleFields({
           rows={3}
           value={details}
           onChange={(e) => onDetailsChange(e.target.value)}
-          disabled={disabled}
-          className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm resize-none ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          // Fora do `disabled`: em atendimento encerrado, as observações continuam editáveis
+          disabled={detailsDisabled}
+          className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm resize-none ${detailsDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           placeholder={detailsPlaceholder}
         />
       </div>

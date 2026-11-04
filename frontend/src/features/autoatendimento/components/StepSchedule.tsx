@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { horarioParaMinutos } from '@shared/agenda';
-import { motion } from 'motion/react';
 import { Service, AutoatendimentoSlot, AutoatendimentoReservaSession } from '../../../types';
 import {
   fetchAutoatendimentoDisponibilidade,
@@ -68,20 +67,27 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
     return list;
   }, []);
 
-  const loadDisponibilidade = async (dateStr: string) => {
+  // manterErro: a recarga depois de uma reserva recusada não pode apagar o aviso que explica por quê
+  // Data da última busca: a resposta de um dia que já não está selecionado é descartada (senão os horários de um
+  // dia apareceriam com outro dia destacado)
+  const ultimaBuscaRef = useRef('');
+  const loadDisponibilidade = async (dateStr: string, { manterErro = false } = {}) => {
     if (activeServices.length === 0) return;
+    ultimaBuscaRef.current = dateStr;
     setLoading(true);
-    setError(null);
+    if (!manterErro) setError(null);
     setSelectedSlot(null);
     try {
       const ids = activeServices.map((s) => s.id);
       const res = await fetchAutoatendimentoDisponibilidade(ids, dateStr);
+      if (ultimaBuscaRef.current !== dateStr) return;
       setSlots(res.slots || []);
     } catch (err: unknown) {
+      if (ultimaBuscaRef.current !== dateStr) return;
       setError(mensagemDeErro(err, 'Falha ao carregar horários disponíveis.'));
       setSlots([]);
     } finally {
-      setLoading(false);
+      if (ultimaBuscaRef.current === dateStr) setLoading(false);
     }
   };
 
@@ -115,9 +121,12 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
         detalhes: result.detalhes,
       });
     } catch (err: unknown) {
-      setError(mensagemDeErro(err, 'Não foi possível reservar este horário. Atualizando disponibilidade...'));
-      // Recarrega os slots para refletir a ocupação atualizada
-      loadDisponibilidade(selectedDate);
+      const mensagem = mensagemDeErro(err, 'Não foi possível reservar este horário.');
+      // Horário ocupado (409) pede outro horário; os demais erros (limite, horário que já passou) já dizem o que fazer.
+      // Em todos os casos a grade recarrega, mantendo o aviso: um horário que passou não pode continuar verde
+      const ocupado = (err as { status?: number })?.status === 409;
+      setError(ocupado && !/escolha outro/i.test(mensagem) ? `${mensagem} Os horários foram atualizados: escolha outro.` : mensagem);
+      loadDisponibilidade(selectedDate, { manterErro: true });
     } finally {
       reservandoRef.current = false;
       setIsLocking(false);
@@ -160,7 +169,8 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
               <button
                 key={slot.horario}
                 type="button"
-                disabled={!slot.disponivel}
+                // Durante a reserva o horário escolhido não muda (a reserva em andamento é a do horário marcado)
+                disabled={!slot.disponivel || isLocking}
                 onClick={() => setSelectedSlot(slot)}
                 className={`p-3 rounded-xl border text-left transition-all relative ${
                   !slot.disponivel
@@ -249,6 +259,8 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
                 type="button"
                 data-date={item.dateStr}
                 onClick={() => setSelectedDate(item.dateStr)}
+                // Durante a reserva a data não muda: a recarga depois de uma recusa é do dia que estava na tela
+                disabled={isLocking}
                 className={`min-w-[76px] p-3.5 rounded-2xl border text-center transition-all shrink-0 cursor-pointer shadow-xs ${
                   isSelected
                     ? 'bg-primary text-on-primary border-primary shadow-md scale-102 ring-2 ring-primary/30'
@@ -299,7 +311,9 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
         <button
           type="button"
           onClick={onBack}
-          className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-outline-variant/30 text-xs font-bold uppercase tracking-wider text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center gap-1.5"
+          // Voltar no meio da reserva faria a tela saltar para a identificação quando ela terminasse
+          disabled={isLocking}
+          className="w-full sm:w-auto px-5 py-2.5 rounded-xl border disabled:opacity-50 border-outline-variant/30 text-xs font-bold uppercase tracking-wider text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center gap-1.5"
         >
           <span className="material-symbols-outlined text-[16px]">arrow_back</span>
           <span>Voltar para o Catálogo de Produtos</span>

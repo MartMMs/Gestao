@@ -60,9 +60,10 @@ async function main() {
 
   const hash = await bcrypt.hash(senha, 10);
   const usuario = existente
-    ? await prisma.colaborador.update({ where: { id: existente.id }, data: { papel, senha: hash, ativo: true, ...INVALIDAR_SESSOES } })
+    ? await prisma.colaborador.update({ where: { id: existente.id }, data: { papel, senha: hash, ativo: true, trocarSenha: senhaGerada, ...INVALIDAR_SESSOES } })
     : await prisma.colaborador.create({
-      data: { nome, email, papel, senha: hash, especialidade: papel === 'admin' ? 'Gestão' : '', ativo: true },
+      // Senha gerada aparece no terminal (pode ter sido vista por outra pessoa): troca obrigatória no 1º acesso
+      data: { nome, email, papel, senha: hash, especialidade: papel === 'admin' ? 'Gestão' : '', ativo: true, trocarSenha: senhaGerada },
     });
 
   if (existente && existente.papel !== papel) console.log(`⚠️  Papel de ${email} alterado de ${existente.papel} para ${papel}.`);

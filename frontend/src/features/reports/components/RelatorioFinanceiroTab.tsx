@@ -12,10 +12,10 @@ const baixarCsv = (relatorio: RelatorioFinanceiro) => {
   const numero = (v: number) => v.toFixed(2).replace('.', ',');
   // Campo começando com = + - @ vira fórmula no Excel: o apóstrofo força texto
   const texto = (v: string) => `"${(/^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replace(/"/g, '""')}"`;
-  const cabecalho = ['Profissional', 'Atendimentos concluídos', 'Faturamento', ...(relatorio.usarComissao ? ['Comissão'] : []), 'Ticket médio', 'Faltas', 'Cancelados'];
+  const cabecalho = ['Profissional', 'Atendimentos concluídos', 'Faturamento', ...(relatorio.usarComissao ? ['Comissão'] : []), 'Ticket médio', 'Faltas', 'Sem baixa', 'Cancelados'];
   const linhas = relatorio.profissionais.map((p) => [
     texto(p.nome + (p.ativo ? '' : ' (desligado)')), String(p.concluidos), numero(p.faturamento),
-    ...(relatorio.usarComissao ? [numero(p.comissao)] : []), numero(p.ticketMedio), String(p.faltas), String(p.cancelados),
+    ...(relatorio.usarComissao ? [numero(p.comissao)] : []), numero(p.ticketMedio), String(p.faltas), String(p.semBaixa), String(p.cancelados),
   ]);
   const conteudo = [cabecalho.map(texto), ...linhas].map((l) => l.join(';')).join('\r\n');
   const blob = new Blob([`﻿${conteudo}`], { type: 'text/csv;charset=utf-8' });
@@ -27,7 +27,7 @@ const baixarCsv = (relatorio: RelatorioFinanceiro) => {
   URL.revokeObjectURL(url);
 };
 
-const STATUS_ROTULO: Record<string, string> = { completed: 'Concluído', no_show: 'Falta', cancelled: 'Cancelado', sem_baixa: 'Falta (sem baixa)' };
+const STATUS_ROTULO: Record<string, string> = { completed: 'Concluído', no_show: 'Falta', cancelled: 'Cancelado', sem_baixa: 'Sem baixa' };
 
 const ACAO_ROTULO: Record<string, string> = {
   'servico.alterado': 'Serviço alterado',
@@ -37,18 +37,21 @@ const ACAO_ROTULO: Record<string, string> = {
   'totem.cobranca': 'Cobrança do totem',
   'empresa.comissao': 'Comissão da empresa',
   'agendamento.reaberto': 'Atendimento reaberto',
+  'agendamento.valores': 'Valor do atendimento alterado',
+  'agendamento.excluido': 'Atendimento excluído',
+  'servico.criado': 'Serviço criado',
 };
 
 const CAMPO_ROTULO: Record<string, string> = {
   preco: 'preço', comissaoPercentual: 'comissão (%)', nome: 'nome', duracao: 'duração (min)', ativo: 'ativo',
-  exigirPagamento: 'cobrança online', percentualSinal: 'sinal (%)', usarComissao: 'usar comissão', existe: 'existe', status: 'situação',
+  exigirPagamento: 'cobrança online', percentualSinal: 'sinal (%)', usarComissao: 'usar comissão', existe: 'existe', status: 'situação', valorTotal: 'valor', valorComissao: 'comissão',
 };
 
 const valorLegivel = (campo: string, v: unknown) => {
   if (v === true) return 'sim';
   if (v === false) return 'não';
   if (v === null || v === undefined) return '—';
-  if (campo === 'preco' && typeof v === 'number') return reais(v);
+  if ((campo === 'preco' || campo === 'valorTotal' || campo === 'valorComissao') && typeof v === 'number') return reais(v);
   if (campo === 'status') return v === 'scheduled' ? 'Agendado' : STATUS_ROTULO[String(v)] ?? String(v);
   return String(v);
 };
@@ -59,8 +62,14 @@ function DetalheProfissional({ colaboradorId, de, ate, usarComissao }: { colabor
   const { data, isLoading, error } = useAtendimentosDoRelatorio(token, colaboradorId, de, ate);
   if (isLoading) return <p className="text-xs text-on-surface-variant p-3">Carregando atendimentos...</p>;
   if (error) return <p className="text-xs text-error p-3">{isApiError(error) ? error.message : 'Não foi possível carregar os atendimentos.'}</p>;
-  if (!data?.length) return <p className="text-xs text-on-surface-variant p-3">Nenhum atendimento no período.</p>;
+  if (!data?.atendimentos.length) return <p className="text-xs text-on-surface-variant p-3">Nenhum atendimento no período.</p>;
   return (
+    <>
+    {data.truncado && (
+      <p role="status" className="text-xs text-amber-700 dark:text-amber-300 px-3 pt-2">
+        Mostrando os {data.limite} primeiros atendimentos do período: a soma desta lista fica menor que o total da linha. Escolha um período menor para conferir tudo.
+      </p>
+    )}
     <table className="w-full text-xs">
       <thead className="text-[10px] uppercase tracking-widest text-outline">
         <tr>
@@ -73,18 +82,22 @@ function DetalheProfissional({ colaboradorId, de, ate, usarComissao }: { colabor
         </tr>
       </thead>
       <tbody>
-        {data.map((a) => (
+        {data.atendimentos.map((a) => (
           <tr key={a.id} className="border-t border-outline-variant/10">
             <td className="py-2 px-3 tabular-nums">{dataBr(a.data)} {a.horario}</td>
             <td className="py-2 px-3">{a.cliente} <span className="font-mono text-on-surface-variant">#{a.clienteCodigo}</span></td>
             <td className="py-2 px-3">{a.servicos.join(', ')}</td>
-            <td className="py-2 px-3">{STATUS_ROTULO[a.status] ?? a.status}</td>
+            <td className="py-2 px-3">
+              {STATUS_ROTULO[a.status] ?? a.status}
+              {a.status === 'sem_baixa' && <span className="block text-[10px] text-on-surface-variant">Conclua ou marque falta na agenda</span>}
+            </td>
             <td className="py-2 px-3 text-right tabular-nums">{reais(a.valor)}</td>
             {usarComissao && <td className="py-2 px-3 text-right tabular-nums">{reais(a.comissao)}</td>}
           </tr>
         ))}
       </tbody>
     </table>
+    </>
   );
 }
 
@@ -139,6 +152,7 @@ export function RelatorioFinanceiroTab() {
     ] : []),
     { rotulo: 'Atendimentos concluídos', valor: String(data.totais.concluidos), icone: 'task_alt' },
     { rotulo: 'Faltas', valor: String(data.totais.faltas), icone: 'person_off' },
+    { rotulo: 'Sem baixa', valor: String(data.totais.semBaixa), icone: 'pending_actions' },
     { rotulo: 'Cancelados', valor: String(data.totais.cancelados), icone: 'event_busy' },
   ] : [];
 
@@ -185,7 +199,13 @@ export function RelatorioFinanceiroTab() {
       {data && (
         <>
           <p className="text-xs text-on-surface-variant">Período: {dataBr(data.periodo.de)} a {dataBr(data.periodo.ate)}</p>
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {data.totais.semBaixa > 0 && (
+            <p role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-on-surface">
+              {data.totais.semBaixa === 1 ? '1 atendimento' : `${data.totais.semBaixa} atendimentos`} sem baixa no período: o horário passou e
+              ninguém concluiu nem marcou falta. Eles ficam fora do faturamento e da comissão até você concluir ou marcar falta na agenda.
+            </p>
+          )}
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
             {cartoes.map((c) => (
               <div key={c.rotulo} className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-4">
                 <span className="material-symbols-outlined text-primary text-[20px]">{c.icone}</span>
@@ -205,12 +225,13 @@ export function RelatorioFinanceiroTab() {
                   {data.usarComissao && <th className="text-right py-3 px-4">Comissão</th>}
                   <th className="text-right py-3 px-4">Ticket médio</th>
                   <th className="text-right py-3 px-4">Faltas</th>
+                  <th className="text-right py-3 px-4" title="Horário passou sem concluir nem marcar falta">Sem baixa</th>
                   <th className="text-right py-3 px-4">Cancelados</th>
                 </tr>
               </thead>
               <tbody>
                 {data.profissionais.length === 0 && (
-                  <tr><td colSpan={7} className="py-6 px-4 text-center text-on-surface-variant">Nenhum atendimento concluído, falta ou cancelamento no período.</td></tr>
+                  <tr><td colSpan={8} className="py-6 px-4 text-center text-on-surface-variant">Nenhum atendimento concluído, falta ou cancelamento no período.</td></tr>
                 )}
                 {data.profissionais.map((p) => (
                   <React.Fragment key={p.colaboradorId}>
@@ -242,11 +263,12 @@ export function RelatorioFinanceiroTab() {
                     {data.usarComissao && <td className="py-3 px-4 text-right tabular-nums">{reais(p.comissao)}</td>}
                     <td className="py-3 px-4 text-right tabular-nums">{reais(p.ticketMedio)}</td>
                     <td className="py-3 px-4 text-right tabular-nums">{p.faltas}</td>
+                    <td className={`py-3 px-4 text-right tabular-nums ${p.semBaixa > 0 ? 'font-bold text-amber-700 dark:text-amber-300' : ''}`}>{p.semBaixa}</td>
                     <td className="py-3 px-4 text-right tabular-nums">{p.cancelados}</td>
                   </tr>
                   {aberto === p.colaboradorId && (
                     <tr id={`detalhe-${p.colaboradorId}`} className="bg-surface-container-low/50">
-                      <td colSpan={7} className="p-2">
+                      <td colSpan={8} className="p-2">
                         <DetalheProfissional colaboradorId={p.colaboradorId} de={periodo.de} ate={periodo.ate} usarComissao={data.usarComissao} />
                       </td>
                     </tr>

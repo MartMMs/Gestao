@@ -1,5 +1,8 @@
 import React, { useMemo } from 'react';
-import type { Appointment, Employee } from '../../../types';
+import { instanteNoFuso } from '@shared/agenda';
+import { semBaixaVencido } from '@shared/statusAgendamento';
+import type { Appointment, Employee, Service } from '../../../types';
+import { getDuration } from '../../appointments/utils/appointmentCore';
 
 export type VisaoAgenda = 'dia' | 'semana' | 'mes';
 
@@ -10,6 +13,7 @@ interface AgendaVisaoPeriodoProps {
   // Já filtrados por busca, profissional e recurso
   appointments: Appointment[];
   employees: Employee[];
+  services: Service[];
   onMudarDataBase: (data: string) => void;
   onAbrirDia: (data: string) => void;
   onAbrirAtendimento: (appointment: Appointment) => void;
@@ -24,22 +28,41 @@ const somarDias = (data: string, dias: number) =>
 const diaDaSemanaSegunda = (data: string) => (new Date(`${data}T12:00:00Z`).getUTCDay() + 6) % 7;
 const inicioDaSemana = (data: string) => somarDias(data, -diaDaSemanaSegunda(data));
 
-// Mesma leitura de cores da grade do dia
-const corDoAtendimento = (app: Appointment) => {
-  if (app.status === 'completed') return 'bg-outline';
-  if (app.status === 'no_show') return 'bg-error';
-  if (app.aguardandoCheckin) return 'bg-violet-500';
-  return 'bg-amber-400';
+type EstadoPeriodo = 'concluido' | 'falta' | 'sem_baixa' | 'totem' | 'agendado';
+
+// Mesma leitura de cores e a mesma regra de "sem baixa" da grade do dia e do relatório (shared/statusAgendamento.ts)
+const ESTADOS_PERIODO: Record<EstadoPeriodo, { cor: string; rotulo: string }> = {
+  agendado: { cor: 'bg-amber-400', rotulo: 'agendado' },
+  totem: { cor: 'bg-violet-500', rotulo: 'totem, aguardando chegada' },
+  sem_baixa: { cor: 'bg-error/50', rotulo: 'sem baixa (conclua ou marque falta)' },
+  falta: { cor: 'bg-error', rotulo: 'falta' },
+  concluido: { cor: 'bg-outline', rotulo: 'concluído' },
 };
-// A cor não basta sozinha (daltonismo, leitor de tela): o estado também vai por escrito
-const estadoDoAtendimento = (app: Appointment) => {
-  if (app.status === 'completed') return 'concluído';
+
+const estadoDoAtendimento = (app: Appointment, services: Service[], agora: Date): EstadoPeriodo => {
+  if (app.status === 'completed') return 'concluido';
   if (app.status === 'no_show') return 'falta';
-  if (app.aguardandoCheckin) return 'totem, aguardando chegada';
+  const servicos = [{ duracao: getDuration(app.services, services) }];
+  if (semBaixaVencido({ status: app.status, inicio: instanteNoFuso(app.date, app.time), servicos }, agora)) return 'sem_baixa';
+  if (app.aguardandoCheckin) return 'totem';
   return 'agendado';
 };
 
-export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, employees, onMudarDataBase, onAbrirDia, onAbrirAtendimento }: AgendaVisaoPeriodoProps) {
+// Legenda própria das visões de período (a da grade do dia tem estados que só existem lá, como "em atendimento")
+function LegendaPeriodo() {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2" aria-label="Legenda de cores">
+      {(Object.keys(ESTADOS_PERIODO) as EstadoPeriodo[]).map((estado) => (
+        <span key={estado} className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">
+          <span className={`w-3 h-3 rounded-full ring-1 ring-on-surface/25 ${ESTADOS_PERIODO[estado].cor}`} />
+          {ESTADOS_PERIODO[estado].rotulo}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, employees, services, onMudarDataBase, onAbrirDia, onAbrirAtendimento }: AgendaVisaoPeriodoProps) {
   const nomes = useMemo(() => new Map(employees.map((e) => [e.id, e.name.split(' ')[0] || e.name])), [employees]);
 
   // Dias exibidos: a semana (segunda a domingo) ou o mês inteiro completado até fechar as semanas
@@ -80,6 +103,8 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
     onMudarDataBase(new Date(Date.UTC(ano, mes - 1 + direcao, 1)).toISOString().slice(0, 10));
   };
   const maxPorCelula = visao === 'semana' ? 50 : 3;
+  // "Sem baixa" depende do relógio: o atendimento que acabou agora muda de estado no próximo redesenho
+  const agora = new Date();
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -97,6 +122,7 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
           <span className="material-symbols-outlined">chevron_right</span>
         </button>
       </div>
+      <LegendaPeriodo />
 
       <div className="overflow-x-auto">
         <div className="grid grid-cols-7 gap-1 min-w-[700px]">
@@ -111,13 +137,21 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
                 key={dia}
                 className={`rounded-xl border p-1.5 flex flex-col gap-1 ${visao === 'semana' ? 'min-h-[260px]' : 'min-h-[110px]'} ${dia === todayStr ? 'border-primary' : 'border-outline-variant/20'} ${foraDoMes ? 'bg-surface-container-low/40' : 'bg-surface-container-lowest'}`}
               >
-                <button type="button" onClick={() => onAbrirDia(dia)} className="flex items-center justify-between text-left hover:text-primary" title="Abrir este dia na grade">
+                <button
+                  type="button"
+                  onClick={() => onAbrirDia(dia)}
+                  className="flex items-center justify-between text-left hover:text-primary"
+                  title="Abrir este dia na grade"
+                  aria-label={`${Number(dia.slice(8))}: ${lista.length === 0 ? 'sem atendimentos' : `${lista.length} ${lista.length === 1 ? 'atendimento' : 'atendimentos'}`}. Abrir na grade`}
+                >
                   {/* Fora do mês só o número esmaece: os atendimentos continuam legíveis */}
                   <span className={`text-xs font-bold ${dia === todayStr ? 'text-primary' : foraDoMes ? 'text-outline' : 'text-on-surface'}`}>{Number(dia.slice(8))}</span>
-                  <span className="text-[10px] font-bold text-on-surface-variant">
-                    {/* 'Livre' sugeriria vaga mesmo em domingo, feriado ou dia de folga de todos */}
-                    {lista.length === 0 ? 'Sem atendimentos' : `${lista.length} ${lista.length === 1 ? 'atendimento' : 'atendimentos'}`}
-                  </span>
+                  {/* Dia vazio fica em silêncio na tela ('Livre' sugeriria vaga em domingo ou feriado); o leitor de tela ouve pelo aria-label */}
+                  {lista.length > 0 && (
+                    <span className="text-[10px] font-bold text-on-surface-variant" aria-hidden="true">
+                      {lista.length} {visao === 'semana' ? (lista.length === 1 ? 'atendimento' : 'atendimentos') : 'atend.'}
+                    </span>
+                  )}
                 </button>
                 {lista.slice(0, maxPorCelula).map((app) => (
                   <button
@@ -125,10 +159,10 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
                     type="button"
                     onClick={() => onAbrirAtendimento(app)}
                     className={`flex gap-1 rounded-lg bg-surface-container-low px-1.5 py-1 text-left hover:bg-primary/10 ${visao === 'semana' ? 'items-start' : 'items-center'}`}
-                    title={`${app.time} · ${app.clientName} · ${app.services.join(', ')} · ${nomes.get(app.assignedEmployeeId) ?? ''} · ${estadoDoAtendimento(app)}`}
-                    aria-label={`${app.time}, ${app.clientName}, com ${nomes.get(app.assignedEmployeeId) ?? 'profissional'}, ${estadoDoAtendimento(app)}`}
+                    title={`${app.time} · ${app.clientName} · ${app.services.join(', ')} · ${nomes.get(app.assignedEmployeeId) ?? ''} · ${ESTADOS_PERIODO[estadoDoAtendimento(app, services, agora)].rotulo}`}
+                    aria-label={`${app.time}, ${app.clientName}, com ${nomes.get(app.assignedEmployeeId) ?? 'profissional'}, ${ESTADOS_PERIODO[estadoDoAtendimento(app, services, agora)].rotulo}`}
                   >
-                    <span className={`w-2 h-2 rounded-full ring-1 ring-on-surface/25 shrink-0 ${visao === 'semana' ? 'mt-1' : ''} ${corDoAtendimento(app)}`} />
+                    <span className={`w-2 h-2 rounded-full ring-1 ring-on-surface/25 shrink-0 ${visao === 'semana' ? 'mt-1' : ''} ${ESTADOS_PERIODO[estadoDoAtendimento(app, services, agora)].cor}`} />
                     {visao === 'semana' ? (
                       // Semana: espaço para ler cliente e profissional sem abrir o atendimento
                       <span className="min-w-0">

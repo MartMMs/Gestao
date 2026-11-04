@@ -2,6 +2,7 @@ import { PAPEIS_ATENDIMENTO } from '../lib/usuarios';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { redisService } from './redisService';
+import { travarChave } from '../lib/transacao';
 import {
   duracaoTotal,
   intervalosSobrepoem,
@@ -286,4 +287,27 @@ export const validarDisponibilidadeProfissional = async (
   if (erroClt) return { status: 409, erro: erroClt };
 
   return null;
+};
+
+/**
+ * Outro atendimento ativo do mesmo cliente que se sobrepõe a [inicio, inicio + duração): a mesma pessoa não está em
+ * dois lugares ao mesmo tempo. Vale na agenda interna (o totem não barra para não revelar se o cliente tem horário).
+ * Trava o cliente até o fim da transação: duas marcações dele ao mesmo tempo esperam uma pela outra.
+ */
+export const atendimentoSobrepostoDoCliente = async (
+  tx: Prisma.TransactionClient, clienteId: string, inicio: Date, duracaoMin: number, ignorarId?: string,
+) => {
+  await travarChave(tx, `cliente:${clienteId}`);
+  const fim = inicio.getTime() + duracaoMin * 60_000;
+  const candidatos = await tx.agendamento.findMany({
+    where: {
+      clienteId,
+      ...(ignorarId ? { id: { not: ignorarId } } : {}),
+      OR: [{ status: 'scheduled' }, { status: null }],
+      // Um dia antes já cobre o atendimento mais longo possível que ainda esteja em curso no início deste
+      data: { gte: new Date(inicio.getTime() - 24 * 3_600_000), lt: new Date(fim) },
+    },
+    include: { servicos: true, colaborador: { select: { nome: true } } },
+  });
+  return candidatos.find((ag) => ag.data.getTime() + duracaoTotal(ag.servicos) * 60_000 > inicio.getTime()) ?? null;
 };

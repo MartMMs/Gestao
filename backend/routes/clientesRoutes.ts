@@ -3,7 +3,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { getUsuario, usuarioEhSupervisor, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { HttpError, responderErro, type Notificar } from '../lib/http';
-import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, mensagemNomeDuplicado } from '../lib/clientes';
+import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, mensagemNomeDuplicado, travarNomeCliente } from '../lib/clientes';
+import { transacaoComTravas, travarChave } from '../lib/transacao';
 import { clientesComAcessoSaude, prepararCliente } from '../lib/privacidade';
 import { LIMITE_OBSERVACAO, MENSAGEM_CPF_INVALIDO, MENSAGEM_TELEFONE_INVALIDO, apenasDigitos, cpfValido, normalizarTelefone, telefoneValido, valorMascarado } from '../../shared/validadores';
 
@@ -74,10 +75,16 @@ export function createClientesRouter(notificar: Notificar) {
         dados.cpf = apenasDigitos(cpf) || null;
       }
 
-      const atualizado = await prisma.$transaction(async (tx) => {
+      const atualizado = await transacaoComTravas(async (tx) => {
+        // Mesmas travas e ordem da exclusão (nome, depois cliente:id): uma ficha excluída neste instante não volta a
+        // receber nome, telefone, CPF ou anamnese
+        if (dados.nome) await travarNomeCliente(tx, dados.nome as string);
+        await travarChave(tx, `cliente:${id}`);
+        const atual = await tx.cliente.findUnique({ where: { id }, select: { removidoEm: true } });
+        if (!atual || atual.removidoEm) throw new HttpError(404, 'Cliente não encontrado.');
         if (dados.nome) {
           const homonimo = await clienteComMesmoNome(tx, dados.nome as string, id);
-          if (homonimo) throw new HttpError(409, mensagemNomeDuplicado(homonimo));
+          if (homonimo) throw new HttpError(409, mensagemNomeDuplicado(homonimo, 'carteira'));
         }
         return tx.cliente.update({ where: { id }, data: dados });
       });
@@ -93,7 +100,13 @@ export function createClientesRouter(notificar: Notificar) {
   router.delete('/clientes/:id', verificarSupervisorToken, async (req, res) => {
     try {
       const { id } = req.params;
-      const resultado = await prisma.$transaction(async (tx) => {
+      const resultado = await transacaoComTravas(async (tx) => {
+        const antes = await tx.cliente.findUnique({ where: { id }, select: { nome: true } });
+        if (!antes) return { tipo: 'nao_encontrado' as const };
+        // As mesmas travas da marcação (nome: totem e cadastro novo; cliente:id: escolhido na busca): quem marca ao
+        // mesmo tempo espera e encontra o cadastro excluído, ou a exclusão espera e encontra o atendimento marcado
+        await travarNomeCliente(tx, antes.nome);
+        await travarChave(tx, `cliente:${id}`);
         const cliente = await tx.cliente.findUnique({ where: { id } });
         if (!cliente || cliente.removidoEm) return { tipo: 'nao_encontrado' as const };
 

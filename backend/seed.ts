@@ -31,17 +31,17 @@ async function main() {
   console.log('🌱 Semeando o banco de dados...');
 
   await prisma.colaborador.create({
-    data: { nome: 'Administrador', email: 'admin@serenidade.com', especialidade: 'Gestão', papel: 'admin', ativo: true, senha: await bcrypt.hash(senhaAdmin, 10) },
+    data: { nome: 'Administrador', email: 'admin@exemplo.com', especialidade: 'Gestão', papel: 'admin', ativo: true, senha: await bcrypt.hash(senhaAdmin, 10) },
   });
   await prisma.colaborador.create({
-    data: { nome: 'Supervisor Operacional', email: 'supervisor@serenidade.com', especialidade: 'Coordenação', papel: 'supervisor', ativo: true, senha: await bcrypt.hash(senhaSupervisor, 10) },
+    data: { nome: 'Supervisor Operacional', email: 'supervisor@exemplo.com', especialidade: 'Coordenação', papel: 'supervisor', ativo: true, senha: await bcrypt.hash(senhaSupervisor, 10) },
   });
 
   const helena = await prisma.colaborador.create({
     data: {
       nome: 'Helena Silva',
-      email: 'helena@serenidade.com',
-      especialidade: 'Massoterapia',
+      email: 'helena@exemplo.com',
+      especialidade: 'Atendimento',
       ativo: true,
       papel: 'collaborator',
       senha,
@@ -51,8 +51,8 @@ async function main() {
   const marcos = await prisma.colaborador.create({
     data: {
       nome: 'Marcos Oliveira',
-      email: 'marcos@serenidade.com',
-      especialidade: 'Estética',
+      email: 'marcos@exemplo.com',
+      especialidade: 'Avaliação',
       ativo: true,
       papel: 'collaborator',
       senha,
@@ -62,8 +62,8 @@ async function main() {
   const ana = await prisma.colaborador.create({
     data: {
       nome: 'Ana Luiza',
-      email: 'ana@serenidade.com',
-      especialidade: 'Yoga & Meditação',
+      email: 'ana@exemplo.com',
+      especialidade: 'Consultoria',
       ativo: true,
       papel: 'collaborator',
       senha,
@@ -73,7 +73,7 @@ async function main() {
   const roberto = await prisma.colaborador.create({
     data: {
       nome: 'Roberto Santos',
-      email: 'roberto@serenidade.com',
+      email: 'roberto@exemplo.com',
       especialidade: 'Recepção',
       ativo: true,
       papel: 'receptionist',
@@ -81,14 +81,14 @@ async function main() {
     },
   });
 
-  console.log('💆 Semeando serviços...');
+  console.log('🗂️  Semeando serviços...');
   const servicos = [
-    { nome: 'Massagem Relaxante', preco: 150.0 },
-    { nome: 'Massagem Terapêutica', preco: 180.0 },
-    { nome: 'Limpeza de Pele', preco: 120.0 },
-    { nome: 'Drenagem Linfática', preco: 140.0 },
-    { nome: 'Sessão de Yoga', preco: 80.0 },
-    { nome: 'Aromaterapia', preco: 90.0 }
+    { nome: 'Atendimento Padrão', preco: 150.0 },
+    { nome: 'Atendimento Completo', preco: 180.0 },
+    { nome: 'Avaliação Inicial', preco: 120.0 },
+    { nome: 'Retorno', preco: 80.0 },
+    { nome: 'Consultoria', preco: 140.0 },
+    { nome: 'Atendimento Express', preco: 90.0 }
   ];
 
   for (const servico of servicos) {
@@ -146,8 +146,8 @@ async function main() {
   console.log('✅ Banco populado com sucesso!');
   console.log('Profissionais criados:', { helena: helena.nome, marcos: marcos.nome, ana: ana.nome, roberto: roberto.nome });
   console.log('🔑 Senhas das contas de gestão (anote agora, não serão mostradas de novo):');
-  console.log(`   admin@serenidade.com: ${senhaAdmin}`);
-  console.log(`   supervisor@serenidade.com: ${senhaSupervisor}`);
+  console.log(`   admin@exemplo.com: ${senhaAdmin}`);
+  console.log(`   supervisor@exemplo.com: ${senhaSupervisor}`);
 }
 
 main()

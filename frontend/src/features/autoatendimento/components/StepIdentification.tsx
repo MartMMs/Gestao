@@ -2,15 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { AutoatendimentoReservaSession } from '../../../types';
 import { formatPhone, formatCpf } from '../../../utils/formatters';
 import { cpfValido, telefoneValido } from '@shared/validadores';
+import { perguntasDoSegmento } from '@shared/segmento';
+import { textoConsentimento } from '@shared/consentimento';
+import type { DadosClienteTotem } from '../services/autoatendimentoService';
 
 interface StepIdentificationProps {
   reservation: AutoatendimentoReservaSession;
-  onSubmit: (data: {
-    nome: string;
-    telefone: string;
-    cpf: string;
-    observacoesSaude: string;
-  }) => void;
+  // Nome da empresa no texto do consentimento (quem trata os dados)
+  nomeEmpresa?: string;
+  // Segmento da empresa: decide quais perguntas aparecem (as de saúde e as de spa não servem para todo negócio)
+  segmento?: string;
+  onSubmit: (data: DadosClienteTotem) => void;
   onBack: () => void;
 }
 
@@ -20,7 +22,7 @@ interface StepIdentificationProps {
 type Rascunho = {
   nome: string; telefone: string; cpf: string; gestante: boolean | null; pressao: 'normal' | 'alta' | 'baixa';
   cirurgiaRecente: boolean | null; alergia: boolean | null; detalheAlergia: string;
-  pressaoMassagem: 'suave' | 'media' | 'firme'; aroma: string; areasEvitar: string;
+  pressaoMassagem: 'suave' | 'media' | 'firme'; aroma: string; areasEvitar: string; consentimento: boolean;
 };
 let rascunho: Rascunho | null = null;
 
@@ -28,7 +30,9 @@ export const limparRascunhoIdentificacao = () => {
   rascunho = null;
 };
 
-export function StepIdentification({ reservation, onSubmit, onBack }: StepIdentificationProps) {
+export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmit, onBack }: StepIdentificationProps) {
+  const { saude, spa } = perguntasDoSegmento(segmento);
+  const termo = textoConsentimento(nomeEmpresa, saude);
   const salvo = rascunho;
   const [nome, setNome] = useState(salvo?.nome ?? '');
   const [telefone, setTelefone] = useState(salvo?.telefone ?? '');
@@ -43,16 +47,17 @@ export function StepIdentification({ reservation, onSubmit, onBack }: StepIdenti
   const [pressaoMassagem, setPressaoMassagem] = useState<'suave' | 'media' | 'firme'>(salvo?.pressaoMassagem ?? 'media');
   const [aroma, setAroma] = useState<string>(salvo?.aroma ?? 'lavanda');
   const [areasEvitar, setAreasEvitar] = useState<string>(salvo?.areasEvitar ?? '');
+  const [consentimento, setConsentimento] = useState<boolean>(salvo?.consentimento ?? false);
 
   useEffect(() => {
-    rascunho = { nome, telefone, cpf, gestante, pressao, cirurgiaRecente, alergia, detalheAlergia, pressaoMassagem, aroma, areasEvitar };
-  }, [nome, telefone, cpf, gestante, pressao, cirurgiaRecente, alergia, detalheAlergia, pressaoMassagem, aroma, areasEvitar]);
+    rascunho = { nome, telefone, cpf, gestante, pressao, cirurgiaRecente, alergia, detalheAlergia, pressaoMassagem, aroma, areasEvitar, consentimento };
+  }, [nome, telefone, cpf, gestante, pressao, cirurgiaRecente, alergia, detalheAlergia, pressaoMassagem, aroma, areasEvitar, consentimento]);
 
-  const [erros, setErros] = useState<{ nome?: string; telefone?: string; cpf?: string }>({});
+  const [erros, setErros] = useState<{ nome?: string; telefone?: string; cpf?: string; consentimento?: string }>({});
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const newErros: { nome?: string; telefone?: string; cpf?: string } = {};
+    const newErros: { nome?: string; telefone?: string; cpf?: string; consentimento?: string } = {};
 
     if (!nome.trim() || nome.trim().length < 3) {
       newErros.nome = 'Por favor, informe seu nome completo.';
@@ -70,26 +75,37 @@ export function StepIdentification({ reservation, onSubmit, onBack }: StepIdenti
       newErros.cpf = 'CPF inválido. Confira os dígitos ou deixe o campo em branco.';
     }
 
+    if (!consentimento) {
+      newErros.consentimento = 'Para continuar, marque a autorização de uso dos seus dados.';
+    }
+
     if (Object.keys(newErros).length > 0) {
       setErros(newErros);
       return;
     }
 
-    // Monta o resumo da Anamnese para a equipe do Spa
+    // Resumo para a equipe. Só entra o que está na tela: o segmento pode ter mudado com o rascunho já preenchido
     const healthSummaryParts: string[] = [];
-    if (gestante) healthSummaryParts.push('GESTANTE: Sim');
-    if (pressao !== 'normal') healthSummaryParts.push(`Pressão: ${pressao}`);
-    if (cirurgiaRecente) healthSummaryParts.push('Cirurgia/Procedimento recente: Sim');
+    if (saude) {
+      if (gestante) healthSummaryParts.push('GESTANTE: Sim');
+      if (pressao !== 'normal') healthSummaryParts.push(`Pressão: ${pressao}`);
+      if (cirurgiaRecente) healthSummaryParts.push('Cirurgia/Procedimento recente: Sim');
+    }
     if (alergia) healthSummaryParts.push(`Alergia: ${detalheAlergia || 'Sim'}`);
-    healthSummaryParts.push(`Pressão massagem: ${pressaoMassagem}`);
-    healthSummaryParts.push(`Aroma preferido: ${aroma}`);
-    if (areasEvitar.trim()) healthSummaryParts.push(`Áreas a evitar: ${areasEvitar.trim()}`);
+    if (spa) {
+      healthSummaryParts.push(`Pressão massagem: ${pressaoMassagem}`);
+      healthSummaryParts.push(`Aroma preferido: ${aroma}`);
+    }
+    if (areasEvitar.trim()) healthSummaryParts.push(`${spa ? 'Áreas a evitar' : 'Observações'}: ${areasEvitar.trim()}`);
 
     onSubmit({
       nome: nome.trim(),
       telefone,
       cpf,
       observacoesSaude: healthSummaryParts.join(' | '),
+      consentimento: true,
+      // A versão do mesmo texto que está na tela
+      consentimentoVersao: termo.versao,
     });
   };
 
@@ -97,13 +113,13 @@ export function StepIdentification({ reservation, onSubmit, onBack }: StepIdenti
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="text-center max-w-xl mx-auto space-y-2">
         <span className="text-[11px] font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-3 py-1 rounded-full">
-          Etapa 3 de 4 · Identificação e Saúde
+          Etapa 3 de 4 · {saude ? 'Identificação e Saúde' : 'Identificação'}
         </span>
         <h2 className="text-2xl sm:text-3xl font-headline text-primary">
-          Ficha Personalizada do Spa
+          Seus dados para o atendimento
         </h2>
         <p className="text-sm text-on-surface-variant font-body">
-          Suas informações garantem um atendimento sob medida, seguro e terapêutico para seu bem-estar.
+          Essas informações ajudam a equipe a preparar o seu atendimento com segurança.
         </p>
       </div>
 
@@ -193,12 +209,13 @@ export function StepIdentification({ reservation, onSubmit, onBack }: StepIdenti
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
             <span className="material-symbols-outlined text-[18px]">health_and_safety</span>
-            Anamnese Rápida & Preferências
+            {saude ? 'Saúde e cuidados' : 'Informações para o atendimento'}
           </h3>
           <span className="text-[11px] text-outline-variant">Importante para sua segurança</span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {saude && (<>
           {/* Gestante */}
           <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
             <div>
@@ -277,11 +294,12 @@ export function StepIdentification({ reservation, onSubmit, onBack }: StepIdenti
             </div>
           </div>
 
+          </>)}
           {/* Alergias */}
           <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
             <div>
-              <p className="text-xs font-bold text-on-surface">Alergia a cosméticos ou óleos?</p>
-              <p className="text-[10px] text-on-surface-variant">Usaremos produtos hipoalergênicos neutros</p>
+              <p className="text-xs font-bold text-on-surface">{spa ? 'Alergia a cosméticos ou óleos?' : 'Tem alguma alergia?'}</p>
+              <p className="text-[10px] text-on-surface-variant">{spa ? 'Usaremos produtos hipoalergênicos neutros' : 'Para a equipe se preparar'}</p>
             </div>
             <div className="flex gap-2">
               <button
@@ -318,13 +336,14 @@ export function StepIdentification({ reservation, onSubmit, onBack }: StepIdenti
               type="text"
               value={detalheAlergia}
               onChange={(e) => setDetalheAlergia(e.target.value)}
-              placeholder="Ex: Alergia a canela, lavanda, amêndoas..."
+              placeholder={spa ? 'Ex: Alergia a canela, lavanda, amêndoas...' : 'Ex.: látex, algum produto ou medicamento...'}
               className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 text-xs text-on-surface"
             />
           </div>
         )}
 
         {/* Preferências de Massagem e Aroma */}
+        {spa && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
           <div>
             <label className="block text-xs font-bold text-on-surface-variant mb-1.5">
@@ -368,19 +387,42 @@ export function StepIdentification({ reservation, onSubmit, onBack }: StepIdenti
             </select>
           </div>
         </div>
+        )}
 
         <div>
           <label className="block text-xs font-bold text-on-surface-variant mb-1">
-            Partes do corpo a evitar ou áreas com maior tensão:
+            {spa ? 'Partes do corpo a evitar ou áreas com maior tensão:' : 'Alguma observação ou preferência para o atendimento?'}
           </label>
           <input
             type="text"
             value={areasEvitar}
             onChange={(e) => setAreasEvitar(e.target.value)}
-            placeholder="Ex: Foco nos ombros e pescoço; não massagear pés..."
+                        placeholder={spa ? 'Ex: Foco nos ombros e pescoço; não massagear pés...' : 'Opcional'}
             className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 text-xs text-on-surface"
           />
         </div>
+      </div>
+
+      {/* Consentimento LGPD (dados de saúde exigem autorização específica, art. 11) */}
+      <div className={`rounded-xl border p-4 ${erros.consentimento ? 'border-error bg-error/5' : 'border-outline-variant/30 bg-surface-container-low'}`}>
+        <label className="flex items-start gap-3 text-xs text-on-surface cursor-pointer">
+          <input
+            type="checkbox"
+            checked={consentimento}
+            onChange={(e) => {
+              setConsentimento(e.target.checked);
+              if (e.target.checked) setErros((atual) => ({ ...atual, consentimento: undefined }));
+            }}
+            className="mt-0.5 h-5 w-5 shrink-0 accent-primary"
+            aria-describedby="consentimento-detalhe"
+            aria-invalid={Boolean(erros.consentimento)}
+          />
+          <span>{termo.autorizacao}</span>
+        </label>
+        <p id="consentimento-detalhe" className="mt-2 pl-8 text-[11px] text-on-surface-variant">
+          {termo.detalhe}
+        </p>
+        {erros.consentimento && <p role="alert" className="mt-2 pl-8 text-[11px] font-bold text-error">{erros.consentimento}</p>}
       </div>
 
       {/* Botões de Ação */}

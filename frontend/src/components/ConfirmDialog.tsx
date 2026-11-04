@@ -47,16 +47,36 @@ export function ConfirmDialog({
   const enviandoRef = useRef(isSubmitting);
   enviandoRef.current = isSubmitting;
 
-  // Foco dentro do diálogo ao abrir (teclado e leitor de tela começam nele) e Esc fecha.
-  // Em ação destrutiva o foco vai para Cancelar: um Enter sem querer não apaga nada.
+  const caixaRef = useRef<HTMLDivElement>(null);
+
+  // Foco dentro do diálogo ao abrir (teclado e leitor de tela começam nele), preso nele enquanto aberto e
+  // devolvido a quem abriu ao fechar. Em ação destrutiva o foco vai para Cancelar: um Enter sem querer não apaga nada.
   useEffect(() => {
     if (!open) return;
+    const anterior = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     (tone === 'danger' ? cancelarRef : confirmarRef).current?.focus();
     const aoTeclar = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !enviandoRef.current) fecharRef.current();
+      if (event.key === 'Escape' && !enviandoRef.current) {
+        event.stopPropagation();
+        fecharRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !caixaRef.current) return;
+      const focaveis = [...caixaRef.current.querySelectorAll<HTMLElement>('button, select, input, textarea, [href], [tabindex]:not([tabindex="-1"])')]
+        .filter((el) => !el.hasAttribute('disabled'));
+      if (focaveis.length === 0) return;
+      const primeiro = focaveis[0];
+      const ultimo = focaveis[focaveis.length - 1];
+      if (event.shiftKey && document.activeElement === primeiro) { event.preventDefault(); ultimo.focus(); }
+      else if (!event.shiftKey && document.activeElement === ultimo) { event.preventDefault(); primeiro.focus(); }
+      else if (!caixaRef.current.contains(document.activeElement)) { event.preventDefault(); primeiro.focus(); }
     };
-    window.addEventListener('keydown', aoTeclar);
-    return () => window.removeEventListener('keydown', aoTeclar);
+    window.addEventListener('keydown', aoTeclar, true);
+    return () => {
+      window.removeEventListener('keydown', aoTeclar, true);
+      // O elemento de origem pode ter sumido (card movido ou excluído): aí o foco fica onde o navegador puser
+      if (anterior?.isConnected) anterior.focus();
+    };
   }, [open, tone]);
 
   if (!open) return null;
@@ -65,6 +85,7 @@ export function ConfirmDialog({
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <motion.div
+        ref={caixaRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={tituloId}

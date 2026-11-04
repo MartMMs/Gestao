@@ -2,10 +2,11 @@ import { Router, Request } from 'express';
 import { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../db';
-import { getUsuario, usuarioEhAdmin, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken, PAPEIS_VALIDOS, type Papel } from '../auth';
+import { redisService } from '../services/redisService';
+import { avisoTentativasSenha, chaveConferenciaSenha, getUsuario, senhaAtualConfere, usuarioEhAdmin, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken, PAPEIS_VALIDOS, type Papel } from '../auth';
 import { HttpError, responderErro } from '../lib/http';
 import type { Eventos } from '../lib/eventos';
-import { transacaoSerializavel, travarChave } from '../lib/transacao';
+import { transacaoComTravas, travarAgenda } from '../lib/transacao';
 import { prepararBloqueio } from '../lib/privacidade';
 import { INVALIDAR_SESSOES, PAPEIS_ATENDIMENTO, validarSenha } from '../lib/usuarios';
 import { validarDisponibilidadeProfissional } from '../services/agendaService';
@@ -143,6 +144,8 @@ export function createColaboradoresRouter(eventos: Eventos) {
           email,
           papel,
           senha: await bcrypt.hash(req.body.senha, 10),
+          // Senha provisória vista pela supervisão: a pessoa escolhe a dela no primeiro acesso
+          trocarSenha: true,
           ativo: true,
         } as Prisma.ColaboradorCreateInput,
       });
@@ -182,18 +185,24 @@ export function createColaboradoresRouter(eventos: Eventos) {
         }
         dados.papel = req.body.papel;
       }
+      const propriaConta = alvo.id === getUsuario(req)?.id;
       if (req.body.senha) {
+        // A própria senha tem um caminho só (com auditoria e sessão nova): POST /api/minha-senha
+        if (propriaConta) return res.status(400).json({ erro: 'A sua própria senha não muda pelo cadastro da equipe. Peça a outro supervisor ou administrador para redefini-la.' });
         const erroSenha = validarSenha(req.body.senha);
         if (erroSenha) return res.status(400).json({ erro: erroSenha });
         dados.senha = await bcrypt.hash(req.body.senha, 10);
+        // Redefinida por outra pessoa: vira provisória e precisa ser trocada pela dona no próximo acesso
+        dados.trocarSenha = true;
       }
       if (dados.senha || emailMudou) {
-        // Na própria conta, trocar credenciais exige a senha atual: um token vazado não basta para tomar a conta
-        if (alvo.id === getUsuario(req)?.id) {
+        // Na própria conta, trocar o e-mail exige a senha atual: um token vazado não basta para tomar a conta
+        if (propriaConta) {
           const senhaAtual = typeof req.body.senhaAtual === 'string' ? req.body.senhaAtual : '';
           const conta = await prisma.colaborador.findUnique({ where: { id }, omit: { senha: false } });
-          if (!senhaAtual || !conta?.senha || !(await bcrypt.compare(senhaAtual, conta.senha))) {
-            return res.status(403).json({ erro: 'Para trocar a sua própria senha ou e-mail, informe a senha atual correta.' });
+          const conferencia = await senhaAtualConfere(id, senhaAtual, conta?.senha);
+          if (!conferencia.confere) {
+            return res.status(403).json({ erro: `Para trocar o seu próprio e-mail, informe a senha atual correta.${avisoTentativasSenha(conferencia.restantes)}` });
           }
         }
         // Credenciais novas derrubam as sessões abertas com as antigas (inclusive um token vazado)
@@ -202,6 +211,8 @@ export function createColaboradoresRouter(eventos: Eventos) {
 
       const colaboradorAtualizado = await prisma.colaborador.update({ where: { id }, data: dados });
       if (dados.versaoToken) eventos.encerrarSessoesDoUsuario(id);
+      // Senha provisória nova: os chutes contra a antiga não podem bloquear a pessoa de criar a dela
+      if (dados.senha) await redisService.deleteKey(chaveConferenciaSenha(id));
       notificar();
       res.json(colaboradorAtualizado);
     } catch (error) {
@@ -233,7 +244,10 @@ export function createColaboradoresRouter(eventos: Eventos) {
         return res.status(400).json({ erro: 'Profissional de destino não encontrado.' });
       }
 
-      const resultado = await transacaoSerializavel(async (tx) => {
+      const resultado = await transacaoComTravas(async (tx) => {
+        // Sem a trava, uma marcação para quem está saindo (ou para o destino) entraria depois da leitura
+        await travarAgenda(tx, id);
+        if (realocarPara) await travarAgenda(tx, realocarPara);
         const futuros = await tx.agendamento.findMany({
           // Sem filtro de data: o atendimento em andamento (começou antes de agora) também precisa de dono
           where: { colaboradorId: id, status: 'scheduled' },
@@ -245,15 +259,16 @@ export function createColaboradoresRouter(eventos: Eventos) {
         const canceladosLista: string[] = [];
         for (const ag of futuros) {
           if (realocarPara) {
-            await travarChave(tx, `agenda:${realocarPara}:${partesNoFuso(ag.data).data}`);
             const indisponivel = await validarDisponibilidadeProfissional(tx, realocarPara, ag.data, ag.servicos, { ignorarAgendamentoId: ag.id });
             if (!indisponivel) {
-              await tx.agendamento.update({ where: { id: ag.id }, data: { colaboradorId: realocarPara } });
-              transferidos += 1;
+              // Condicionado: um atendimento que outra pessoa acabou de mover ou fechar fica como ela deixou
+              const { count } = await tx.agendamento.updateMany({ where: { id: ag.id, colaboradorId: id, status: 'scheduled' }, data: { colaboradorId: realocarPara } });
+              transferidos += count;
               continue;
             }
           }
-          await tx.agendamento.update({ where: { id: ag.id }, data: { status: 'cancelled' } });
+          const { count } = await tx.agendamento.updateMany({ where: { id: ag.id, colaboradorId: id, status: 'scheduled' }, data: { status: 'cancelled' } });
+          if (count === 0) continue;
           const { data, horario } = partesNoFuso(ag.data);
           canceladosLista.push(`${data.split('-').reverse().join('/')} às ${horario} (${ag.cliente?.nome ?? 'cliente'})`);
         }

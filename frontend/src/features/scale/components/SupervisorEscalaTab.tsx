@@ -2,12 +2,13 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { normalizarTexto } from '@shared/validadores';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Client, Service, Bloqueio } from '../../../types';
-import { getDuration, getBrazilCurrentMinuteOfDay, getBrazilCurrentTimeString, getLocalTodayString, matchesAppointmentSearch, matchesResourceFilter, shiftDateString, type ResourceFilter } from '../../../features/appointments/utils/appointmentCore';
+import { getDuration, getBrazilCurrentMinuteOfDay, getBrazilCurrentTimeString, getLocalTodayString, matchesAppointmentSearch, shiftDateString } from '../../../features/appointments/utils/appointmentCore';
 import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { BlockModal, BookingModal, EditAppointmentModal, DeleteAppointmentModal } from '../../../features/appointments/components';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
+import { isApiError } from '../../../api';
 import { useScheduleModals } from '../../../features/appointments/hooks';
-import { EmployeeScheduleColumn, LegendaEstadosAgenda, ScheduleGridProvider, type ScheduleGridActions, type ScheduleGridContext } from '../../../components/ScheduleGridColumn';
+import { EmployeeScheduleColumn, LegendaEstadosAgenda, ScheduleGridProvider, type AcaoDeStatus, type ScheduleGridActions, type ScheduleGridContext } from '../../../components/ScheduleGridColumn';
 import { AgendaVisaoPeriodo, type VisaoAgenda } from './AgendaVisaoPeriodo';
 import { ScheduleRulerGrid } from '../../../components/ScheduleRulerGrid';
 import { isTeamMember } from '../../../utils/formatters';
@@ -38,9 +39,10 @@ interface SupervisorEscalaTabProps {
   onReassignAppointment?: (appointmentId: string, newEmployeeId: string, version?: string) => Promise<unknown> | void;
   onAddAppointment: (appointment: Omit<Appointment, 'id' | 'status'>) => Promise<boolean | void> | void;
   isAddingAppointment?: boolean;
-  onDeleteAppointment: (id: string) => Promise<boolean | void> | void;
+  onDeleteAppointment: (id: string, version?: string) => Promise<boolean | void> | void;
   onEditAppointment: (id: string, appointment: Partial<Appointment>) => Promise<boolean | void> | void;
-  onCompleteAppointment: (id: string) => void;
+  // Concluir, marcar falta ou reabrir (com a versão do atendimento); rejeita com o erro da API
+  onAlterarStatus: (appointment: Appointment, status: 'completed' | 'no_show' | 'scheduled') => Promise<unknown>;
   onEditClient?: (id: string, clientData: Partial<Client>) => Promise<boolean | void> | void;
   onAddBloqueio?: (b: Omit<Bloqueio, 'id'>) => Promise<boolean | void>;
   onDeleteBloqueio?: (id: string) => Promise<boolean | void>;
@@ -55,12 +57,11 @@ type EmployeeDayStatus = {
   isAllDayUnavailable: boolean;
 };
 
-export function SupervisorEscalaTab({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onOpenUpcomingAppointments, onReassignAppointment, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onCompleteAppointment, onEditClient, onAddBloqueio, onDeleteBloqueio, setToastMessage, setErrorMessage, buildScaleForEmployee }: SupervisorEscalaTabProps) {
+export function SupervisorEscalaTab({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onOpenUpcomingAppointments, onReassignAppointment, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onAlterarStatus, onEditClient, onAddBloqueio, onDeleteBloqueio, setToastMessage, setErrorMessage, buildScaleForEmployee }: SupervisorEscalaTabProps) {
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
   const [scheduleSearchTerm, setScheduleSearchTerm] = useState('');
   const [professionalFilter, setProfessionalFilter] = useState('all');
   const OFF_DAY_FILTER = '__off_today__';
-  const [resourceFilter, setResourceFilter] = useState<ResourceFilter>('all');
   const [visao, setVisao] = useState<VisaoAgenda>('dia');
   const {
     state: {
@@ -288,7 +289,6 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     openBookingModal(formattedTime, empId);
   }, [employees, receptionDate, setErrorMessage, todayStr, dayStatusByEmployee, openBookingModal]);
 
-  const currentViewDateObj = new Date(`${receptionDate}T12:00:00Z`);
   const activeEmployees = useMemo(() => employees
     .filter((emp) => isTeamMember(emp))
     .filter((emp) => {
@@ -326,7 +326,6 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     for (const appointment of appointments) {
       if (appointment.date !== receptionDate) continue;
       if (!matchesAppointmentSearch(appointment, scheduleSearchTerm)) continue;
-      if (!matchesResourceFilter(appointment, resourceFilter)) continue;
       const list = map.get(appointment.assignedEmployeeId);
       if (list) list.push(appointment);
       else map.set(appointment.assignedEmployeeId, [appointment]);
@@ -338,14 +337,13 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     }
     previousDayAppointmentsRef.current = map;
     return map;
-  }, [appointments, receptionDate, scheduleSearchTerm, resourceFilter]);
+  }, [appointments, receptionDate, scheduleSearchTerm]);
 
-  // Semana e mês: mesmos filtros da grade (busca, profissional e recurso), sem limitar ao dia
+  // Semana e mês: mesmos filtros da grade (busca e profissional), sem limitar ao dia
   const periodAppointments = useMemo(() => appointments.filter((appointment) => (
     (professionalFilter === 'all' || professionalFilter === OFF_DAY_FILTER || appointment.assignedEmployeeId === professionalFilter)
     && matchesAppointmentSearch(appointment, scheduleSearchTerm)
-    && matchesResourceFilter(appointment, resourceFilter)
-  )), [appointments, professionalFilter, scheduleSearchTerm, resourceFilter]);
+  )), [appointments, professionalFilter, scheduleSearchTerm]);
 
   const scheduleGridContext = useMemo<ScheduleGridContext>(() => ({
     receptionDate,
@@ -365,35 +363,35 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   // e a versão do registro, para não sobrescrever uma edição feita por outra pessoa nesse meio tempo
   const appointmentsRef = useRef(appointments);
   appointmentsRef.current = appointments;
-  // Soltar o card não grava direto: um arrasto sem querer remarcaria o cliente. A confirmação mostra o antes e o depois.
-  const [movimentoPendente, setMovimentoPendente] = useState<{
-    app: Appointment; empId: string; time: string; resolver: (movido: boolean) => void; rejeitar: (erro: unknown) => void;
-  } | null>(null);
+  // Soltar o card não grava direto: um arrasto sem querer remarcaria o cliente. A confirmação mostra o antes e o
+  // depois, grava e mostra o resultado (nada fica esperando no card que foi solto)
+  const [movimentoPendente, setMovimentoPendente] = useState<{ app: Appointment; empId: string; time: string } | null>(null);
   const [movendo, setMovendo] = useState(false);
   const handleMoveAppointment = useCallback((appointmentId: string, newEmployeeId: string, time: string) => {
     const app = appointmentsRef.current.find((a) => a.id === appointmentId);
-    if (!app) return Promise.reject(new Error('Agendamento não encontrado. Atualize a agenda e tente novamente.'));
-    return new Promise<boolean>((resolver, rejeitar) => setMovimentoPendente({ app, empId: newEmployeeId, time, resolver, rejeitar }));
-  }, []);
+    if (!app) {
+      setErrorMessage('Agendamento não encontrado. Atualize a agenda e tente novamente.');
+      return;
+    }
+    setMovimentoPendente({ app, empId: newEmployeeId, time });
+  }, [setErrorMessage]);
   const confirmarMovimento = async () => {
     if (!movimentoPendente || movendo) return;
-    const { app, empId, time, resolver, rejeitar } = movimentoPendente;
+    const { app, empId, time } = movimentoPendente;
     setMovendo(true);
     try {
       const resultado = await onEditAppointment(app.id, { date: app.date, time, assignedEmployeeId: empId, version: app.version });
-      if (resultado === false) rejeitar(new Error('Não foi possível mover o agendamento.'));
-      else resolver(true);
+      if (resultado === false) setErrorMessage('Não foi possível mover o agendamento.');
+      else setToastMessage(empId === app.assignedEmployeeId ? `Agendamento remarcado para ${time}.` : `Agendamento movido para ${nomeProfissional(empId)} às ${time}.`);
     } catch (error) {
-      rejeitar(error);
+      // Versão desatualizada inclusive: a mensagem do servidor já diz que a agenda foi atualizada
+      setErrorMessage(isApiError(error) ? error.message : 'Não foi possível mover o agendamento.');
     } finally {
       setMovendo(false);
       setMovimentoPendente(null);
     }
   };
-  const cancelarMovimento = () => {
-    movimentoPendente?.resolver(false);
-    setMovimentoPendente(null);
-  };
+  const cancelarMovimento = () => setMovimentoPendente(null);
   const nomeProfissional = (id: string) => employees.find((e) => e.id === id)?.name ?? 'profissional';
   const descricaoMovimento = (() => {
     if (!movimentoPendente) return '';
@@ -404,17 +402,64 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     return `${app.clientName}, ${dia}: de ${intervalo(app.time)} com ${nomeProfissional(app.assignedEmployeeId)} para ${intervalo(time)} com ${nomeProfissional(empId)}.`;
   })();
 
+  // Concluir, falta e reabrir mexem em faturamento, comissão e faltas: sempre com confirmação, esperando a resposta
+  const [acaoPendente, setAcaoPendente] = useState<{ app: Appointment; acao: AcaoDeStatus } | null>(null);
+  const [aplicandoAcao, setAplicandoAcao] = useState(false);
+  const pedirAcaoDeStatus = useCallback((app: Appointment, acao: AcaoDeStatus) => setAcaoPendente({ app, acao }), []);
+  const confirmarAcaoDeStatus = async () => {
+    if (!acaoPendente || aplicandoAcao) return;
+    const { app, acao } = acaoPendente;
+    setAplicandoAcao(true);
+    try {
+      await onAlterarStatus(app, acao === 'concluir' ? 'completed' : acao === 'falta' ? 'no_show' : 'scheduled');
+      setToastMessage(acao === 'concluir' ? 'Atendimento concluído.' : acao === 'falta' ? 'Falta registrada.' : 'Atendimento reaberto.');
+      setAcaoPendente(null);
+    } catch (error) {
+      setAcaoPendente(null);
+      // Versão desatualizada inclusive: a mensagem do servidor já diz que a agenda foi atualizada
+      setErrorMessage(isApiError(error) ? error.message : 'Não foi possível alterar o atendimento.');
+    } finally {
+      setAplicandoAcao(false);
+    }
+  };
+  // O atendimento mudou (outra aba, outra pessoa, aviso em tempo real) com a confirmação aberta: ela fecha, em vez
+  // de pedir para confirmar algo que já não está na tela
+  useEffect(() => {
+    const pendente = acaoPendente?.app ?? movimentoPendente?.app;
+    if (!pendente || aplicandoAcao || movendo) return;
+    const atual = appointments.find((a) => a.id === pendente.id);
+    if (atual && atual.version === pendente.version) return;
+    setAcaoPendente(null);
+    setMovimentoPendente(null);
+    setErrorMessage('Este atendimento mudou enquanto a confirmação estava aberta. A agenda foi atualizada: confira e tente de novo.');
+  }, [appointments, acaoPendente, movimentoPendente, aplicandoAcao, movendo, setErrorMessage]);
+  const textoAcao = (() => {
+    if (!acaoPendente) return { titulo: '', descricao: '', botao: '' };
+    const { app, acao } = acaoPendente;
+    const quando = `${app.date.split('-').reverse().join('/')} às ${app.time}, com ${nomeProfissional(app.assignedEmployeeId)}`;
+    if (acao === 'concluir') {
+      const valor = typeof app.valorTotal === 'number' ? ` (${app.valorTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})` : '';
+      return { titulo: 'Concluir atendimento?', descricao: `${app.clientName}, ${quando}. Ele entra no faturamento${valor} e na comissão.`, botao: 'Concluir' };
+    }
+    if (acao === 'falta') return { titulo: 'Marcar falta?', descricao: `${app.clientName}, ${quando}. O horário fica registrado como falta do cliente.`, botao: 'Marcar falta' };
+    return {
+      titulo: 'Reabrir atendimento?',
+      descricao: `${app.clientName}, ${quando}. Ele volta a ficar agendado (sai do faturamento e das faltas até uma nova baixa). A reabertura fica no histórico de alterações.`,
+      botao: 'Reabrir',
+    };
+  })();
+
   const scheduleGridActions = useMemo<ScheduleGridActions>(() => ({
     onGridClick: handleGridClick,
     onDeleteBloqueio,
     onReassignAppointment,
     onMoveAppointment: handleMoveAppointment,
-    onCompleteAppointment,
+    onAcaoDeStatus: pedirAcaoDeStatus,
     onEditAppointmentClick: openEditAppointmentModal,
     onDeleteAppointmentClick: openDeleteAppointmentModal,
     setToastMessage,
     setErrorMessage,
-  }), [handleGridClick, onDeleteBloqueio, onReassignAppointment, handleMoveAppointment, onCompleteAppointment, openEditAppointmentModal, openDeleteAppointmentModal, setToastMessage, setErrorMessage]);
+  }), [handleGridClick, onDeleteBloqueio, onReassignAppointment, handleMoveAppointment, pedirAcaoDeStatus, openEditAppointmentModal, openDeleteAppointmentModal, setToastMessage, setErrorMessage]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col lg:flex-row gap-6">
@@ -525,16 +570,6 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
               <option key={employee.id} value={employee.id}>{employee.name}</option>
             ))}
           </select>
-          <select
-            value={resourceFilter}
-            onChange={(event) => setResourceFilter(event.target.value as ResourceFilter)}
-            className="md:w-56 bg-surface-container-low border border-outline-variant/30 text-sm rounded-xl px-3 py-2 focus:ring-1 focus:ring-primary text-on-surface"
-          >
-            <option value="all">Recurso: Todos</option>
-            <option value="sala_massagem">Sala de Massagem</option>
-            <option value="ofuro">Ofurô</option>
-            <option value="estetica">Sala de Estética</option>
-          </select>
         </div>
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4 shrink-0">
@@ -551,7 +586,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
               </button>
             ))}
           </div>
-          {/* Semana e mês usam só as cores de agendado, totem, concluído e falta (com o estado por escrito): a legenda é da grade do dia */}
+          {/* Semana e mês têm legenda própria (AgendaVisaoPeriodo): esta é a da grade do dia */}
           {visao === 'dia' && <LegendaEstadosAgenda />}
         </div>
         {visao !== 'dia' && professionalFilter === OFF_DAY_FILTER && (
@@ -578,6 +613,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
             todayStr={todayStr}
             appointments={periodAppointments}
             employees={employees}
+            services={services}
             onMudarDataBase={setReceptionDate}
             onAbrirDia={(dia) => { setReceptionDate(dia); setVisao('dia'); }}
             onAbrirAtendimento={openEditAppointmentModal}
@@ -684,6 +720,19 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
         />
       )}
       <ConfirmDialog
+        open={Boolean(acaoPendente)}
+        icon={acaoPendente?.acao === 'concluir' ? 'task_alt' : acaoPendente?.acao === 'falta' ? 'person_off' : 'undo'}
+        tone={acaoPendente?.acao === 'falta' ? 'danger' : 'primary'}
+        title={textoAcao.titulo}
+        description={textoAcao.descricao}
+        confirmLabel={textoAcao.botao}
+        confirmingLabel="Salvando..."
+        cancelLabel="Voltar"
+        isSubmitting={aplicandoAcao}
+        onConfirm={confirmarAcaoDeStatus}
+        onClose={() => { if (!aplicandoAcao) setAcaoPendente(null); }}
+      />
+      <ConfirmDialog
         open={Boolean(movimentoPendente)}
         icon="event_repeat"
         tone="primary"
@@ -691,13 +740,16 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
         description={descricaoMovimento}
         confirmLabel="Remarcar"
         confirmingLabel="Remarcando..."
+        // "Cancelar" ao lado de um atendimento poderia ser lido como cancelar o agendamento
+        cancelLabel="Manter horário"
         isSubmitting={movendo}
         onConfirm={confirmarMovimento}
         onClose={cancelarMovimento}
       />
       {appointmentToDelete && (
         <DeleteAppointmentModal
-          appointmentId={appointmentToDelete} onClose={closeDeleteAppointmentModal} onDeleteAppointment={onDeleteAppointment} setToastMessage={setToastMessage} setErrorMessage={setErrorMessage}
+          key={appointmentToDelete}
+          appointmentId={appointmentToDelete} version={appointments.find((a) => a.id === appointmentToDelete)?.version} onClose={closeDeleteAppointmentModal} onDeleteAppointment={onDeleteAppointment} setToastMessage={setToastMessage} setErrorMessage={setErrorMessage}
         />
       )}
     </motion.div>

@@ -207,7 +207,7 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
       {/* Footer */}
       <footer className="py-12 px-8 flex flex-col md:flex-row justify-between items-center gap-8 text-on-surface-variant text-[11px] font-medium uppercase tracking-widest border-t border-outline-variant/10 font-body">
         <div className="flex items-center gap-3">
-          <span className="font-serif italic text-lg text-primary normal-case tracking-normal">Serenidade Spa & Resort</span>
+          <span className="font-serif italic text-lg text-primary normal-case tracking-normal">{companyName || 'OmniGestão'}</span>
           <span className="opacity-40">|</span>
           <span>Sistema Interno</span>
         </div>

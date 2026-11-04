@@ -44,7 +44,12 @@ jobs:
       # Os testes rodam todos do mesmo IP; limites do totem mais altos só no CI
       TOTEM_MAX_REQUISICOES_POR_MINUTO: '1000'
       TOTEM_MAX_RESERVAS_POR_IP: '100'
-      TOTEM_MAX_RESERVAS_POR_TELEFONE: '100'
+      TOTEM_MAX_RESERVAS_POR_IP_DIA: '10000'
+      # Os testes do modo de segurança erram senhas de propósito, sempre do mesmo IP
+      LOGIN_MAX_TENTATIVAS_IP: '1000'
+      LOGIN_MAX_DESAFIOS_POR_MINUTO_IP: '1000'
+      # O e2e do relatório financeiro insere atendimentos no passado direto no banco da API
+      E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gestao_ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

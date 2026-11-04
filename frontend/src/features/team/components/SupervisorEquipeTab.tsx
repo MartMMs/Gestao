@@ -3,10 +3,12 @@ import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import { motion } from 'motion/react';
 import { Employee, Role, EmployeeUpdate } from '../../../types';
 import { useAuth } from '../../../AuthContext';
-import { isApiError } from '../../../api';
+import { isApiError, useCompanyConfig, useServices } from '../../../api';
 import { useSearch } from '../../../hooks/useSearch';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { isTeamMember, gerarSenhaProvisoria, gerarEmailUnico } from '../../../utils/formatters';
+
+const PROVEDORES_PUBLICOS = /^(gmail|googlemail|hotmail|outlook|live|msn|yahoo|ymail|icloud|me|uol|bol|terra|ig|globo|protonmail|proton)\./;
 
 interface SupervisorEquipeTabProps {
   employees: Employee[];
@@ -42,7 +44,9 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const [newEmpCargaHoraria, setNewEmpCargaHoraria] = useState<number | ''>(40);
   const [newEmpHabilidades, setNewEmpHabilidades] = useState<string[]>([]);
   const [newEmpRole, setNewEmpRole] = useState<Role>('collaborator');
-  const { currentUser } = useAuth();
+  const { currentUser, token } = useAuth();
+  const { data: empresa } = useCompanyConfig(token);
+  const { data: servicos } = useServices(token);
   const podeGerenciarSupervisores = currentUser?.role === 'admin';
   const [newEmpDiasTrabalho, setNewEmpDiasTrabalho] = useState<string[]>(['1','2','3','4','5','6']);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -67,7 +71,12 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const podeRedefinirSenha = (emp: Employee) => emp.id !== currentUser?.id
     && (podeGerenciarSupervisores || (emp.role !== 'supervisor' && emp.role !== 'admin'));
   const EMPLOYEES_PER_PAGE = 6;
-  const SKILL_OPTIONS = ['Massagem', 'Acupuntura', 'Fisioterapia', 'Aromaterapia', 'Drenagem Linfática'];
+  // Habilidades que valem alguma coisa: as exigidas pelos serviços (regra "Somente habilidades") e as já usadas na
+  // equipe. Nada fixo de um ramo de negócio
+  const SKILL_OPTIONS = useMemo(() => Array.from(new Set([
+    ...(servicos ?? []).flatMap((s) => s.habilidadesPermitidas ?? []),
+    ...employees.flatMap((e) => e.habilidades ?? []),
+  ].map((h) => h.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [servicos, employees]);
   const selectableEmployees = useMemo(() => employees.filter(isTeamMember), [employees]);
 
   // --- ESTADOS DA GESTÃO DE TURNOS ---
@@ -90,7 +99,11 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
     setToastMessage('Turno adicionado.');
   };
 
-  const generateEmployeeEmail = (fullName: string) => gerarEmailUnico(fullName, employees.map((emp) => emp.email));
+  // Domínio do e-mail de contato da empresa (ex.: contato@suaclinica.com.br -> nome@suaclinica.com.br). Provedor
+  // público não serve: joao.silva@gmail.com é o endereço de outra pessoa
+  const dominioContato = empresa?.emailContato?.split('@')[1]?.toLowerCase();
+  const dominioEmail = dominioContato && !PROVEDORES_PUBLICOS.test(dominioContato) ? dominioContato : undefined;
+  const generateEmployeeEmail = (fullName: string) => gerarEmailUnico(fullName, employees.map((emp) => emp.email), dominioEmail);
 
   const liveGeneratedEmail = generateEmployeeEmail(newEmpName);
 
@@ -603,6 +616,9 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                     </button>
                   ))}
                 </div>
+                {SKILL_OPTIONS.length === 0 && (
+                  <p className="text-[11px] text-on-surface-variant">Nenhuma habilidade cadastrada ainda. Elas aparecem aqui quando um serviço exige habilidades (regra "Somente habilidades").</p>
+                )}
               </div>
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Dias de trabalho</p>
@@ -654,8 +670,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
               </div>
               <p className="text-xs text-on-surface-variant">
                 {createdCredentials.redefinida
-                  ? 'A senha anterior deixou de valer e as sessões abertas desse usuário foram encerradas. Entregue a nova senha a ele.'
-                  : 'Guarde essas credenciais para acesso do novo usuário.'}
+                  ? 'A senha anterior deixou de valer e as sessões abertas desse usuário foram encerradas. Entregue a nova senha a ele: no próximo acesso ele vai criar uma senha própria.'
+                  : 'Entregue essas credenciais ao novo usuário: no primeiro acesso ele vai criar uma senha própria.'}
               </p>
             </div>
             <button type="button" onClick={() => setCreatedCredentials(null)} className="w-full mt-5 bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim transition-all">

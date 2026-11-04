@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { semSufixoDoTotem } from '@shared/validadores';
 import { Appointment, Employee } from '../types';
 import { getLocalTodayString } from '../features/appointments/utils/appointmentCore';
 import { readEnv } from '../config/env';
@@ -14,7 +15,7 @@ interface TVPanelViewProps {
 
 const formatClientName = (fullName: string) => {
   if (!fullName) return '';
-  const parts = fullName.trim().split(' ').filter(Boolean);
+  const parts = semSufixoDoTotem(fullName).trim().split(' ').filter(Boolean);
   if (parts.length === 1) return parts[0];
   const first = parts[0];
   const initials = parts.slice(1).map(p => p.charAt(0).toUpperCase() + '.').join(' ');
@@ -34,16 +35,6 @@ function TVClock() {
 export function TVPanelView({ appointments, employees, onExit, companyName, companyIcon }: TVPanelViewProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [weather, setWeather] = useState<{ temp: number; description: string; icon: string } | null>(null);
-  const [tvConfig, setTvConfig] = useState(() => {
-    const saved = localStorage.getItem('spa_tv_config');
-    return saved ? JSON.parse(saved) : {
-      bgAnimated: true,
-      emptyMode: 'qr', // 'qr', 'text', 'logo'
-      emptyTitle: 'Aproveite sua jornada',
-      emptyText: 'Escaneie o QR Code para acessar nosso cardápio digital de chás e serviços extras. Acomode-se, seu momento de paz já vai começar.',
-      qrUrl: 'https://serenidadespa.com/menu'
-    };
-  });
 
 
   // Data no fuso de Brasília (toISOString usaria UTC e viraria o dia às 21h)
@@ -132,17 +123,6 @@ export function TVPanelView({ appointments, employees, onExit, companyName, comp
       }
     }
   };
-
-  // Escuta mudanças feitas no painel do Supervisor em outra aba e atualiza a TV na hora!
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'spa_tv_config' && e.newValue) {
-        setTvConfig(JSON.parse(e.newValue));
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
 
   // Lógica para detectar novos agendamentos e tocar o som
   const isFirstRender = useRef(true);

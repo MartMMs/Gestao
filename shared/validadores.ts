@@ -64,6 +64,10 @@ export const normalizarTexto = (texto: unknown) => String(texto ?? '')
 
 export const normalizarNome = normalizarTexto;
 
+// Sufixo interno que o totem põe em cadastro à parte ("Maria (tel. final 22)", "... 2"). A equipe vê (é o que distingue
+// os cadastros); o que vai para o público (painel da TV, voucher) mostra o nome sem ele
+export const semSufixoDoTotem = (nome: string) => nome.replace(/\s*\(tel\. final \d+\)(?:\s+\d+)?$/i, '');
+
 // Limite comum para observações/anamnese (agenda interna, clientes e totem)
 export const LIMITE_OBSERVACAO = 5000;
 

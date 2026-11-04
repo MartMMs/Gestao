@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
-import { Employee, Role } from './types';
+import { CODIGO_CONFERINDO, CODIGO_DESAFIO_NECESSARIO } from '@shared/codigosErro';
+import { Employee } from './types';
 import { getApiUrl } from './config/api';
-import { CABECALHO_CSRF, SESSAO_COOKIE, SESSAO_EXPIRADA_EVENT } from './api';
+import { resolverDesafio, type DesafioLogin } from '@shared/provaDeTrabalho';
+import { SESSAO_COOKIE, SESSAO_EXPIRADA_EVENT, SESSAO_TROCADA_EVENT, TROCAR_SENHA_EVENT, cabecalhoCsrf, carregarTokenCsrf, definirTokenCsrf, definirUsuarioDaSessao, ehDaSessaoAtual, iniciarNovaSessao } from './api';
 import { existeRascunho, limparRascunhos } from './hooks/useFormDraft';
 
 // Formato antigo: o token ficava no localStorage. Agora a sessão vive num cookie HttpOnly (o JS não lê o token)
@@ -180,8 +182,16 @@ const parseStoredUser = (): Employee | null => {
 
 // Revoga a sessão no servidor (o token e o cookie HttpOnly): apagar o localStorage não basta, o cookie
 // continuaria valendo até expirar para quem usasse o mesmo navegador. Falha de rede não impede sair.
+// O login espera o logout em andamento: senão a resposta dele (que apaga o cookie) poderia chegar depois e
+// derrubar a sessão nova.
+let logoutPendente: Promise<unknown> = Promise.resolve();
 const revogarSessaoNoServidor = () => {
-  fetch(`${getApiUrl()}/logout`, { method: 'POST', credentials: 'include', headers: CABECALHO_CSRF, keepalive: true }).catch(() => {});
+  logoutPendente = (async () => {
+    // Página recém-aberta (sessão vencida na hidratação) ainda não tem o token anti-CSRF: busca antes
+    if (!Object.keys(cabecalhoCsrf()).length) await carregarTokenCsrf();
+    await fetch(`${getApiUrl()}/logout`, { method: 'POST', credentials: 'include', headers: cabecalhoCsrf(), keepalive: true });
+    definirTokenCsrf(null);
+  })().catch(() => {});
 };
 
 const hydrateInitialAuthState = (): InitialAuthState => {
@@ -223,13 +233,21 @@ const hydrateInitialAuthState = (): InitialAuthState => {
   };
 };
 
+// site: campo-isca do formulário (pessoas deixam vazio); aoVerificarRobo: avisa a tela enquanto a prova de trabalho roda
+export type OpcoesLogin = { site?: string; aoVerificarRobo?: (verificando: boolean) => void };
+
 interface AuthContextType {
   currentUser: Employee | null;
   token: string | null;
   loginError: string | null;
-  handleLogin: (email: string, pass: string) => Promise<void>;
+  handleLogin: (email: string, pass: string, opcoes?: OpcoesLogin) => Promise<void>;
   handleLogout: () => void;
+  // Resposta de POST /minha-senha: sessão nova, sem a marca de senha provisória
+  concluirTrocaDeSenha: (resposta: RespostaTrocaSenha) => void;
 }
+
+// Resposta de POST /minha-senha que importa aqui: a sessão nova
+type RespostaTrocaSenha = { expiraEm?: number; csrf?: string };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -244,21 +262,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loginError, setLoginError] = useState<string | null>(null);
   const lastActivityRef = useRef(0);
 
-  const handleLogin = useCallback(async (email: string, pass: string) => {
+  const handleLogin = useCallback(async (email: string, pass: string, opcoes: OpcoesLogin = {}) => {
     try {
-      const response = await fetch(`${getApiUrl()}/login`, {
+      await logoutPendente;
+      const enviarUmaVez = (desafio?: { id: string; nonce: string }) => fetch(`${getApiUrl()}/login`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, senha: pass })
+        body: JSON.stringify({ email, senha: pass, campo_controle: opcoes.site, ...(desafio ? { desafio } : {}) }),
       });
+      // Outra senha desta conta estava sendo conferida (dura menos de 1 s): tenta de novo sozinho, sem a pessoa ver
+      const enviar = async (desafio?: { id: string; nonce: string }) => {
+        let resposta = await enviarUmaVez(desafio);
+        for (let rodada = 0; rodada < 3 && resposta.status === 429; rodada += 1) {
+          if ((await resposta.clone().json().catch(() => null))?.code !== CODIGO_CONFERINDO) break;
+          await new Promise((resolver) => setTimeout(resolver, 700 + Math.random() * 600));
+          resposta = await enviarUmaVez(desafio);
+        }
+        return resposta;
+      };
+      let response = await enviar();
+      // Modo de segurança (muitas tentativas): resolve a prova de trabalho e tenta de novo, sem a pessoa fazer nada
+      for (let rodada = 0; rodada < 2 && response.status === 401; rodada += 1) {
+        const corpo = await response.clone().json().catch(() => null);
+        if (corpo?.code !== CODIGO_DESAFIO_NECESSARIO || !corpo.desafio) break;
+        opcoes.aoVerificarRobo?.(true);
+        try {
+          const nonce = await resolverDesafio(corpo.desafio as DesafioLogin);
+          response = await enviar({ id: corpo.desafio.id, nonce });
+        } finally {
+          opcoes.aoVerificarRobo?.(false);
+        }
+      }
 
       if (!response.ok) {
         const erro = await response.json().catch(() => null);
+        // Prova vencida no caminho (aba em segundo plano): a mensagem do servidor parece algo ainda em andamento
+        if (erro?.code === CODIGO_DESAFIO_NECESSARIO) throw new Error('A verificação demorou demais. Digite a senha e clique em Entrar de novo.');
         throw new Error(erro?.erro || 'E-mail ou senha incorretos.');
       }
 
       const data = await response.json();
+      iniciarNovaSessao();
+      definirTokenCsrf(data.csrf);
       
       // O servidor gravou o cookie de sessão; aqui fica só a validade, para avisar a expiração na hora
       setToken(SESSAO_COOKIE);
@@ -274,7 +320,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         rating: 5.0,
         completedServices: 0,
         diasTrabalho: data.usuario.diasTrabalho ?? '1,2,3,4,5,6',
-        bloqueios: []
+        bloqueios: [],
+        trocarSenha: data.usuario.trocarSenha === true,
       };
       
       try {
@@ -313,9 +360,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoginError(MENSAGEM_SESSAO_EXPIRADA + (existeRascunho() ? MENSAGEM_RASCUNHO_GUARDADO : ''));
   }, []);
 
+  // Outra conta entrou neste navegador: a tela desta aba fecha sem gravar nada e sem derrubar a sessão nova
+  const encerrarPorTrocaDeConta = useCallback(() => {
+    definirTokenCsrf(null);
+    definirUsuarioDaSessao(null);
+    setCurrentUser(null);
+    setToken(null);
+    setLoginError('Outra conta entrou neste navegador (em outra aba). Esta tela foi fechada sem gravar nada: entre de novo para continuar.');
+  }, []);
+  useEffect(() => {
+    window.addEventListener(SESSAO_TROCADA_EVENT, encerrarPorTrocaDeConta);
+    return () => window.removeEventListener(SESSAO_TROCADA_EVENT, encerrarPorTrocaDeConta);
+  }, [encerrarPorTrocaDeConta]);
+
+  // Senha provisória: marcada no login, ou descoberta quando a API recusa com TROCAR_SENHA (ex.: supervisão
+  // redefiniu a senha enquanto a pessoa estava logada em outro aparelho)
+  const marcarTrocaDeSenha = useCallback((trocarSenha: boolean) => {
+    setCurrentUser((atual) => {
+      if (!atual || Boolean(atual.trocarSenha) === trocarSenha) return atual;
+      const proximo = { ...atual, trocarSenha };
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(proximo));
+      return proximo;
+    });
+  }, []);
+  useEffect(() => {
+    const aoExigirTroca = () => marcarTrocaDeSenha(true);
+    window.addEventListener(TROCAR_SENHA_EVENT, aoExigirTroca);
+    return () => window.removeEventListener(TROCAR_SENHA_EVENT, aoExigirTroca);
+  }, [marcarTrocaDeSenha]);
+  const concluirTrocaDeSenha = useCallback((resposta: RespostaTrocaSenha) => {
+    iniciarNovaSessao();
+    definirTokenCsrf(resposta.csrf);
+    persistSessionMeta(buildSessionMeta(typeof resposta.expiraEm === 'number' ? resposta.expiraEm : null));
+    marcarTrocaDeSenha(false);
+  }, [marcarTrocaDeSenha]);
+  // Quem esta aba mostra: a api.ts confere o dono do cookie antes de repetir uma escrita
+  const currentUserIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    currentUserIdRef.current = currentUser?.id ?? null;
+    definirUsuarioDaSessao(currentUser?.id ?? null);
+  }, [currentUser]);
+
   // Qualquer resposta 401 da API (token expirado/inválido) volta para a tela de login com aviso
   useEffect(() => {
-    const onSessaoExpirada = () => encerrarSessaoExpirada();
+    const onSessaoExpirada = (event: Event) => {
+      // 401 de um pedido da sessão anterior: ignorado (ver iniciarNovaSessao)
+      if (!ehDaSessaoAtual((event as CustomEvent<{ geracao?: number }>).detail?.geracao)) return;
+      encerrarSessaoExpirada();
+    };
     window.addEventListener(SESSAO_EXPIRADA_EVENT, onSessaoExpirada);
     return () => window.removeEventListener(SESSAO_EXPIRADA_EVENT, onSessaoExpirada);
   }, [encerrarSessaoExpirada]);
@@ -363,6 +455,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         handleLogout();
         return;
       }
+      // Outra conta entrou em outra aba (o cookie agora é dela): esta aba fecha sem revogar a sessão nova
+      if (event.key === USER_STORAGE_KEY && event.newValue && currentUserIdRef.current) {
+        try {
+          const outro = JSON.parse(event.newValue) as { id?: unknown; trocarSenha?: unknown };
+          if (String(outro.id) !== currentUserIdRef.current) encerrarPorTrocaDeConta();
+          // A mesma pessoa criou a senha em outra aba: esta sai da tela de troca (o cookie novo já vale aqui; o token
+          // anti-CSRF era da sessão antiga e é buscado de novo na próxima escrita)
+          else if (outro.trocarSenha !== true && event.oldValue && (JSON.parse(event.oldValue) as { trocarSenha?: unknown }).trocarSenha === true) {
+            iniciarNovaSessao();
+            definirTokenCsrf(null);
+            marcarTrocaDeSenha(false);
+          }
+        } catch {
+          encerrarPorTrocaDeConta();
+        }
+        return;
+      }
 
       if (event.key === SESSION_STORAGE_KEY) {
         checkSessionExpiry();
@@ -390,10 +499,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('storage', handleStorageChange);
       window.clearInterval(interval);
     };
-  }, [token, handleLogout, encerrarSessaoExpirada]);
+  }, [token, handleLogout, encerrarSessaoExpirada, encerrarPorTrocaDeConta, marcarTrocaDeSenha]);
 
   return (
-    <AuthContext.Provider value={{ currentUser, token, loginError, handleLogin, handleLogout }}>
+    // Com senha provisória o token não é entregue às telas: nenhuma lista é buscada até a troca
+    <AuthContext.Provider value={{ currentUser, token: currentUser?.trocarSenha ? null : token, loginError, handleLogin, handleLogout, concluirTrocaDeSenha }}>
       {children}
     </AuthContext.Provider>
   );
