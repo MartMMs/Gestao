@@ -21,6 +21,23 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
 - **Correcoes:** `VITE_API_URL`/`VITE_SOCKET_URL` voltam a valer no build de producao; linha vermelha da agenda
   cobre todas as colunas; painel da TV usa o fuso de Brasilia; mensagens (toasts) nao se apagam umas as outras.
 
+## Mudancas depois da 1.1.0-beta.1 (ainda sem versao)
+
+- **Sessao em cookie HttpOnly com protecao CSRF:** o token nao fica mais no navegador ao alcance do JavaScript;
+  escritas exigem `X-Requested-With`; logout e inatividade revogam a sessao no servidor.
+- **Agenda:** visoes Dia, Semana e Mes; arrastar o card remarca profissional e horario (com a versao do registro);
+  legenda de cores.
+- **Marcacoes simultaneas:** agenda, totem, escala, trocas de turno, desligamento e clientes gravam com travas por
+  chave (profissional, agendamento, nome, CPF, cliente, sala, escala). Dois pedidos para o mesmo horario: um grava,
+  o outro recebe 409. Espera longa por trava vira 503 com "tente de novo".
+- **Auditoria e numeros:** historico de alteracoes (preco, comissao, cobranca do totem) para o administrador;
+  dashboard e relatorio usam o mesmo calculo; falta conta o agendado vencido sem baixa.
+- **Privacidade:** comissao escondida de quem nao e supervisor; ficha de cliente excluida nao recebe atendimento
+  nem dados; consentimento versionado no totem; senha provisoria.
+
+> **Antes de subir esta versao:** faca backup do banco e rode `cd backend && npx prisma migrate deploy`
+> (5 migrations novas: auditoria, comissao proporcional, troca de senha obrigatoria, consentimento do totem e sua versao).
+
 ## Guias detalhados
 
 Para detalhes tecnicos completos de cada camada:
@@ -183,6 +200,8 @@ Atalhos locais (`Gestao-*.desktop`, tasks do VS Code) podem ser criados por cada
    - continuar saneamento de `any` residual em `SupervisorView` e `SupervisorPlanejamentoTab` (props ainda genericas)
    - integrar um gateway de pagamento real ao webhook assinado
    - finalizar adocao de hooks/contexto compartilhado em todos os fluxos do Supervisor
+   - envio de lembretes por WhatsApp
+   - criacao de bloqueio ainda sem transacao/trava
 
 ## Documentacao relacionada
 
