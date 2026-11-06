@@ -158,7 +158,7 @@ export function TVPanelView({ appointments, employees, onExit, companyName, comp
             <span className="material-symbols-outlined text-4xl text-[#afefdd]">{weather.icon}</span>
             <div className="text-left">
               <p className="text-2xl font-bold leading-none">{weather.temp}°C</p>
-              <p className="text-[10px] uppercase tracking-widest text-white/60 mt-1">{weather.description}</p>
+              <p className="text-[11px] uppercase tracking-widest text-white/60 mt-1">{weather.description}</p>
             </div>
           </div>
         )}

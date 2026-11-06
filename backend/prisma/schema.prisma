@@ -39,6 +39,7 @@ model Cliente {
   nome         String
   telefone     String?
   cpf          String?
+  email        String?
   observacao   String?
   // Preenchido quando o cliente é excluído mas tem histórico: os dados pessoais são apagados e os atendimentos ficam
   removidoEm   DateTime?
@@ -137,6 +138,17 @@ model SolicitacaoTroca {
   @@index([status])
 }
 
+// Turnos padrão da escala (Regras e Turnos): opções do editor de dia e da edição em lote
+model Turno {
+  id       String   @id @default(uuid())
+  nome     String
+  inicio   String // HH:MM
+  fim      String // HH:MM (antes do início = vira a noite)
+  criadoEm DateTime @default(now())
+
+  @@unique([inicio, fim])
+}
+
 model EscalaOverride {
   key           String      @id
   colaboradorId String
@@ -181,6 +193,8 @@ model ConfiguracaoEmpresa {
   corTemaPrimaria      String?  @default("#0f766e")
   // Desligado: comissão some dos serviços e dos relatórios
   usarComissao         Boolean  @default(true)
+  // Ligado: agendar (pela equipe) e cadastrar cliente exigem ficha de anamnese preenchida
+  exigirAnamnese       Boolean  @default(false)
   atualizadoEm         DateTime @updatedAt
 }
 // Trilha de auditoria: cada abertura do histórico (com dados de saúde) de um cliente.

@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { Appointment, Employee, Service } from '../types';
 import { getBrazilCurrentMinuteOfDay, getLocalTodayString } from '../features/appointments/utils/appointmentCore';
 import { isTeamMember } from '../utils/formatters';
+import { useModal } from '../hooks/useModal';
 
 interface UpcomingAppointmentsModalProps {
   open: boolean;
@@ -85,6 +86,7 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
       .join(', ');
   };
 
+  useModal(open, onClose);
   if (!open) return null;
 
   return (
@@ -97,6 +99,9 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
       }}
     >
       <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Próximos atendimentos"
         initial={{ opacity: 0, y: 20, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         className="w-full max-w-4xl max-h-[88vh] overflow-hidden rounded-3xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl flex flex-col"
@@ -104,7 +109,7 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
       >
         <div className="flex items-start justify-between gap-4 border-b border-outline-variant/20 bg-surface-container p-6">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Agenda rápida</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-primary">Agenda rápida</p>
             <h2 className="text-2xl font-headline text-primary mt-1">Próximos atendimentos</h2>
             <p className="text-sm text-on-surface-variant mt-1">Veja quem atende hoje, nos próximos dias e de outros profissionais.</p>
           </div>
@@ -115,15 +120,15 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
 
         <div className="grid gap-3 border-b border-outline-variant/20 bg-surface-container-low px-6 py-4 md:grid-cols-4">
           <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Hoje</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Hoje</p>
             <p className="text-2xl font-headline text-primary">{summary.today}</p>
           </div>
           <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Próximos dias</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Próximos dias</p>
             <p className="text-2xl font-headline text-primary">{summary.future}</p>
           </div>
           <div>
-            <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Buscar</label>
+            <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Buscar</label>
             <input
               type="text"
               value={searchTerm}
@@ -133,7 +138,7 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
             />
           </div>
           <div>
-            <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Profissional</label>
+            <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Profissional</label>
             <select
               value={employeeFilter}
               onChange={(e) => setEmployeeFilter(e.target.value)}
@@ -158,7 +163,7 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
               key={option.key}
               type="button"
               onClick={() => setDateFilter(option.key)}
-              className={`rounded-full px-4 py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${dateFilter === option.key ? 'bg-primary text-on-primary shadow-sm' : 'bg-surface-container-lowest text-on-surface-variant hover:text-primary'}`}
+              className={`rounded-full px-4 py-2 text-[11px] font-bold uppercase tracking-widest transition-all ${dateFilter === option.key ? 'bg-primary text-on-primary shadow-sm' : 'bg-surface-container-lowest text-on-surface-variant hover:text-primary'}`}
             >
               {option.label}
             </button>
@@ -178,13 +183,13 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="truncate text-sm font-bold text-on-surface">{appointment.clientName}</h3>
-                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-primary">{appointment.time}</span>
-                        <span className="rounded-full bg-surface-container px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">{formatDateLabel(appointment.date)}</span>
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest text-primary">{appointment.time}</span>
+                        <span className="rounded-full bg-surface-container px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">{formatDateLabel(appointment.date)}</span>
                       </div>
                       <p className="mt-1 truncate text-xs text-on-surface-variant">{resolveServicesLabel(appointment)}</p>
                     </div>
                     <div className="flex flex-col md:items-end">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Profissional</p>
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Profissional</p>
                       <p className="text-sm font-bold text-on-surface">{resolveEmployeeName(appointment.assignedEmployeeId)}</p>
                     </div>
                   </div>

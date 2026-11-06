@@ -19,6 +19,8 @@ export interface ConfiguracaoEmpresa {
   corTemaPrimaria?: string;
   // Desligado: a empresa não trabalha com comissão (campo some dos serviços)
   usarComissao?: boolean;
+  // Ligado: agendar e cadastrar cliente exigem ficha de anamnese
+  exigirAnamnese?: boolean;
   atualizadoEm?: string;
 }
 
@@ -105,6 +107,10 @@ export interface Client {
   nome: string;
   telefone: string;
   cpf?: string;
+  // Só a supervisão recebe (para os demais a API manda null)
+  email?: string | null;
+  // Calculado pela API: há ficha de anamnese (vem até para quem não pode ver o conteúdo)
+  temAnamnese?: boolean;
   observacao?: string;
   alergias?: string[];
   preferencias?: string[];

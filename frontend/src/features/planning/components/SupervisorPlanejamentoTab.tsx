@@ -7,7 +7,10 @@ import { CalendarioEscala } from './CalendarioEscala';
 import { DraggableCalendarioEscala } from './DraggableCalendarioEscala';
 import { PlanningDayPopover } from './PlanningDayPopover';
 import { TimelineGantt } from './TimelineGantt';
+import { FolgasDoDia } from './FolgasDoDia';
+import { TurnoSelect } from './TurnoSelect';
 import { isTeamMember } from '../../../utils/formatters';
+import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
 import type { usePlanejamentoEscala } from '../hooks/usePlanejamentoEscala';
 import type { SupervisorViewProps } from '../../../components/SupervisorView';
 
@@ -128,45 +131,57 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
 
   const handleApplyBatch = async () => {
     if (!batchTargetDate || batchSelectedIds.length === 0) return;
+    if (!onSaveScaleOverride) return;
     setIsApplyingBatch(true);
-    try {
-      // Otimista: atualiza a interface instantaneamente
-      setPlanningOverrides((prev) => {
-        const next = { ...prev };
-        batchSelectedIds.forEach((empId) => {
-          next[`${empId}:${batchTargetDate}`] = {
-            colaboradorId: empId, data: batchTargetDate, tipo: batchShiftType,
-            turno: batchShiftType === 'trabalho' ? batchShiftTurno : undefined,
-            descricao: batchShiftDescricao,
-          };
-        });
-        return next;
-      });
-
-      // Dispara a mutação para cada funcionário selecionado
-      if (onSaveScaleOverride) {
-        for (const empId of batchSelectedIds) {
-          try { await onSaveScaleOverride({ colaboradorId: empId, data: batchTargetDate, tipo: batchShiftType, turno: batchShiftType === 'trabalho' ? batchShiftTurno : undefined, descricao: batchShiftDescricao }); } catch (e) { console.error(e); }
-        }
+    // Sem atualização otimista: antes a grade mostrava como salvo o que o servidor recusou. A grade recarrega
+    // sozinha a cada gravação; quem falhou continua selecionado para tentar de novo
+    const falhas: { id: string; motivo: string }[] = [];
+    for (const empId of batchSelectedIds) {
+      try {
+        await onSaveScaleOverride({ colaboradorId: empId, data: batchTargetDate, tipo: batchShiftType, turno: batchShiftType === 'trabalho' ? batchShiftTurno : undefined, descricao: batchShiftDescricao });
+      } catch (error) {
+        falhas.push({ id: empId, motivo: error instanceof Error ? error.message : 'erro desconhecido' });
       }
-
+    }
+    setIsApplyingBatch(false);
+    if (falhas.length === 0) {
       setToastMessage(`Lote aplicado para ${batchSelectedIds.length} colaboradores!`);
       setIsBatchEditOpen(false);
       setBatchSelectedIds([]);
-    } catch (error) { setToastMessage('Erro ao aplicar edição em lote.'); } finally { setIsApplyingBatch(false); }
+      return;
+    }
+    setBatchSelectedIds(falhas.map((f) => f.id));
+    setToastMessage(`Não foi salvo para ${falhas.length} de ${batchSelectedIds.length} colaboradores (${falhas[0].motivo}). Eles continuam selecionados.`);
   };
+
+  // Uma função de fechar por modal (X, clique fora e Esc): não fecha durante o envio e pergunta se algo mudou.
+  // "Cancelar" descarta de propósito, sem perguntar
+  const geradorAlterado = useAlterado(isScaleGeneratorOpen, [scaleGeneratorEmployeeId, scaleGeneratorMonth, scaleGeneratorType, scaleGeneratorSundayOffs]);
+  const fecharGerador = () => { if (!isSavingPlanning && confirmarSaida(geradorAlterado)) setIsScaleGeneratorOpen(false); };
+  const loteAlterado = useAlterado(isBatchEditOpen, [batchSelectedIds, batchTargetDate, batchShiftType, batchShiftTurno, batchShiftDescricao]);
+  const fecharLote = () => { if (!isApplyingBatch && confirmarSaida(loteAlterado)) setIsBatchEditOpen(false); };
+  useModal(isScaleGeneratorOpen, fecharGerador);
+  useModal(isBatchEditOpen, fecharLote);
 
   return (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="relative flex flex-col gap-6 items-start w-full">
           {/* Main Content Area - Calendário/Timeline Dominante */}
           <div className="flex-1 w-full min-w-0">
+            <FolgasDoDia
+              employees={props.activeNonAdminEmployees}
+              scaleByEmployee={props.scaleByEmployee}
+              mes={props.selectedScaleMonth}
+              hoje={props.todayStr}
+              onSwapScaleDays={onSwapScaleDays}
+              setToastMessage={setToastMessage}
+            />
             {/* Zonas de visualização e ações */}
             <div className={`bg-surface-container p-5 rounded-3xl border border-outline-variant/10 shadow-sm mb-6 transition-all ${isPlanningEditMode ? 'ring-1 ring-primary/45 border-primary/35' : ''}`}>
               {/* Linha 1: filtro, navegação temporal, modo de visualização */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-center">
                 <div className="flex flex-wrap items-end gap-3">
                   <div className="min-w-42.5">
-                    <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Setor</label>
+                    <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Setor</label>
                     <select
                       value={filterRole}
                       onChange={(event) => setFilterRole(event.target.value)}
@@ -254,7 +269,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
               {/* Linha 2: busca e ações */}
               <div className="mt-4 pt-4 border-t border-outline-variant/10 flex flex-col lg:flex-row gap-3 lg:items-end lg:justify-between">
                 <div className="w-full lg:max-w-md">
-                  <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Buscar Funcionário</label>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Buscar Funcionário</label>
                   <div className="relative">
                     <span className="material-symbols-outlined text-[16px] text-on-surface-variant/70 absolute left-3 top-1/2 -translate-y-1/2">search</span>
                     <input
@@ -340,7 +355,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
               {/* Linha 3: filtros avançados combináveis */}
               <div className="mt-4 pt-4 border-t border-outline-variant/10 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Recorte</label>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Recorte</label>
                   <select
                     value={planningDateScope}
                     onChange={(event) => setPlanningDateScope(event.target.value as 'mensal' | 'semanal')}
@@ -352,7 +367,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Semana</label>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Semana</label>
                   <select
                     value={planningWeekIndex}
                     onChange={(event) => setPlanningWeekIndex(Number(event.target.value) || 1)}
@@ -366,7 +381,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Colaborador</label>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Colaborador</label>
                   <select
                     value={planningEmployeeFilter}
                     onChange={(event) => {
@@ -387,7 +402,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Turno</label>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Turno</label>
                   <select
                     value={planningShiftFilter}
                     onChange={(event) => setPlanningShiftFilter(event.target.value as 'all' | 'manha' | 'tarde' | 'noite' | 'comercial' | 'folga')}
@@ -403,7 +418,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Carga Semanal</label>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Carga Semanal</label>
                   <select
                     value={planningWorkloadFilter}
                     onChange={(event) => setPlanningWorkloadFilter(event.target.value as 'all' | 'ate36' | '37a44' | '45plus')}
@@ -494,14 +509,14 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                             <button
                               type="button"
                               onClick={() => handleUpdateSwapStatus(request.id, 'aprovada')}
-                              className="flex-1 h-7 rounded-lg bg-primary text-on-primary text-[10px] font-bold uppercase tracking-wider"
+                              className="flex-1 h-7 rounded-lg bg-primary text-on-primary text-[11px] font-bold uppercase tracking-wider"
                             >
                               Aprovar
                             </button>
                             <button
                               type="button"
                               onClick={() => handleUpdateSwapStatus(request.id, 'rejeitada')}
-                              className="flex-1 h-7 rounded-lg bg-error/20 text-error text-[10px] font-bold uppercase tracking-wider"
+                              className="flex-1 h-7 rounded-lg bg-error/20 text-error text-[11px] font-bold uppercase tracking-wider"
                             >
                               Rejeitar
                             </button>
@@ -828,11 +843,11 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
               <button
                 type="button"
                 className="absolute inset-0 bg-black/55 backdrop-blur-[1px]"
-                onClick={() => setIsScaleGeneratorOpen(false)}
+                onClick={fecharGerador}
                 aria-label="Fechar modal"
               />
 
-              <div className="relative w-full max-w-2xl rounded-3xl border border-outline-variant/20 bg-surface-container shadow-2xl p-6">
+              <div role="dialog" aria-modal="true" aria-label="Gerar escala" className="relative w-full max-w-2xl rounded-3xl border border-outline-variant/20 bg-surface-container shadow-2xl p-6">
                 <div className="flex items-start justify-between gap-3 mb-5">
                   <div>
                     <h3 className="text-xl font-headline text-on-surface">Gerar Nova Escala</h3>
@@ -840,7 +855,8 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                   </div>
                   <button
                     type="button"
-                    onClick={() => setIsScaleGeneratorOpen(false)}
+                    onClick={fecharGerador}
+                    aria-label="Fechar"
                     className="w-9 h-9 rounded-xl border border-outline-variant/20 bg-surface-container-low text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center"
                     title="Fechar"
                   >
@@ -851,7 +867,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Colaborador</label>
+                      <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Colaborador</label>
                       <input
                         type="text"
                         value={scaleGeneratorSearch}
@@ -874,7 +890,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Mês</label>
+                      <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Mês</label>
                       <input
                         type="month"
                         value={scaleGeneratorMonth}
@@ -886,7 +902,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Tipo de Escala</label>
+                      <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Tipo de Escala</label>
                       <select
                         value={scaleGeneratorType || '6x1'}
                         onChange={(event) => setScaleGeneratorType(event.target.value as Employee['tipoEscala'])}
@@ -897,12 +913,12 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                         <option value="5x2">5x2 (5 dias trabalho, 2 folgas)</option>
                         <option value="12x36">12x36 (12h trabalho, 36h folga)</option>
                         <option value="rotativo">Rotativo</option>
-                        <option value="personalizado">Personalizado</option>
+                        {/* Sem "Personalizado": a API só aceita 6x1, 5x2, 5x1, 12x36 e rotativo (recusava com 400) */}
                       </select>
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Folgas no Domingo</label>
+                      <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Folgas no Domingo</label>
                       <div className="h-11 rounded-xl bg-surface-container-low border border-outline-variant/20 px-2 flex items-center justify-between">
                         <button
                           type="button"
@@ -925,7 +941,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Meta de Cobertura</label>
+                      <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Meta de Cobertura</label>
                       <input
                         type="number"
                         min={1}
@@ -939,7 +955,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Regra de Domingos</label>
+                      <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Regra de Domingos</label>
                       <select
                         value={scaleGeneratorSundayFrequency}
                         onChange={(event) => setScaleGeneratorSundayFrequency(event.target.value as '1x1' | '2x1')}
@@ -956,6 +972,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                   <button
                     type="button"
                     onClick={() => setIsScaleGeneratorOpen(false)}
+                    disabled={isSavingPlanning}
                     className="h-11 px-5 rounded-xl border border-outline-variant/20 text-sm font-semibold text-on-surface-variant hover:text-on-surface"
                   >
                     Cancelar
@@ -979,26 +996,26 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
               <button
                 type="button"
                 className="absolute inset-0 bg-black/55 backdrop-blur-[1px]"
-                onClick={() => setIsBatchEditOpen(false)}
+                onClick={fecharLote}
                 aria-label="Fechar modal"
               />
 
-              <div className="relative w-full max-w-md rounded-3xl border border-outline-variant/20 bg-surface-container shadow-2xl p-6 flex flex-col max-h-[90vh]">
+              <div role="dialog" aria-modal="true" aria-label="Edição em Lote" className="relative w-full max-w-md rounded-3xl border border-outline-variant/20 bg-surface-container shadow-2xl p-6 flex flex-col max-h-[90vh]">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-headline text-on-surface">Edição em Lote</h2>
-                  <button onClick={() => setIsBatchEditOpen(false)} className="p-2 rounded-full hover:bg-surface-container-high text-on-surface-variant transition-colors">
+                  <button type="button" onClick={fecharLote} disabled={isApplyingBatch} aria-label="Fechar" className="p-2 rounded-full hover:bg-surface-container-high text-on-surface-variant transition-colors disabled:opacity-40">
                     <span className="material-symbols-outlined text-[20px]">close</span>
                   </button>
                 </div>
 
                 <div className="mb-4">
-                  <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Data Alvo</label>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Data Alvo</label>
                   <input type="date" value={batchTargetDate} onChange={e => setBatchTargetDate(e.target.value)} className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary" />
                 </div>
 
                 <div className="flex justify-between items-center mb-2">
-                  <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Colaboradores ({batchSelectedIds.length})</label>
-                  <button onClick={() => setBatchSelectedIds(batchSelectedIds.length === timelineEmployees.length ? [] : timelineEmployees.map((e) => e.id))} className="text-[10px] font-bold uppercase tracking-wider text-primary hover:text-primary-dim transition-colors">
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Colaboradores ({batchSelectedIds.length})</label>
+                  <button onClick={() => setBatchSelectedIds(batchSelectedIds.length === timelineEmployees.length ? [] : timelineEmployees.map((e) => e.id))} className="text-[11px] font-bold uppercase tracking-wider text-primary hover:text-primary-dim transition-colors">
                     {batchSelectedIds.length === timelineEmployees.length ? 'Desmarcar Todos' : 'Marcar Todos'}
                   </button>
                 </div>
@@ -1015,7 +1032,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
 
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Ação</label>
+                    <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Ação</label>
                     <select value={batchShiftType} onChange={e => setBatchShiftType(e.target.value as typeof batchShiftType)} className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer">
                       <option value="trabalho">Trabalho</option>
                       <option value="folga">Folga</option>
@@ -1024,19 +1041,14 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                   </div>
                   {batchShiftType === 'trabalho' && (
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Turno</label>
-                      <select value={batchShiftTurno} onChange={e => setBatchShiftTurno(e.target.value)} className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer">
-                        <option value="06:00-14:00">Manhã (06h - 14h)</option>
-                        <option value="08:00-18:00">Comercial (08h - 18h)</option>
-                        <option value="14:00-22:00">Tarde (14h - 22h)</option>
-                        <option value="22:00-06:00">Noite (22h - 06h)</option>
-                      </select>
+                      <label htmlFor="lote-turno" className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Turno</label>
+                      <TurnoSelect id="lote-turno" value={batchShiftTurno} onChange={setBatchShiftTurno} className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer" />
                     </div>
                   )}
                 </div>
 
                 <div className="mb-6">
-                  <label className="block text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Motivo/Descrição</label>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Motivo/Descrição</label>
                   <input type="text" value={batchShiftDescricao} onChange={e => setBatchShiftDescricao(e.target.value)} className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary" placeholder="Ex: Ajuste coletivo, Feriado..." />
                 </div>
 

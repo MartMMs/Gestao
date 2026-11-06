@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Appointment, Employee, Service } from '../../../types';
 import { AppointmentScheduleFields } from '../../../components/AppointmentScheduleFields';
-import { AppointmentModalShell } from '../../../components/AppointmentModalShell';
+import { ModalFormulario } from '../../../components/ModalFormulario';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
 import { ehVersaoDesatualizada, isApiError, useCheckinAppointment, useClients } from '../../../api';
@@ -217,7 +217,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
   };
 
   return (<>
-    <AppointmentModalShell
+    <ModalFormulario
       showSubmitButton={!nadaEditavel}
       title="Editar Agendamento"
       onClose={closeAndDiscard}
@@ -232,7 +232,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
           <div className="flex items-start gap-2">
             <span className="material-symbols-outlined text-[16px] text-error mt-0.5">schedule</span>
             <div>
-              <p className="font-bold text-error uppercase tracking-[0.12em] text-[10px]">Atenção</p>
+              <p className="font-bold text-error uppercase tracking-[0.12em] text-[11px]">Atenção</p>
               <p className="text-on-surface-variant mt-1">{conflictMessage}</p>
             </div>
           </div>
@@ -268,14 +268,14 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
       ) : undefined}
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div><label className="block text-[10px] font-bold text-on-surface-variant uppercase mb-2">Cliente</label><input required type="text" value={editingAppointment.clientName} onChange={e => setEditingAppointment(p => p && ({...p, clientName: e.target.value}))} disabled={encerrado || !gerenciaAgenda} title={!gerenciaAgenda ? 'Só a supervisão altera o cliente do atendimento.' : undefined} list={gerenciaAgenda ? 'edit-appointment-clientes' : undefined} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm ${encerrado || !gerenciaAgenda ? 'opacity-50 cursor-not-allowed' : ''}`} />
+        <div><label className="block text-[11px] font-bold text-on-surface-variant uppercase mb-2">Cliente</label><input required type="text" value={editingAppointment.clientName} onChange={e => setEditingAppointment(p => p && ({...p, clientName: e.target.value}))} disabled={encerrado || !gerenciaAgenda} title={!gerenciaAgenda ? 'Só a supervisão altera o cliente do atendimento.' : undefined} list={gerenciaAgenda ? 'edit-appointment-clientes' : undefined} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm ${encerrado || !gerenciaAgenda ? 'opacity-50 cursor-not-allowed' : ''}`} />
           {gerenciaAgenda && !encerrado && (<>
             <datalist id="edit-appointment-clientes">
               {carteira?.map((c) => <option key={c.id} value={c.nome} />)}
             </datalist>
-            <p className="mt-1 text-[10px] text-on-surface-variant">Escolha um cadastro existente para passar o atendimento para ele (ex.: juntar um cadastro duplicado).</p>
+            <p className="mt-1 text-[11px] text-on-surface-variant">Escolha um cadastro existente para passar o atendimento para ele (ex.: juntar um cadastro duplicado).</p>
           </>)}</div>
-        <div><label className="block text-[10px] font-bold text-on-surface-variant uppercase mb-2">Telefone</label><input type="text" value={editingAppointment.contact} onChange={e => setEditingAppointment(p => p && ({...p, contact: formatPhone(e.target.value)}))} maxLength={15} placeholder="(00) 00000-0000" disabled={encerrado || !supervisao} title={!supervisao ? 'Só a supervisão altera o telefone de um cliente já cadastrado.' : undefined} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm ${encerrado || !supervisao ? 'opacity-50 cursor-not-allowed' : ''}`} /></div>
+        <div><label className="block text-[11px] font-bold text-on-surface-variant uppercase mb-2">Telefone</label><input type="text" value={editingAppointment.contact} onChange={e => setEditingAppointment(p => p && ({...p, contact: formatPhone(e.target.value)}))} maxLength={15} placeholder="(00) 00000-0000" disabled={encerrado || !supervisao} title={!supervisao ? 'Só a supervisão altera o telefone de um cliente já cadastrado.' : undefined} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm ${encerrado || !supervisao ? 'opacity-50 cursor-not-allowed' : ''}`} /></div>
       </div>
       <AppointmentScheduleFields
         date={editingAppointment.date}
@@ -309,7 +309,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
         detailsPlaceholder={editingAppointment.observacaoOculta ? 'Observações protegidas: só quem tem acesso à ficha de saúde deste cliente vê e altera.' : undefined}
         disabled={encerrado}
       />
-    </AppointmentModalShell>
+    </ModalFormulario>
     <ConfirmDialog
       open={Boolean(trocaDeCadastro)}
       tone="primary"

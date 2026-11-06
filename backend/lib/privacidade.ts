@@ -39,6 +39,8 @@ export const prepararCliente = <T extends ClienteBase>(cliente: T, req: Request,
     ...cliente,
     cpf: mascararCpf(cliente.cpf),
     telefone: mascararTelefone(cliente.telefone),
+    // E-mail não tem máscara útil: só a supervisão vê
+    ...('email' in cliente ? { email: null } : {}),
     observacao: veSaude ? cliente.observacao : null,
   };
 };

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { horarioParaMinutos, minutoDentroDoBloqueio } from '@shared/agenda';
 import { useToast } from '../hooks/useToast';
+import { useModal } from '../hooks/useModal';
 import { Employee, Appointment, Service, Client } from '../types';
 import { getBrazilCurrentMinuteOfDay, getLocalTodayString, getDuration, matchesAppointmentSearch } from '../features/appointments/utils/appointmentCore';
 import { SCHEDULE_CONFIG } from '../config/scheduleConfig';
@@ -170,6 +171,10 @@ export function CollaboratorView({
   const currentMinuteTop = isTodayView ? (getBrazilCurrentMinuteOfDay() - START_HOUR * 60) * MINUTE_HEIGHT : -100;
   const timelineHeight = (END_HOUR - START_HOUR + 1) * HOUR_HEIGHT;
 
+  useModal(showFolgas, () => setShowFolgas(false));
+  useModal(showMyScheduleModal, () => setShowMyScheduleModal(false));
+  useModal(!!errorMessage, () => setErrorMessage(null));
+
   return (
     <div className="w-full max-w-4xl mx-auto">
       <div className="mb-12">
@@ -195,18 +200,18 @@ export function CollaboratorView({
       {/* Cards de Estatísticas */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8 ${activeTab === 'agenda' ? '' : 'hidden'}`}>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
-          <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Atendimentos Concluídos</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Atendimentos Concluídos</p>
           <p className="text-4xl font-headline text-primary">{completedCount}</p>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
-          <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Sua Média</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Sua Média</p>
           <div className="flex items-center gap-2">
             <p className="text-4xl font-headline text-primary">{averageRating.toFixed(1)}</p>
             <span className="material-symbols-outlined text-primary star-active text-2xl">star</span>
           </div>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
-          <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Próximo Cliente (Hoje)</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Próximo Cliente (Hoje)</p>
           {nextClient ? (
             <div className="flex items-center gap-3 mt-1">
               <div className="flex-1 min-w-0">
@@ -279,7 +284,7 @@ export function CollaboratorView({
               endHour={END_HOUR}
               hourHeight={HOUR_HEIGHT}
               hourColumnClassName="w-14 shrink-0 bg-surface-container-lowest/95 backdrop-blur border-r border-outline-variant/20 sticky left-0 z-10 flex flex-col"
-              labelClassName="absolute top-1 right-2 text-[10px] font-bold text-on-surface-variant bg-surface-container-lowest px-1 leading-none"
+              labelClassName="absolute top-1 right-2 text-[11px] font-bold text-on-surface-variant bg-surface-container-lowest px-1 leading-none"
             />
 
             {/* Coluna de Agendamentos */}
@@ -292,7 +297,7 @@ export function CollaboratorView({
                 return (
                   <div key={bloq.id} className="absolute left-2 right-2 bg-surface-container-high/60 backdrop-blur-sm rounded-lg border border-outline-variant/30 flex items-center justify-center group overflow-hidden" style={{ top, height }}>
                     <div className="absolute inset-0 opacity-10 repeating-linear-gradient-45 from-transparent to-on-surface-variant"></div>
-                    <span className="text-[10px] font-bold tracking-widest uppercase text-on-surface-variant z-10 truncate px-2">{bloq.motivo}</span>
+                    <span className="text-[11px] font-bold tracking-widest uppercase text-on-surface-variant z-10 truncate px-2">{bloq.motivo}</span>
                   </div>
                 );
               })}
@@ -346,11 +351,11 @@ export function CollaboratorView({
                       </div>
                       <h5 className="font-bold text-on-surface text-sm leading-tight truncate mt-1" title={app.clientName}>{app.clientName}</h5>
                       {height > 45 && <p className="text-xs text-on-surface-variant leading-tight line-clamp-2 mt-1" title={app.services.join(', ')}>{app.services.join(', ')}</p>}
-                      {height > 70 && app.observation && <p className="text-[10px] text-on-surface-variant my-1.5 italic border-l-2 border-outline-variant/30 pl-2 line-clamp-2" title={app.observation}>{app.observation}</p>}
+                      {height > 70 && app.observation && <p className="text-[11px] text-on-surface-variant my-1.5 italic border-l-2 border-outline-variant/30 pl-2 line-clamp-2" title={app.observation}>{app.observation}</p>}
                       {height > 55 && (
                         <div className="mt-auto flex gap-1.5 pt-1.5 border-t border-outline-variant/10">
-                          {delayMinutes > 0 && <span className="bg-error/10 text-error text-[9px] px-1.5 rounded font-bold">{delayMinutes}m atraso</span>}
-                          {isNoShow && <span className="bg-error/10 text-error text-[9px] px-1.5 rounded font-bold">Falta</span>}
+                          {delayMinutes > 0 && <span className="bg-error/10 text-error text-[10px] px-1.5 rounded font-bold">{delayMinutes}m atraso</span>}
+                          {isNoShow && <span className="bg-error/10 text-error text-[10px] px-1.5 rounded font-bold">Falta</span>}
                         </div>
                       )}
                     </div>
@@ -445,7 +450,7 @@ export function CollaboratorView({
 
       {showFolgas && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-80 p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowFolgas(false); }}>
-          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" onMouseDown={(event) => event.stopPropagation()}>
+          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} role="dialog" aria-modal="true" aria-label="Minhas Folgas" className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-headline text-primary">Minhas Folgas</h3>
               <button type="button" onClick={() => setShowFolgas(false)} className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant"><span className="material-symbols-outlined">close</span></button>
@@ -459,7 +464,7 @@ export function CollaboratorView({
                   <div key={bloq.id} className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-bold text-on-surface">{bloq.motivo}</p>
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-primary">{bloq.data}</span>
+                      <span className="text-[11px] font-bold uppercase tracking-widest text-primary">{bloq.data}</span>
                     </div>
                     <p className="text-xs text-on-surface-variant mt-1">{bloq.horaInicio} - {bloq.horaFim}</p>
                   </div>
@@ -475,7 +480,7 @@ export function CollaboratorView({
 
       {showMyScheduleModal && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-80 p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowMyScheduleModal(false); }}>
-          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" onMouseDown={(event) => event.stopPropagation()}>
+          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} role="dialog" aria-modal="true" aria-label="Minha Escala" className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-headline text-primary">Minha Escala</h3>
               <button type="button" onClick={() => setShowMyScheduleModal(false)} className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant"><span className="material-symbols-outlined">close</span></button>
@@ -487,12 +492,12 @@ export function CollaboratorView({
               </div>
 
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-3">Dias de Trabalho</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-3">Dias de Trabalho</p>
                 <div className="grid grid-cols-4 gap-2">
                   {WEEK_DAYS.map((day) => (
                     <div
                       key={day.value}
-                      className={`rounded-xl border px-2 py-2 text-[10px] font-bold uppercase tracking-widest text-center ${myScheduleDaySet.has(day.value) ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/20'}`}
+                      className={`rounded-xl border px-2 py-2 text-[11px] font-bold uppercase tracking-widest text-center ${myScheduleDaySet.has(day.value) ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/20'}`}
                     >
                       {day.label}
                     </div>
@@ -513,7 +518,7 @@ export function CollaboratorView({
 
       {errorMessage && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-100 p-4">
-          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-surface-container-lowest p-8 rounded-3xl shadow-2xl max-w-sm w-full border border-error/30 text-center">
+          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} role="alertdialog" aria-modal="true" aria-label="Erro" className="bg-surface-container-lowest p-8 rounded-3xl shadow-2xl max-w-sm w-full border border-error/30 text-center">
             <span className="material-symbols-outlined text-3xl text-error mb-4">error</span>
             <h2 className="text-2xl font-headline text-error mb-2">Ops!</h2>
             <p className="text-on-surface-variant text-sm mb-6">{errorMessage}</p>

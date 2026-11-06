@@ -26,6 +26,7 @@ async function main() {
   const usuarios = [
     { nome: 'Admin E2E', email: 'admin@serenidade.com', papel: 'admin', especialidade: 'Gestão' },
     { nome: 'Supervisor E2E', email: 'supervisor@serenidade.com', papel: 'supervisor', especialidade: 'Coordenação' },
+    { nome: 'Recepcao E2E', email: 'recepcao@serenidade.com', papel: 'receptionist', especialidade: 'Recepção' },
     { nome: 'Helena E2E', email: 'helena@serenidade.com', papel: 'collaborator', especialidade: 'Massagem' },
     { nome: 'Ana E2E', email: 'ana@serenidade.com', papel: 'collaborator', especialidade: 'Massagem' },
   ];

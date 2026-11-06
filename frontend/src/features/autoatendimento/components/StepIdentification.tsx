@@ -179,7 +179,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
               className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm text-on-surface"
             />
             {erros.telefone && <p className="text-xs text-error mt-1">{erros.telefone}</p>}
-            <p className="text-[10px] text-outline-variant mt-1">
+            <p className="text-[11px] text-outline-variant mt-1">
               Enviaremos seu voucher e lembretes por este número.
             </p>
           </div>
@@ -220,7 +220,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
           <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
             <div>
               <p className="text-xs font-bold text-on-surface">Está gestante?</p>
-              <p className="text-[10px] text-on-surface-variant">Requer cuidados de postura e óleos seguros</p>
+              <p className="text-[11px] text-on-surface-variant">Requer cuidados de postura e óleos seguros</p>
             </div>
             <div className="flex gap-2">
               <button
@@ -248,7 +248,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
           <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
             <div>
               <p className="text-xs font-bold text-on-surface">Pressão Arterial</p>
-              <p className="text-[10px] text-on-surface-variant">Para ajuste térmico e intensidade</p>
+              <p className="text-[11px] text-on-surface-variant">Para ajuste térmico e intensidade</p>
             </div>
             <div className="flex gap-1.5">
               {(['normal', 'alta', 'baixa'] as const).map((p) => (
@@ -270,7 +270,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
           <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
             <div>
               <p className="text-xs font-bold text-on-surface">Cirurgia Recente (últimos 6 meses)?</p>
-              <p className="text-[10px] text-on-surface-variant">Para evitar áreas sensíveis ou em cicatrização</p>
+              <p className="text-[11px] text-on-surface-variant">Para evitar áreas sensíveis ou em cicatrização</p>
             </div>
             <div className="flex gap-2">
               <button
@@ -299,7 +299,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
           <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
             <div>
               <p className="text-xs font-bold text-on-surface">{spa ? 'Alergia a cosméticos ou óleos?' : 'Tem alguma alergia?'}</p>
-              <p className="text-[10px] text-on-surface-variant">{spa ? 'Usaremos produtos hipoalergênicos neutros' : 'Para a equipe se preparar'}</p>
+              <p className="text-[11px] text-on-surface-variant">{spa ? 'Usaremos produtos hipoalergênicos neutros' : 'Para a equipe se preparar'}</p>
             </div>
             <div className="flex gap-2">
               <button

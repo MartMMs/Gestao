@@ -472,7 +472,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
            <button onClick={handleNextMonth} className="p-1.5 hover:bg-surface-container rounded-full text-on-surface-variant transition-colors"><span className="material-symbols-outlined text-[18px]">chevron_right</span></button>
         </div>
         <div className="grid grid-cols-7 gap-1 text-center mb-2">
-           {dayNames.map(day => <span key={day} className="text-[10px] font-bold text-outline uppercase">{day}</span>)}
+           {dayNames.map(day => <span key={day} className="text-[11px] font-bold text-on-surface-variant uppercase">{day}</span>)}
         </div>
         <div className="grid grid-cols-7 gap-1 text-center">
            {calendarDays.map((d, i) => {
@@ -508,7 +508,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
                  <div className="absolute z-50 bottom-full mb-2 hidden group-hover:flex flex-col w-64 p-3 bg-surface-container-highest shadow-2xl rounded-2xl text-sm border border-outline-variant pointer-events-none left-1/2 -translate-x-1/2">
                     <div className="font-bold text-primary mb-2 flex justify-between items-center border-b border-outline-variant/30 pb-1">
                       <span>Cobertura: {dStr.split('-').reverse().join('/')}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] ${coverage.availableCount < coverage.ideal ? 'bg-orange-500/20 text-orange-600' : 'bg-emerald-500/20 text-emerald-600'}`}>
+                      <span className={`px-2 py-0.5 rounded-full text-[11px] ${coverage.availableCount < coverage.ideal ? 'bg-orange-500/20 text-orange-600' : 'bg-emerald-500/20 text-emerald-600'}`}>
                         {coverage.availableCount} {coverage.availableCount === 1 ? 'Plantão' : 'Plantões'}
                       </span>
                     </div>
@@ -527,7 +527,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
            })}
         </div>
         <div className="mt-6 rounded-2xl border border-outline-variant/20 bg-surface-container-low p-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Dica operacional</p>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Dica operacional</p>
           <p className="text-xs text-on-surface-variant mt-1">Use os atalhos acima da grade para Nova Reserva, Lista de Hoje e Bloqueios.</p>
         </div>
       </div>
@@ -632,16 +632,16 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
                 <div key={emp.id} className="flex-1 min-w-55 p-2 text-center border-r border-outline-variant/10">
                   <img src={emp.avatar} alt={emp.name} className="w-9 h-9 mx-auto rounded-full border-2 border-surface-container shadow-sm object-cover" />
                   <h4 className="font-bold text-on-surface text-xs mt-1 truncate">{emp.name.split(' ')[0]}</h4>
-                  <p className="text-[9px] text-on-surface-variant uppercase tracking-widest truncate">{emp.specialty}</p>
+                  <p className="text-[10px] text-on-surface-variant uppercase tracking-widest truncate">{emp.specialty}</p>
                         {(() => {
                           const dayStatus = dayStatusByEmployee.get(emp.id);
                           if (!dayStatus) return null;
                           return (
                             <div className="mt-1 flex flex-col items-center gap-0.5">
-                              <span className={`text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-full border ${dayStatus.isAllDayUnavailable ? 'bg-error/10 text-error border-error/20' : 'bg-amber-500/10 text-amber-400 border-amber-400/30'}`}>
+                              <span className={`text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full border ${dayStatus.isAllDayUnavailable ? 'bg-error/10 text-error border-error/20' : 'bg-amber-500/10 text-amber-400 border-amber-400/30'}`}>
                                 {dayStatus.label}
                               </span>
-                              <p className="text-[9px] text-on-surface-variant uppercase tracking-widest truncate max-w-full">{dayStatus.reason}</p>
+                              <p className="text-[10px] text-on-surface-variant uppercase tracking-widest truncate max-w-full">{dayStatus.reason}</p>
                             </div>
                           );
                         })()}
@@ -658,7 +658,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
                 endHour={END_HOUR}
                 hourHeight={HOUR_HEIGHT}
                 hourColumnClassName="w-14 shrink-0 bg-surface-container-lowest/95 backdrop-blur border-r border-outline-variant/20 sticky left-0 z-20 flex flex-col"
-                labelClassName="absolute top-1 right-2 text-[10px] font-bold text-on-surface-variant bg-surface-container-lowest px-1 leading-none"
+                labelClassName="absolute top-1 right-2 text-[11px] font-bold text-on-surface-variant bg-surface-container-lowest px-1 leading-none"
               />
 
               <ScheduleGridProvider schedule={scheduleGridContext} actions={scheduleGridActions}>

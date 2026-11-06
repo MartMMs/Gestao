@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Appointment } from '../types';
 import { getLocalTodayString } from '../features/appointments/utils/appointmentCore';
+import { MENSAGEM_SAIDA, useModal } from '../hooks/useModal';
 
 // Mesmo limite do servidor (escalaRoutes)
 const LIMITE_MOTIVO = 500;
@@ -43,6 +44,8 @@ export function SolicitarTroca({
     [appointments, colaboradorId, dataOriginal],
   );
 
+  // fecharComConfirmacao é declarada adiante; o Esc só a chama depois do render, já definida
+  useModal(open, () => fecharComConfirmacao());
   if (!open) return null;
 
   const hoje = getLocalTodayString();
@@ -103,13 +106,16 @@ export function SolicitarTroca({
   const fecharComConfirmacao = () => {
     if (isSubmitting) return;
     const temConteudo = Boolean(dataOriginal || dataSolicitada || motivo.trim());
-    if (temConteudo && !window.confirm('Descartar a solicitação de troca que você estava preenchendo?')) return;
+    if (temConteudo && !window.confirm(MENSAGEM_SAIDA)) return;
     resetAndClose();
   };
 
   return (
     <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-[90] p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) fecharComConfirmacao(); }}>
       <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Solicitar troca de turno"
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg"
@@ -124,24 +130,24 @@ export function SolicitarTroca({
 
         <div className="space-y-4">
           <div>
-            <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Data original</label>
+            <label className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Data original</label>
             <input type="date" min={hoje} value={dataOriginal} onChange={(event) => setDataOriginal(event.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
           </div>
 
           {turnoOriginal && (
             <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Turno encontrado</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Turno encontrado</p>
               <p className="text-sm font-bold text-on-surface mt-1">{turnoOriginal.time} - {turnoOriginal.clientName}</p>
             </div>
           )}
 
           <div>
-            <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Data solicitada</label>
+            <label className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Data solicitada</label>
             <input type="date" min={hoje} value={dataSolicitada} onChange={(event) => setDataSolicitada(event.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Motivo</label>
+            <label className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Motivo</label>
             <textarea
               value={motivo}
               onChange={(event) => setMotivo(event.target.value)}
@@ -149,7 +155,7 @@ export function SolicitarTroca({
               maxLength={LIMITE_MOTIVO}
               className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm min-h-[96px] resize-none"
             />
-            <p className="text-[10px] text-on-surface-variant text-right mt-1">{motivo.length}/{LIMITE_MOTIVO}</p>
+            <p className="text-[11px] text-on-surface-variant text-right mt-1">{motivo.length}/{LIMITE_MOTIVO}</p>
           </div>
 
           <button

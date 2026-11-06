@@ -101,6 +101,10 @@ const validarConfigEmpresa = (body: Record<string, unknown>) => {
     if (typeof body.usarComissao !== 'boolean') return { erro: 'Campo usarComissao inválido.' };
     dados.usarComissao = body.usarComissao;
   }
+  if (body.exigirAnamnese !== undefined) {
+    if (typeof body.exigirAnamnese !== 'boolean') return { erro: 'Campo exigirAnamnese inválido.' };
+    dados.exigirAnamnese = body.exigirAnamnese;
+  }
   for (const campo of CAMPOS_EMPRESA) {
     const valor = body[campo];
     if (valor === undefined) continue;
@@ -359,13 +363,18 @@ export function createEmpresaRouter(eventos: Eventos) {
         return res.status(403).json({ erro: 'Apenas o administrador pode ligar ou desligar a comissão.' });
       }
 
-      await getEmpresaConfig();
+      // Nada mudou: responde sem gravar nem avisar as telas (o aviso faz todas recarregarem as listas)
+      const mudou = Object.entries(validacao.dados).some(([campo, valor]) => (atual as Record<string, unknown>)[campo] !== valor);
+      if (!mudou) return res.json(atual);
+
       const configAtualizada = await prisma.configuracaoEmpresa.update({
         where: { id: 'default' },
         data: validacao.dados as Prisma.ConfiguracaoEmpresaUpdateInput,
       });
 
       await registrarAuditoria(req, { acao: 'empresa.comissao', alvo: 'Comissão da empresa', antes: atual, depois: configAtualizada, campos: ['usarComissao'] });
+      // Ligar ou desligar a ficha obrigatória muda quem consegue agendar: fica no histórico (só registra se mudou)
+      await registrarAuditoria(req, { acao: 'empresa.anamnese', alvo: 'Ficha de anamnese obrigatória', antes: atual, depois: configAtualizada, campos: ['exigirAnamnese'] });
       eventos.emitirConfigEmpresa(configAtualizada);
       eventos.notificarMudanca();
       res.json(configAtualizada);

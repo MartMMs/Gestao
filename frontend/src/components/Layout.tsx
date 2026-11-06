@@ -69,7 +69,7 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
               <select 
                 value={activeView} 
                 onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
-                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-tighter font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
+                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-wide font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
               >
                 <option value="admin">Painel Administrador</option>
                 <option value="supervisor">Visão Operacional (Supervisor)</option>
@@ -81,7 +81,7 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
               <select 
                 value={activeView} 
                 onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
-                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-tighter font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
+                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-wide font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
               >
                 <option value="supervisor">Portal do Supervisor</option>
                 <option value="collaborator">Portal do Colaborador</option>
@@ -92,7 +92,7 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
               <select 
                 value={activeView} 
                 onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
-                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-tighter font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
+                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-wide font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
               >
                 <option value="collaborator">Portal do Colaborador</option>
                 <option value="autoatendimento">Autoatendimento (Totem)</option>
@@ -106,8 +106,8 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
               title="Abrir lista de próximos atendimentos"
             >
               <span className="material-symbols-outlined text-[18px]">event_upcoming</span>
-              <span className="hidden md:block text-[10px] font-bold uppercase tracking-widest">Lista de Hoje</span>
-              <span className="rounded-full bg-primary/15 text-primary text-[10px] font-bold px-2 py-0.5">{upcomingAppointmentsCount}</span>
+              <span className="hidden md:block text-[11px] font-bold uppercase tracking-widest">Lista de Hoje</span>
+              <span className="rounded-full bg-primary/15 text-primary text-[11px] font-bold px-2 py-0.5">{upcomingAppointmentsCount}</span>
             </button>
           )}
           <div className="flex items-center gap-1.5 sm:gap-3 ml-1 sm:ml-2 pl-2 sm:pl-4 border-l border-outline-variant/30">
@@ -154,7 +154,7 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
               >
                 <span className="material-symbols-outlined">{hasCltAlerts ? 'notifications_active' : 'notifications'}</span>
                 {cltAlertsCount > 0 && (
-                  <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-error text-on-error text-[8px] font-bold rounded-full flex items-center justify-center shadow-sm border border-surface">
+                  <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-error text-on-error text-[10px] font-bold rounded-full flex items-center justify-center shadow-sm border border-surface">
                     {cltAlertsCount > 9 ? '9+' : cltAlertsCount}
                   </span>
                 )}

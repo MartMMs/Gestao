@@ -251,7 +251,10 @@ export const criarAgendamentoTotem = async (
   const servicos = await prisma.servico.findMany({ where: { id: { in: sessao.servicoIds }, ativo: true } });
   if (servicos.length !== sessao.servicoIds.length) throw new HttpError(409, 'Um dos serviços escolhidos saiu do catálogo. Escolha os serviços novamente.');
   const inicio = instanteNoFuso(sessao.data, sessao.horario);
-  const observacao = cliente.observacoesSaude ? `[Anamnese Autoatendimento ${sessao.data}]: ${cliente.observacoesSaude}` : null;
+  // A declaração do cliente fica numa linha só: é a linha inteira que a regra de forja (shared/anamnese.ts) protege
+  const observacao = cliente.observacoesSaude
+    ? `[Anamnese Autoatendimento ${sessao.data}]: ${cliente.observacoesSaude.replace(/\s+/g, ' ').trim()}`
+    : null;
 
   return transacaoComTravas(async (tx) => {
     await travarAgenda(tx, sessao.terapeutaId);

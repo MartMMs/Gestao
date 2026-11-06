@@ -15,6 +15,7 @@ import { StepSchedule } from './StepSchedule';
 import { StepIdentification, limparRascunhoIdentificacao } from './StepIdentification';
 import { StepCheckout } from './StepCheckout';
 import { StepSuccessVoucher } from './StepSuccessVoucher';
+import { useModal } from '../../../hooks/useModal';
 
 // Sem toque nesse tempo, o totem recomeça (o voucher, com dados do cliente, sai da tela antes)
 const TEMPO_INATIVIDADE_MS = 2 * 60_000;
@@ -43,6 +44,8 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
 
   // Modal de expiração
   const [showExpiredModal, setShowExpiredModal] = useState(false);
+  // Sem Esc: o cliente precisa escolher recomeçar
+  useModal(showExpiredModal);
 
   // Só há etapa de pagamento com o botão ligado E um gateway conectado no servidor
   const cobraOnline = config?.exigirPagamento !== false && config?.pagamentoOnlineDisponivel === true;
@@ -259,7 +262,7 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
             </h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span className="text-[10px] sm:text-xs uppercase tracking-widest text-on-surface-variant/90 font-bold">
+              <span className="text-[11px] sm:text-xs uppercase tracking-widest text-on-surface-variant/90 font-bold">
                 Totem Autoatendimento
               </span>
             </div>
@@ -470,7 +473,7 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
       {/* Modal de Tempo Expirado */}
       {showExpiredModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl text-center space-y-4">
+          <div role="alertdialog" aria-modal="true" aria-label="Tempo de Reserva Expirado" className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl text-center space-y-4">
             <div className="w-14 h-14 rounded-full bg-error/10 border border-error/20 flex items-center justify-center text-error mx-auto">
               <span className="material-symbols-outlined text-3xl">timer_off</span>
             </div>

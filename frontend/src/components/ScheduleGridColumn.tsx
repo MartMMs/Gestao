@@ -81,7 +81,7 @@ export function LegendaEstadosAgenda() {
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1" aria-label="Legenda de cores da agenda">
       {(Object.keys(ESTILO_ESTADO) as EstadoVisual[]).map((estado) => (
-        <span key={estado} className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">
+        <span key={estado} className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-on-surface-variant">
           <span className={`w-3 h-3 rounded-full ring-1 ring-on-surface/25 ${ESTILO_ESTADO[estado].side}`} />
           {ROTULO_ESTADO[estado]}
         </span>
@@ -212,7 +212,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
             style={{ top, height }}
           >
             <div className="absolute inset-0 opacity-10 repeating-linear-gradient-45 from-transparent to-on-surface-variant"></div>
-            <span className="text-[10px] font-bold tracking-widest uppercase text-on-surface-variant z-10 truncate px-2">{bloq.motivo}</span>
+            <span className="text-[11px] font-bold tracking-widest uppercase text-on-surface-variant z-10 truncate px-2">{bloq.motivo}</span>
             {onDeleteBloqueio && (
               <button
                 onClick={(e) => {
@@ -304,7 +304,7 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
               {/* No mouse, os botões flutuam sobre o card ao passar o cursor; no toque (sempre visíveis) eles entram na
                   linha do horário, para não cobrir o nome do cliente */}
               <div className="flex justify-between items-start flex-wrap gap-0.5">
-                <span className={`text-[10px] font-bold leading-none whitespace-nowrap ${visualStyle.text}`}>{app.time}–{horaFim}</span>
+                <span className={`text-[11px] font-bold leading-none whitespace-nowrap ${visualStyle.text}`}>{app.time}–{horaFim}</span>
                 <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 [@media(hover:none)]:static [@media(hover:none)]:shadow-none transition-opacity bg-surface-container-lowest/90 rounded-full shadow-sm p-0.5 border border-outline-variant/20 absolute right-1 top-1 z-30">
                   {/* Concluir e falta só depois do início (o servidor também confere) */}
                   {jaComecou && (
@@ -346,16 +346,16 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
               </div>
               <h5 className={`font-bold text-on-surface text-[11px] leading-tight mt-0.5 break-words ${height > 52 ? 'line-clamp-2' : 'truncate'}`} title={app.clientName}>{app.clientName}</h5>
               {app.aguardandoCheckin && app.status === 'scheduled' && (
-                <span className="inline-block mt-0.5 rounded-full bg-amber-500/15 px-1.5 text-[9px] font-bold uppercase tracking-wide text-amber-700" title="Reserva do totem: abra o agendamento e confirme a chegada do cliente para liberar a ficha">
+                <span className="inline-block mt-0.5 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-700" title="Reserva do totem: abra o agendamento e confirme a chegada do cliente para liberar a ficha">
                   Totem · confirmar chegada
                 </span>
               )}
-              {height > 40 && <p className="text-[9px] text-on-surface-variant leading-tight line-clamp-2 mt-0.5" title={app.services.join(', ')}>{app.services.join(', ')}</p>}
-              {height > 60 && app.observation && <p className="text-[8px] text-on-surface-variant my-1 italic border-l-2 border-outline-variant/30 pl-1.5 line-clamp-1">{app.observation}</p>}
+              {height > 40 && <p className="text-[10px] text-on-surface-variant leading-tight line-clamp-2 mt-0.5" title={app.services.join(', ')}>{app.services.join(', ')}</p>}
+              {height > 60 && app.observation && <p className="text-[10px] text-on-surface-variant my-1 italic border-l-2 border-outline-variant/30 pl-1.5 line-clamp-1">{app.observation}</p>}
               {height > 50 && (
                 <div className="mt-auto flex gap-1 pt-1 border-t border-outline-variant/10">
-                  <span className="bg-surface-container text-on-surface-variant text-[8px] px-1 rounded font-bold uppercase tracking-wide">{ROTULO_ESTADO[visualStatus]}</span>
-                  {delayMinutes > 0 && <span className="bg-error/10 text-error text-[8px] px-1 rounded font-bold">{delayMinutes}m atraso</span>}
+                  <span className="bg-surface-container text-on-surface-variant text-[10px] px-1 rounded font-bold uppercase tracking-wide">{ROTULO_ESTADO[visualStatus]}</span>
+                  {delayMinutes > 0 && <span className="bg-error/10 text-error text-[10px] px-1 rounded font-bold">{delayMinutes}m atraso</span>}
                 </div>
               )}
             </div>

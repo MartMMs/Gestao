@@ -366,7 +366,7 @@ export function AutoatendimentoAdminTab() {
                   Fica guardado para quando o gateway for conectado. Até lá o totem não cobra sinal e o pagamento é feito na recepção.
                 </p>
               )}
-              <div className="flex justify-between text-[10px] text-outline-variant">
+              <div className="flex justify-between text-[11px] text-outline-variant">
                 <span>10% (Sinal Leve)</span>
                 <span>40% (Recomendado)</span>
                 <span>100% (Integral)</span>
@@ -437,7 +437,7 @@ export function AutoatendimentoAdminTab() {
               <option value={15}>15 minutos (Maior tranquilidade no Pix)</option>
               <option value={20}>20 minutos (Folgado)</option>
             </select>
-            <p className="text-[10px] text-outline-variant">
+            <p className="text-[11px] text-outline-variant">
               Tempo que o horário e o espaço ficam reservados para o cliente concluir o agendamento.
             </p>
           </div>

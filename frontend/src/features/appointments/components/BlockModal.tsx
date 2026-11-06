@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { Appointment, Bloqueio, Employee } from '../../../types';
 import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { isTeamMember } from '../../../utils/formatters';
+import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
 
 export interface BlockModalProps {
   receptionDate: string;
@@ -33,6 +34,10 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
   const [reassignToId, setReassignToId] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [blockPreset, setBlockPreset] = useState<'custom' | 'folga' | 'ferias15' | 'ferias30'>('custom');
+  const alterado = useAlterado(true, [blockDate, bookTime, blockEndTime, bookEmp, blockReason, isFolga, reassignToId, blockPreset]);
+  // X, clique fora e Esc: não fecham durante o envio e perguntam se algo foi preenchido
+  const fechar = () => { if (!isSaving && confirmarSaida(alterado)) onClose(); };
+  useModal(true, fechar);
 
   const dayOfWeek = useMemo(() => new Date(`${blockDate}T12:00:00`).getDay(), [blockDate]);
 
@@ -151,20 +156,20 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-surface-container-lowest p-8 rounded-3xl shadow-xl max-w-sm w-full border border-outline-variant/20">
+      <motion.div role="dialog" aria-modal="true" aria-label="Bloquear Agenda" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-surface-container-lowest p-8 rounded-3xl shadow-xl max-w-sm w-full border border-outline-variant/20">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-headline text-error">Bloquear Agenda</h2>
-          <button onClick={onClose} disabled={isSaving} aria-label="Fechar" className="p-2 hover:bg-surface-container rounded-full text-on-surface-variant disabled:opacity-40"><span className="material-symbols-outlined">close</span></button>
+          <button type="button" onClick={fechar} disabled={isSaving} aria-label="Fechar" className="p-2 hover:bg-surface-container rounded-full text-on-surface-variant disabled:opacity-40"><span className="material-symbols-outlined">close</span></button>
         </div>
         <form onSubmit={handleBlockSubmit} className="space-y-4">
           <div>
-            <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">
+            <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">
               {blockPreset === 'custom' || blockPreset === 'folga' ? 'Data do Bloqueio' : 'Data de Início'}
             </label>
             <input required type="date" value={blockDate} onChange={e => setBlockDate(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm text-on-surface font-bold focus:ring-1 focus:ring-primary" />
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Tipo de Bloqueio</label>
+            <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Tipo de Bloqueio</label>
             <select
               value={blockPreset}
               onChange={(e) => {
@@ -204,9 +209,9 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
               </p>
             </div>
           )}
-          <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Início</label><input required type="time" min={START_TIME} max={END_TIME} value={effectiveStart} onChange={e => setBookTime(e.target.value)} disabled={isFolga || blockPreset !== 'custom'} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm ${(isFolga || blockPreset !== 'custom') ? 'opacity-50 cursor-not-allowed' : ''}`} /></div><div><label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Fim</label><input required type="time" min={bookTime || START_TIME} max={END_TIME} value={effectiveEnd} onChange={e => setBlockEndTime(e.target.value)} disabled={isFolga || blockPreset !== 'custom'} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm ${(isFolga || blockPreset !== 'custom') ? 'opacity-50 cursor-not-allowed' : ''}`} /></div></div>
-          <div><label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Profissional</label><select required value={bookEmp} onChange={e => setBookEmp(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm">{employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select></div>
-          <div><label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Motivo</label><input required type="text" value={effectiveReason} onChange={e => setBlockReason(e.target.value)} disabled={isFolga || blockPreset !== 'custom'} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm ${(isFolga || blockPreset !== 'custom') ? 'opacity-50 cursor-not-allowed' : ''}`} placeholder="Ex: Pausa, Almoço..." /></div>
+          <div className="grid grid-cols-2 gap-4"><div><label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Início</label><input required type="time" min={START_TIME} max={END_TIME} value={effectiveStart} onChange={e => setBookTime(e.target.value)} disabled={isFolga || blockPreset !== 'custom'} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm ${(isFolga || blockPreset !== 'custom') ? 'opacity-50 cursor-not-allowed' : ''}`} /></div><div><label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Fim</label><input required type="time" min={bookTime || START_TIME} max={END_TIME} value={effectiveEnd} onChange={e => setBlockEndTime(e.target.value)} disabled={isFolga || blockPreset !== 'custom'} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm ${(isFolga || blockPreset !== 'custom') ? 'opacity-50 cursor-not-allowed' : ''}`} /></div></div>
+          <div><label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Profissional</label><select required value={bookEmp} onChange={e => setBookEmp(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm">{employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select></div>
+          <div><label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Motivo</label><input required type="text" value={effectiveReason} onChange={e => setBlockReason(e.target.value)} disabled={isFolga || blockPreset !== 'custom'} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm ${(isFolga || blockPreset !== 'custom') ? 'opacity-50 cursor-not-allowed' : ''}`} placeholder="Ex: Pausa, Almoço..." /></div>
 
           {isFolga && pendingAppointments.length > 0 && (
             <div className="rounded-xl border border-error/30 bg-error/10 p-3 space-y-2">
@@ -218,7 +223,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
                     <div key={app.id} className="rounded-lg border border-outline-variant/20 bg-surface-container-low px-2.5 py-2">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-xs font-bold text-on-surface truncate">{app.clientName}</p>
-                        <span className="text-[10px] font-bold text-primary">{app.time}</span>
+                        <span className="text-[11px] font-bold text-primary">{app.time}</span>
                       </div>
                       <p className="text-[11px] text-on-surface-variant truncate mt-0.5">{app.services.join(', ') || 'Serviço não informado'}</p>
                     </div>

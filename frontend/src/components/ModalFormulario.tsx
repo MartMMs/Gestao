@@ -1,7 +1,8 @@
-import React, { useEffect, useId, useRef } from 'react';
+import React, { useId, useRef } from 'react';
 import { motion } from 'motion/react';
+import { MENSAGEM_SAIDA, useModal } from '../hooks/useModal';
 
-interface AppointmentModalShellProps {
+interface ModalFormularioProps {
   title: string;
   onClose: () => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -17,7 +18,7 @@ interface AppointmentModalShellProps {
   hasUnsavedChanges?: boolean;
 }
 
-export function AppointmentModalShell({
+export function ModalFormulario({
   title,
   onClose,
   onSubmit,
@@ -30,7 +31,7 @@ export function AppointmentModalShell({
   infoBanner,
   alertBanner,
   hasUnsavedChanges = false,
-}: AppointmentModalShellProps) {
+}: ModalFormularioProps) {
   // Só fecha pelo fundo quando o clique começa E termina nele (arrastar ao selecionar texto não fecha)
   const cliqueComecouNoFundo = useRef(false);
   const tituloId = useId();
@@ -38,20 +39,12 @@ export function AppointmentModalShell({
   const fecharComConfirmacao = () => {
     // Enquanto salva, fechar esconderia o resultado (e um erro) do usuário
     if (isSubmitting) return;
-    if (hasUnsavedChanges && !window.confirm('Descartar o que você preencheu neste formulário?')) return;
+    if (hasUnsavedChanges && !window.confirm(MENSAGEM_SAIDA)) return;
     onClose();
   };
 
-  // Esc fecha como o X (com a mesma confirmação)
-  const fecharRef = useRef(fecharComConfirmacao);
-  fecharRef.current = fecharComConfirmacao;
-  useEffect(() => {
-    const aoTeclar = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') fecharRef.current();
-    };
-    window.addEventListener('keydown', aoTeclar);
-    return () => window.removeEventListener('keydown', aoTeclar);
-  }, []);
+  // Esc fecha como o X (com a mesma confirmação); o fundo não rola
+  useModal(true, fecharComConfirmacao);
 
   return (
     <div

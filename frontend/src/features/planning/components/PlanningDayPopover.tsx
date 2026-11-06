@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DiaEscala } from '../../../utils/escalaCalculator';
+import { confirmarSaida, useModal } from '../../../hooks/useModal';
+import { TurnoSelect } from './TurnoSelect';
 
 interface PlanningDayPopoverProps {
   isOpen: boolean;
@@ -9,13 +11,6 @@ interface PlanningDayPopoverProps {
   onSave: (tipo: DiaEscala['tipo'], turno?: string, descricao?: string) => Promise<void>;
 }
 
-const TURNO_OPTIONS = [
-  { value: '06:00-14:00', label: 'Manhã (06:00 - 14:00)' },
-  { value: '14:00-22:00', label: 'Tarde (14:00 - 22:00)' },
-  { value: '22:00-06:00', label: 'Noite (22:00 - 06:00)' },
-  { value: '08:00-18:00', label: 'Comercial (08:00 - 18:00)' },
-  { value: '07:00-19:00', label: 'Integral (07:00 - 19:00)' },
-];
 
 export function PlanningDayPopover({ isOpen, dia, onClose, onSave }: PlanningDayPopoverProps) {
   const [selectedType, setSelectedType] = useState<DiaEscala['tipo']>(dia?.tipo || 'trabalho');
@@ -65,6 +60,13 @@ export function PlanningDayPopover({ isOpen, dia, onClose, onSave }: PlanningDay
     }
   };
 
+  // Comparado com o dia aberto (o estado é sincronizado com ele num efeito, depois de abrir)
+  const alterado = !!dia && (selectedType !== dia.tipo || descricao !== (dia.descricao || '')
+    || (selectedType === 'trabalho' && selectedTurno !== (dia.turno || '08:00-18:00')));
+  // X, clique fora e Esc; "Cancelar" descarta de propósito, sem perguntar
+  const fechar = () => { if (!isSaving && confirmarSaida(alterado)) onClose(); };
+  useModal(isOpen && !!dia, fechar);
+
   return (
     <AnimatePresence>
       {isOpen && dia && (
@@ -74,8 +76,8 @@ export function PlanningDayPopover({ isOpen, dia, onClose, onSave }: PlanningDay
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/30 z-40"
+            onClick={fechar}
+            className="fixed inset-0 bg-black/30 z-50"
           />
 
           {/* Popover */}
@@ -83,6 +85,9 @@ export function PlanningDayPopover({ isOpen, dia, onClose, onSave }: PlanningDay
             initial={{ opacity: 0, scale: 0.95, y: -10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -10 }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Editar dia da escala"
             className="fixed bottom-12 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm"
           >
             <div className="bg-surface-container p-6 rounded-3xl shadow-2xl border border-outline-variant/20">
@@ -93,15 +98,18 @@ export function PlanningDayPopover({ isOpen, dia, onClose, onSave }: PlanningDay
                     <h3 className="text-xl font-headline text-on-surface capitalize">
                       {formattedDate}
                     </h3>
-                    {isToday && <span className="bg-primary text-on-primary text-[10px] uppercase tracking-widest font-bold px-2 py-0.5 rounded-full shadow-sm">Hoje</span>}
+                    {isToday && <span className="bg-primary text-on-primary text-[11px] uppercase tracking-widest font-bold px-2 py-0.5 rounded-full shadow-sm">Hoje</span>}
                   </div>
                   <p className="text-xs text-on-surface-variant uppercase tracking-widest font-bold">
                     Editar Escala
                   </p>
                 </div>
                 <button
-                  onClick={onClose}
-                  className="p-1.5 hover:bg-surface-container-high rounded-full transition-colors"
+                  type="button"
+                  onClick={fechar}
+                  disabled={isSaving}
+                  aria-label="Fechar"
+                  className="p-1.5 hover:bg-surface-container-high rounded-full transition-colors disabled:opacity-40"
                 >
                   <span className="material-symbols-outlined text-on-surface-variant">close</span>
                 </button>
@@ -114,6 +122,7 @@ export function PlanningDayPopover({ isOpen, dia, onClose, onSave }: PlanningDay
                     <button
                       key={type}
                       type="button"
+                      aria-pressed={selectedType === type}
                       onClick={() => {
                         setSelectedType(type);
                         if (type === 'trabalho' && !selectedTurno) {
@@ -136,20 +145,15 @@ export function PlanningDayPopover({ isOpen, dia, onClose, onSave }: PlanningDay
               {/* Turno Selection (only for trabalho) */}
               {selectedType === 'trabalho' && (
                 <div className="mb-4">
-                  <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-widest mb-2">
+                  <label htmlFor="dia-turno" className="block text-xs font-bold text-on-surface-variant uppercase tracking-widest mb-2">
                     Turno
                   </label>
-                  <select
+                  <TurnoSelect
+                    id="dia-turno"
                     value={selectedTurno}
-                    onChange={(e) => setSelectedTurno(e.target.value)}
+                    onChange={setSelectedTurno}
                     className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-2 text-sm text-on-surface focus:ring-1 focus:ring-primary outline-none transition-all"
-                  >
-                    {TURNO_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
               )}
 
@@ -184,6 +188,7 @@ export function PlanningDayPopover({ isOpen, dia, onClose, onSave }: PlanningDay
                 <button
                   type="button"
                   onClick={onClose}
+                  disabled={isSaving}
                   className="flex-1 py-3 rounded-xl border border-outline-variant/30 text-sm font-bold uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-high transition-colors"
                 >
                   Cancelar

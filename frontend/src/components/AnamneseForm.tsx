@@ -1,5 +1,6 @@
 import { useAuth } from '../AuthContext';
 import { useCompanyConfig } from '../api';
+import { confirmarSaida, useAlterado, useModal } from '../hooks/useModal';
 import { perguntasDoSegmento } from '@shared/segmento';
 
 
@@ -63,10 +64,22 @@ export const formatAnamnese = (data: AnamneseData): string => {
 interface Props {
   data: AnamneseData;
   onChange: (data: AnamneseData) => void;
+  // "Concluir ficha" (e, sem onCancel, todo fechamento): a ficha fica com quem abriu
   onClose: () => void;
+  // Quando concluir grava (ficha de um cliente já salvo): X, clique fora e Esc descartam, perguntando se algo mudou
+  onCancel?: () => void;
+  // Enquanto a ficha é gravada, nada fecha e "Concluir" fica desabilitado
+  salvando?: boolean;
 }
 
-export function AnamneseForm({ data, onChange, onClose }: Props) {
+export function AnamneseForm({ data, onChange, onClose, onCancel, salvando = false }: Props) {
+  const alterado = useAlterado(true, data);
+  const fechar = () => {
+    if (salvando) return;
+    if (!onCancel) onClose();
+    else if (confirmarSaida(alterado)) onCancel();
+  };
+  useModal(true, fechar);
   // As perguntas acompanham o segmento da empresa: as gerais valem para qualquer negócio; as de saúde detalhadas,
   // para clínicas e spas; as de preferência de massagem, só para spas (regra em shared/segmento.ts). Campo escondido
   // não é apagado: a ficha preenchida num segmento antigo volta inteira se o segmento voltar
@@ -133,18 +146,18 @@ export function AnamneseForm({ data, onChange, onClose }: Props) {
       className="fixed inset-0 bg-black/60 backdrop-blur-sm z-70 flex justify-center items-start overflow-y-auto p-4 sm:p-8"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
-          onClose();
+          fechar();
         }
       }}
     >
-      <div className="bg-surface-container-lowest w-full max-w-4xl rounded-3xl shadow-2xl border border-outline-variant/30 flex flex-col my-auto relative overflow-hidden">
+      <div role="dialog" aria-modal="true" aria-label="Ficha de anamnese" className="bg-surface-container-lowest w-full max-w-4xl rounded-3xl shadow-2xl border border-outline-variant/30 flex flex-col my-auto relative overflow-hidden">
         {/* Header Fixo */}
         <div className="bg-surface-container sticky top-0 z-10 p-6 flex justify-between items-center border-b border-outline-variant/20 shadow-sm">
           <div>
             <h2 className="text-xl font-headline text-primary">Ficha do Cliente</h2>
             <p className="text-xs text-on-surface-variant uppercase tracking-widest mt-1">Preencha com o cliente</p>
           </div>
-          <button onClick={onClose} type="button" className="p-2 hover:bg-surface-container-highest rounded-full text-on-surface-variant transition-colors">
+          <button onClick={fechar} type="button" aria-label="Fechar" className="p-2 hover:bg-surface-container-highest rounded-full text-on-surface-variant transition-colors">
             <span className="material-symbols-outlined">close</span>
           </button>
         </div>
@@ -262,7 +275,7 @@ export function AnamneseForm({ data, onChange, onClose }: Props) {
               </div>
 
               <label className="block text-sm font-bold text-on-surface-variant uppercase mb-3 mt-8">Banhos (Alternativos e Relaxantes)</label>
-              <p className="text-[10px] text-on-surface-variant mb-2">Faça a escolha do seu Óleo de banho:</p>
+              <p className="text-[11px] text-on-surface-variant mb-2">Faça a escolha do seu Óleo de banho:</p>
               <div className="flex flex-col gap-3">
                 {['Óleo Energizante', 'Óleo Relaxante', 'Óleo Equilíbrio'].map(b => <label key={b} className="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="banho" checked={data.banho === b} onChange={() => updateField('banho', b)} className="text-primary focus:ring-primary bg-surface-container-lowest border-outline-variant/30 w-4 h-4" /> {b}</label>)}
               </div>
@@ -290,8 +303,8 @@ export function AnamneseForm({ data, onChange, onClose }: Props) {
 
         {/* Footer Actions */}
         <div className="bg-surface-container-low p-6 border-t border-outline-variant/20 flex justify-end gap-4 mt-auto">
-          <button type="button" onClick={onClose} className="px-6 py-3 font-bold uppercase tracking-widest text-xs bg-primary text-on-primary rounded-xl shadow hover:bg-primary-dim transition-all">
-            Concluir ficha / Retornar
+          <button type="button" onClick={onClose} disabled={salvando} className="px-6 py-3 font-bold uppercase tracking-widest text-xs bg-primary text-on-primary rounded-xl shadow hover:bg-primary-dim transition-all disabled:opacity-60">
+            {salvando ? 'Salvando...' : 'Concluir ficha / Retornar'}
           </button>
         </div>
       </div>

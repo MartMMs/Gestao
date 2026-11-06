@@ -4,7 +4,7 @@ import { useAuth } from '../AuthContext';
 import { SENHA_MAXIMA, SENHA_MINIMA, validarSenha } from '@shared/senha';
 
 const campo = 'w-full bg-surface-container border border-outline-variant rounded-xl p-4 focus:ring-1 focus:ring-primary focus:outline-none text-sm text-on-surface';
-const rotulo = 'block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2';
+const rotulo = 'block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2';
 
 /**
  * Primeiro acesso (ou senha redefinida pela supervisão): a senha atual é provisória, conhecida por outra pessoa.

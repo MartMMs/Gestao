@@ -1,11 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
+import { horarioParaMinutos } from '@shared/agenda';
 import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import { motion } from 'motion/react';
 import { Employee, Role, EmployeeUpdate } from '../../../types';
 import { useAuth } from '../../../AuthContext';
-import { isApiError, useCompanyConfig, useServices } from '../../../api';
+import { isApiError, useAddTurno, useCompanyConfig, useDeleteTurno, useServices, useTurnos } from '../../../api';
 import { useSearch } from '../../../hooks/useSearch';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
+import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
 import { isTeamMember, gerarSenhaProvisoria, gerarEmailUnico } from '../../../utils/formatters';
 
 const PROVEDORES_PUBLICOS = /^(gmail|googlemail|hotmail|outlook|live|msn|yahoo|ymail|icloud|me|uol|bol|terra|ig|globo|protonmail|proton)\./;
@@ -36,6 +38,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   ];
   const [newEmpName, setNewEmpName] = useState('');
   const [newEmpEmail, setNewEmpEmail] = useState('');
+  // Na criação o campo mostra o e-mail sugerido até a pessoa mexer nele; depois vale o que ela digitou (até vazio)
+  const [emailEditado, setEmailEditado] = useState(false);
   const [newEmpSpecialty, setNewEmpSpecialty] = useState('');
   const [newEmpCargo, setNewEmpCargo] = useState('');
   const [newEmpTipoEscala, setNewEmpTipoEscala] = useState<Employee['tipoEscala']>('6x1');
@@ -61,7 +65,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const [selectedEmpForSchedule, setSelectedEmpForSchedule] = useState<Employee | null>(null);
   const [scheduleDays, setScheduleDays] = useState<string[]>(['1','2','3','4','5','6']);
   const [bulkSelectedEmployeeIds, setBulkSelectedEmployeeIds] = useState<string[]>([]);
-  const [bulkShiftSelection, setBulkShiftSelection] = useState<'' | 'manha' | 'tarde' | 'folga'>('');
+  // '' (nada), 'folga' ou o horário de um turno padrão ("HH:MM-HH:MM", como a escala grava)
+  const [bulkShiftSelection, setBulkShiftSelection] = useState<string>('');
   const [bulkTargetDate, setBulkTargetDate] = useState(getTodayLocalDate());
   const [isApplyingBulkShift, setIsApplyingBulkShift] = useState(false);
   const [createdCredentials, setCreatedCredentials] = useState<{ name: string; email: string; password: string; redefinida?: boolean } | null>(null);
@@ -81,23 +86,52 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
 
   // --- ESTADOS DA GESTÃO DE TURNOS ---
   const [activeSubTab, setActiveSubTab] = useState<'profissionais' | 'gestao'>('profissionais');
-  const [turnos, setTurnos] = useState<{id: string, nome: string, inicio: string, fim: string}[]>([
-    { id: '1', nome: 'Turno Manhã', inicio: '06:00', fim: '14:00' },
-    { id: '2', nome: 'Turno Tarde', inicio: '14:00', fim: '22:00' },
-    { id: '3', nome: 'Turno Noite', inicio: '22:00', fim: '06:00' },
-    { id: '4', nome: 'Comercial', inicio: '08:00', fim: '18:00' },
-  ]);
+  const { data: turnos = [] } = useTurnos(token);
+  const { mutateAsync: criarTurno, isPending: criandoTurno } = useAddTurno(token);
+  const { mutateAsync: excluirTurno, isPending: excluindoTurno } = useDeleteTurno(token);
+  const [turnoParaExcluir, setTurnoParaExcluir] = useState<{ id: string; nome: string } | null>(null);
+  // Trava síncrona: o isPending só chega no próximo render, tarde para segurar um duplo clique
+  const enviandoTurno = useRef(false);
   const [novoTurnoNome, setNovoTurnoNome] = useState('');
   const [novoTurnoInicio, setNovoTurnoInicio] = useState('08:00');
   const [novoTurnoFim, setNovoTurnoFim] = useState('18:00');
 
-  const handleAddTurno = (e: React.FormEvent) => {
+  const handleAddTurno = async (e: React.FormEvent) => {
     e.preventDefault();
-    if(!novoTurnoNome.trim() || !novoTurnoInicio || !novoTurnoFim) return;
-    setTurnos([...turnos, { id: Date.now().toString(), nome: novoTurnoNome.trim(), inicio: novoTurnoInicio, fim: novoTurnoFim }]);
-    setNovoTurnoNome('');
-    setToastMessage('Turno adicionado.');
+    if (enviandoTurno.current) return;
+    enviandoTurno.current = true;
+    try {
+      await criarTurno({ nome: novoTurnoNome.trim(), inicio: novoTurnoInicio, fim: novoTurnoFim });
+      setNovoTurnoNome('');
+      setToastMessage('Turno adicionado.');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível criar o turno.');
+    } finally {
+      enviandoTurno.current = false;
+    }
   };
+
+  const confirmarExclusaoTurno = async () => {
+    if (!turnoParaExcluir || enviandoTurno.current) return;
+    enviandoTurno.current = true;
+    try {
+      await excluirTurno(turnoParaExcluir.id);
+      setToastMessage(`Turno "${turnoParaExcluir.nome}" excluído.`);
+      setTurnoParaExcluir(null);
+    } catch (error) {
+      setTurnoParaExcluir(null);
+      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível excluir o turno.');
+    } finally {
+      enviandoTurno.current = false;
+    }
+  };
+
+  // Duração em horas; fim antes do início = turno que vira a noite
+  const duracaoTurno = (inicio: string, fim: string) => {
+    const minutos = (horarioParaMinutos(fim) - horarioParaMinutos(inicio) + 1440) % 1440;
+    return `${Math.floor(minutos / 60)}h${minutos % 60 ? String(minutos % 60).padStart(2, '0') : ''}`;
+  };
+
 
   // Domínio do e-mail de contato da empresa (ex.: contato@suaclinica.com.br -> nome@suaclinica.com.br). Provedor
   // público não serve: joao.silva@gmail.com é o endereço de outra pessoa
@@ -148,7 +182,12 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
         if (typeof success === 'string') { setErrorMessage(success); success = false; }
         else if (success !== false) { setToastMessage('Colaborador atualizado com sucesso!'); }
       } else {
-        const generatedEmail = generateEmployeeEmail(newEmpName);
+        // E-mail digitado vence o sugerido: o sugerido pode colidir com uma conta desativada (a lista só tem as ativas)
+        const generatedEmail = emailEditado ? newEmpEmail.trim() : generateEmployeeEmail(newEmpName);
+        if (!generatedEmail) {
+          setErrorMessage('Informe o e-mail do colaborador.');
+          return;
+        }
         const senhaProvisoria = gerarSenhaProvisoria();
         success = await onAddEmployee({
           name: newEmpName,
@@ -184,6 +223,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
     setEditingEmployeeId(null);
     setNewEmpName('');
     setNewEmpEmail('');
+    setEmailEditado(false);
     setNewEmpSpecialty('');
     setNewEmpCargo('');
     setNewEmpTipoEscala('6x1');
@@ -199,6 +239,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
     setEditingEmployeeId(null);
     setNewEmpName('');
     setNewEmpEmail('');
+    setEmailEditado(false);
     setNewEmpSpecialty('');
     setNewEmpCargo('');
     setNewEmpTipoEscala('6x1');
@@ -255,22 +296,12 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
     });
   };
 
-  const handleBulkShiftChange = (value: '' | 'manha' | 'tarde' | 'folga') => {
+  const handleBulkShiftChange = (value: string) => {
     setBulkShiftSelection(value);
-    if (value === 'manha') {
-      if (scheduleDays.length === 0) setScheduleDays(['1', '2', '3', '4', '5', '6']);
-      return;
-    }
-
-    if (value === 'tarde') {
-      if (scheduleDays.length === 0) setScheduleDays(['1', '2', '3', '4', '5', '6']);
-      return;
-    }
-
-    if (value === 'folga') {
-      setScheduleDays([]);
-    }
+    if (value === 'folga') setScheduleDays([]);
+    else if (value && scheduleDays.length === 0) setScheduleDays(['1', '2', '3', '4', '5', '6']);
   };
+  const nomeDoTurnoEmLote = () => turnos.find((t) => `${t.inicio}-${t.fim}` === bulkShiftSelection)?.nome ?? bulkShiftSelection;
 
   const handleApplyBulkShift = async () => {
     if (!onSaveScaleOverride) {
@@ -305,13 +336,12 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
         };
       }
 
-      const turnoLabel = bulkShiftSelection === 'manha' ? '06:00-14:00' : '14:00-22:00';
       return {
         colaboradorId: employeeId,
         data: bulkTargetDate,
         tipo: 'trabalho' as const,
-        turno: turnoLabel,
-        descricao: `Aplicação em lote (${bulkShiftSelection === 'manha' ? 'Manhã' : 'Tarde'})`,
+        turno: bulkShiftSelection,
+        descricao: `Aplicação em lote (${nomeDoTurnoEmLote()})`,
       };
     };
 
@@ -349,7 +379,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
         return;
       }
 
-      const shiftLabel = bulkShiftSelection === 'folga' ? 'Folga' : bulkShiftSelection === 'manha' ? 'Manhã' : 'Tarde';
+      const shiftLabel = bulkShiftSelection === 'folga' ? 'Folga' : nomeDoTurnoEmLote();
       setToastMessage(`Escala em lote aplicada (${shiftLabel}) para ${bulkSelectedEmployeeIds.length} colaborador(es).`);
       closeScheduleModal();
     } catch (error) {
@@ -386,6 +416,17 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   }, [filteredEmployees, employeeCurrentPage]);
 
   const totalPages = Math.max(1, Math.ceil(filteredEmployees.length / EMPLOYEES_PER_PAGE));
+
+  // Uma função de fechar por modal (X, clique fora e Esc): não fecha durante o envio e pergunta se algo mudou.
+  // "Cancelar edição" descarta de propósito, sem perguntar
+  const formAlterado = useAlterado(showEmployeeForm, [newEmpName, newEmpEmail, newEmpSpecialty, newEmpCargo, newEmpTipoEscala, newEmpFolgasDomingoNoMes, newEmpCargaHoraria, newEmpHabilidades, newEmpRole, newEmpDiasTrabalho]);
+  const fecharForm = () => { if (!isSubmitting && confirmarSaida(formAlterado)) cancelEdit(); };
+  const escalaAberta = showScheduleModal && !!selectedEmpForSchedule;
+  const escalaAlterada = useAlterado(escalaAberta, [scheduleDays, bulkSelectedEmployeeIds, bulkShiftSelection, bulkTargetDate]);
+  const fecharEscala = () => { if (!isApplyingBulkShift && confirmarSaida(escalaAlterada)) closeScheduleModal(); };
+  useModal(showEmployeeForm, fecharForm);
+  useModal(!!createdCredentials, () => setCreatedCredentials(null));
+  useModal(escalaAberta, fecharEscala);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 w-full">
@@ -439,14 +480,14 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                     <div className="flex items-center gap-2 min-w-0">
                       <h4 className="text-sm font-bold text-on-surface truncate">{emp.name}</h4>
                       {/* Função de acesso visível: dá para saber quem é supervisor ou recepção sem abrir o cadastro */}
-                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest ${emp.role === 'admin' || emp.role === 'supervisor' ? 'bg-primary/15 text-primary' : emp.role === 'receptionist' ? 'bg-amber-500/15 text-amber-700' : 'bg-surface-container text-on-surface-variant'}`}>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${emp.role === 'admin' || emp.role === 'supervisor' ? 'bg-primary/15 text-primary' : emp.role === 'receptionist' ? 'bg-amber-500/15 text-amber-700' : 'bg-surface-container text-on-surface-variant'}`}>
                         {emp.role === 'admin' ? 'Admin' : emp.role === 'supervisor' ? 'Supervisor' : emp.role === 'receptionist' ? 'Recepção' : 'Colaborador'}
                       </span>
                     </div>
                     <p className="text-xs text-on-surface-variant truncate">{emp.email}</p>
-                    <p className="text-[10px] uppercase tracking-widest text-primary mt-1">{emp.specialty}</p>
-                    <p className="text-[10px] text-on-surface-variant mt-1">{emp.tipoEscala || '6x1'} • {emp.cargaHorariaSemanal ?? 40}h/sem</p>
-                    <p className="text-[10px] text-on-surface-variant">Domingos de folga/mês: {emp.folgasDomingoNoMes ?? 2}</p>
+                    <p className="text-[11px] uppercase tracking-widest text-primary mt-1">{emp.specialty}</p>
+                    <p className="text-[11px] text-on-surface-variant mt-1">{emp.tipoEscala || '6x1'} • {emp.cargaHorariaSemanal ?? 40}h/sem</p>
+                    <p className="text-[11px] text-on-surface-variant">Domingos de folga/mês: {emp.folgasDomingoNoMes ?? 2}</p>
                   </div>
                 </div>
                 <div className="mt-4 flex justify-end gap-2 border-t border-outline-variant/10 pt-3">
@@ -512,72 +553,81 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
           )}
         </>
       ) : (
-        <div className="grid grid-cols-1 gap-6 max-w-2xl">
-          {/* CARD GESTÃO DE TURNOS */}
-          <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm flex flex-col h-100">
-            <div className="flex items-center gap-3 mb-6 shrink-0">
-              <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-500">
-                <span className="material-symbols-outlined">schedule</span>
-              </div>
-              <div>
-                <h3 className="text-lg font-headline text-primary">Turnos Padrão</h3>
-                <p className="text-xs text-on-surface-variant">Horários pré-definidos de escala</p>
-              </div>
-            </div>
+        <section aria-labelledby="turnos-titulo" className="max-w-3xl bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm space-y-6">
+          <header>
+            <h3 id="turnos-titulo" className="text-lg font-headline text-on-surface">Turnos padrão</h3>
+            <p className="text-sm text-on-surface-variant">Aparecem como opções ao editar um dia da escala e na edição em lote. Excluir um turno não muda dias já marcados.</p>
+          </header>
 
-            <div className="space-y-2 flex-1 overflow-y-auto custom-scrollbar pr-2 mb-4">
-              {turnos.map(turno => (
-                <div key={turno.id} className="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-outline-variant/20 group">
-                  <div>
-                    <p className="text-sm font-bold text-on-surface leading-tight">{turno.nome}</p>
-                    <p className="text-[10px] text-on-surface-variant uppercase tracking-widest mt-0.5">{turno.inicio} às {turno.fim}</p>
-                  </div>
-                  <button onClick={() => setTurnos(turnos.filter(t => t.id !== turno.id))} className="text-on-surface-variant hover:text-error transition-colors p-1 rounded-full opacity-0 group-hover:opacity-100"><span className="material-symbols-outlined text-[18px]">delete</span></button>
-                </div>
-              ))}
-            </div>
+          <form onSubmit={handleAddTurno} className="grid gap-3 sm:grid-cols-[1fr_8rem_8rem_auto] sm:items-end">
+            <label className="text-xs font-bold text-on-surface-variant">
+              Nome
+              <input type="text" value={novoTurnoNome} onChange={e => setNovoTurnoNome(e.target.value)} placeholder="Ex.: Madrugada" maxLength={40} required className="mt-1 w-full h-11 px-3 bg-surface-container-low border border-outline-variant/20 rounded-xl text-sm font-normal text-on-surface focus:ring-1 focus:ring-primary outline-none" />
+            </label>
+            <label className="text-xs font-bold text-on-surface-variant">
+              Início
+              <input type="time" value={novoTurnoInicio} onChange={e => setNovoTurnoInicio(e.target.value)} required className="mt-1 w-full h-11 px-3 bg-surface-container-low border border-outline-variant/20 rounded-xl text-sm font-normal text-on-surface focus:ring-1 focus:ring-primary outline-none" />
+            </label>
+            <label className="text-xs font-bold text-on-surface-variant">
+              Fim
+              <input type="time" value={novoTurnoFim} onChange={e => setNovoTurnoFim(e.target.value)} required className="mt-1 w-full h-11 px-3 bg-surface-container-low border border-outline-variant/20 rounded-xl text-sm font-normal text-on-surface focus:ring-1 focus:ring-primary outline-none" />
+            </label>
+            <button type="submit" disabled={criandoTurno} className="h-11 px-5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:bg-primary-dim disabled:opacity-60">
+              {criandoTurno ? 'Salvando...' : 'Adicionar'}
+            </button>
+          </form>
 
-            <form onSubmit={handleAddTurno} className="flex flex-col gap-3 pt-4 border-t border-outline-variant/10 shrink-0">
-              <input type="text" value={novoTurnoNome} onChange={e => setNovoTurnoNome(e.target.value)} placeholder="Nome do turno (Ex: Madrugada)" className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none" required />
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="block text-[9px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Início</label>
-                  <input type="time" value={novoTurnoInicio} onChange={e => setNovoTurnoInicio(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none" required />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-[9px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Fim</label>
-                  <input type="time" value={novoTurnoFim} onChange={e => setNovoTurnoFim(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none" required />
-                </div>
-                <div className="flex items-end">
-                  <button type="submit" className="h-9.5 bg-primary text-on-primary px-4 rounded-xl text-xs font-bold uppercase tracking-wider shadow-sm hover:bg-primary-dim transition-all">Criar</button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
+          {turnos.length === 0 ? (
+            <p className="text-sm text-on-surface-variant">Nenhum turno cadastrado.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-on-surface-variant border-b border-outline-variant/20">
+                  <th scope="col" className="py-2 font-bold">Nome</th>
+                  <th scope="col" className="py-2 font-bold">Horário</th>
+                  <th scope="col" className="py-2 font-bold">Duração</th>
+                  <th scope="col" className="py-2"><span className="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {turnos.map(turno => (
+                  <tr key={turno.id} className="border-b border-outline-variant/10 last:border-0">
+                    <td className="py-3 font-bold text-on-surface">{turno.nome}</td>
+                    <td className="py-3 tabular-nums text-on-surface">{turno.inicio} – {turno.fim}{turno.fim < turno.inicio ? ' (dia seguinte)' : ''}</td>
+                    <td className="py-3 tabular-nums text-on-surface-variant">{duracaoTurno(turno.inicio, turno.fim)}</td>
+                    <td className="py-3 text-right">
+                      <button type="button" onClick={() => setTurnoParaExcluir({ id: turno.id, nome: turno.nome })} aria-label={`Excluir turno ${turno.nome}`} className="p-2 rounded-full text-on-surface-variant hover:text-error hover:bg-error/10">
+                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
       )}
 
       {showEmployeeForm && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-50 p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) cancelEdit(); }}>
-          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-50 p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) fecharForm(); }}>
+          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" role="dialog" aria-modal="true" aria-label={editingEmployeeId ? 'Editar Colaborador' : 'Criar Usuário'} onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-headline text-primary">{editingEmployeeId ? 'Editar Colaborador' : 'Criar Usuário'}</h3>
-              <button type="button" onClick={cancelEdit} className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant"><span className="material-symbols-outlined">close</span></button>
+              <button type="button" onClick={fecharForm} disabled={isSubmitting} aria-label="Fechar" className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant disabled:opacity-40"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
             </div>
             <form onSubmit={handleAddEmployee} className="space-y-3 max-h-[78vh] overflow-y-auto pr-1 custom-scrollbar">
               <input required type="text" value={newEmpName} onChange={e => setNewEmpName(e.target.value)} placeholder="Nome" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
               <div>
                 <input
                   type="email"
-                  value={editingEmployeeId ? newEmpEmail : liveGeneratedEmail}
-                  onChange={e => setNewEmpEmail(e.target.value)}
+                  value={editingEmployeeId || emailEditado ? newEmpEmail : liveGeneratedEmail}
+                  onChange={e => { setEmailEditado(true); setNewEmpEmail(e.target.value); }}
                   placeholder="E-mail"
-                  readOnly={!editingEmployeeId}
-                  className={`w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm ${editingEmployeeId ? '' : 'opacity-80 cursor-not-allowed'}`}
+                  className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm"
                 />
                 {!editingEmployeeId && (
-                  <p className="mt-1 text-[10px] text-on-surface-variant">
-                    Gerado automaticamente a partir do nome completo.
+                  <p className="mt-1 text-[11px] text-on-surface-variant">
+                    Sugerido a partir do nome completo; pode ser alterado.
                   </p>
                 )}
               </div>
@@ -585,7 +635,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
               {/* Cargo é só o rótulo usado nas regras de serviço ("Somente cargos: ..."); vazio = a especialidade */}
               <input type="text" value={newEmpCargo} onChange={e => setNewEmpCargo(e.target.value)} placeholder="Cargo (rótulo; vazio = especialidade)" aria-label="Cargo" maxLength={60} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
               {/* A função de acesso define o que a pessoa pode fazer no sistema */}
-              <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant -mb-2">Função de acesso</label>
+              <label className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant -mb-2">Função de acesso</label>
               <select aria-label="Função de acesso" value={newEmpRole} onChange={e => setNewEmpRole(e.target.value as Role)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm">
                 <option value="collaborator">Colaborador</option>
                 <option value="receptionist">Recepção</option>
@@ -598,19 +648,19 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                 <option value="5x2">5x2 (5 dias trab, 2 folgas)</option>
                 <option value="12x36">12x36 (12h trab, 36h folga)</option>
                 <option value="rotativo">Rotativo (3 turnos)</option>
-                <option value="personalizado">Personalizado</option>
               </select>
               <input type="number" min={0} max={5} value={newEmpFolgasDomingoNoMes} onChange={e => setNewEmpFolgasDomingoNoMes(e.target.value === '' ? '' : Number(e.target.value))} placeholder="Folgas de domingo por mês (Ex: 2)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
               <input type="number" min={1} max={44} value={newEmpCargaHoraria} onChange={e => setNewEmpCargaHoraria(e.target.value === '' ? '' : Number(e.target.value))} placeholder="Carga horária semanal (Ex: 40)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Habilidades</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Habilidades</p>
                 <div className="grid grid-cols-2 gap-2">
                   {SKILL_OPTIONS.map((skill) => (
                     <button
                       key={skill}
                       type="button"
                       onClick={() => toggleSkill(skill)}
-                      className={`rounded-xl border px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${newEmpHabilidades.includes(skill) ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/20'}`}
+                      aria-pressed={newEmpHabilidades.includes(skill)}
+                      className={`rounded-xl border px-3 py-2 text-[11px] font-bold uppercase tracking-widest transition-all ${newEmpHabilidades.includes(skill) ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/20'}`}
                     >
                       {skill}
                     </button>
@@ -621,14 +671,15 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                 )}
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Dias de trabalho</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-2">Dias de trabalho</p>
                 <div className="grid grid-cols-4 gap-2">
                   {WEEK_DAYS.map((day) => (
                     <button
                       key={day.value}
                       type="button"
                       onClick={() => toggleWorkDay(day.value)}
-                      className={`rounded-xl border px-2 py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${newEmpDiasTrabalho.includes(day.value) ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/20'}`}
+                      aria-pressed={newEmpDiasTrabalho.includes(day.value)}
+                      className={`rounded-xl border px-2 py-2 text-[11px] font-bold uppercase tracking-widest transition-all ${newEmpDiasTrabalho.includes(day.value) ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/20'}`}
                     >
                       {day.label}
                     </button>
@@ -639,7 +690,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                 {isSubmitting ? 'Salvando...' : (editingEmployeeId ? 'Salvar Alterações' : 'Cadastrar')}
               </button>
               {editingEmployeeId && (
-                <button type="button" onClick={cancelEdit} className="w-full py-2 rounded-xl text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:bg-surface-container">
+                <button type="button" onClick={cancelEdit} disabled={isSubmitting} className="w-full py-2 rounded-xl text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:bg-surface-container">
                   Cancelar edição
                 </button>
               )}
@@ -650,22 +701,22 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
 
       {createdCredentials && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-60 p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreatedCredentials(null); }}>
-          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" onMouseDown={(event) => event.stopPropagation()}>
+          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" role="dialog" aria-modal="true" aria-label="Credenciais" onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-headline text-primary">{createdCredentials.redefinida ? 'Senha Redefinida' : 'Credenciais Criadas'}</h3>
               <button type="button" onClick={() => setCreatedCredentials(null)} className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant"><span className="material-symbols-outlined">close</span></button>
             </div>
             <div className="space-y-3">
               <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Nome</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Nome</p>
                 <p className="text-sm font-bold text-on-surface">{createdCredentials.name}</p>
               </div>
               <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">E-mail</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">E-mail</p>
                 <p className="text-sm font-bold text-on-surface break-all">{createdCredentials.email}</p>
               </div>
               <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Senha provisória (anote agora: não será exibida de novo)</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Senha provisória (anote agora: não será exibida de novo)</p>
                 <p className="text-sm font-bold text-on-surface">{createdCredentials.password}</p>
               </div>
               <p className="text-xs text-on-surface-variant">
@@ -680,6 +731,19 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
           </motion.div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={Boolean(turnoParaExcluir)}
+        title={`Excluir o turno ${turnoParaExcluir?.nome ?? ''}?`}
+        description="Ele some das opções da escala. Dias já marcados com esse horário não mudam."
+        confirmLabel="Excluir"
+        confirmingLabel="Excluindo..."
+        cancelLabel="Manter turno"
+        icon="delete"
+        isSubmitting={excluindoTurno}
+        onClose={() => { if (!excluindoTurno) setTurnoParaExcluir(null); }}
+        onConfirm={confirmarExclusaoTurno}
+      />
 
       <ConfirmDialog
         open={Boolean(employeeToResetPassword)}
@@ -758,11 +822,11 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
       </ConfirmDialog>
 
       {showScheduleModal && selectedEmpForSchedule && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-50 p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) closeScheduleModal(); }}>
-          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-50 p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) fecharEscala(); }}>
+          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" role="dialog" aria-modal="true" aria-label="Montar Escala" onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-headline text-primary">Montar Escala</h3>
-              <button type="button" onClick={closeScheduleModal} className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant"><span className="material-symbols-outlined">close</span></button>
+              <button type="button" onClick={fecharEscala} disabled={isApplyingBulkShift} aria-label="Fechar" className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant disabled:opacity-40"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
             </div>
             <div className="space-y-4 max-h-[72vh] overflow-y-auto pr-1 custom-scrollbar">
               <div>
@@ -772,11 +836,11 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
 
               <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Edição em Lote (Bulk Edit)</p>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Edição em Lote (Bulk Edit)</p>
                   <button
                     type="button"
                     onClick={toggleSelectAllBulk}
-                    className="text-[10px] font-bold uppercase tracking-widest text-primary hover:opacity-80"
+                    className="text-[11px] font-bold uppercase tracking-widest text-primary hover:opacity-80"
                   >
                     {bulkSelectedEmployeeIds.length === selectableEmployees.length ? 'Limpar seleção' : 'Selecionar todos'}
                   </button>
@@ -798,7 +862,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Data da Aplicação</label>
+                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Data da Aplicação</label>
                     <input
                       type="date"
                       value={bulkTargetDate}
@@ -807,15 +871,15 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Turno em Lote</label>
+                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Turno em Lote</label>
                     <select
                       value={bulkShiftSelection}
-                      onChange={(e) => handleBulkShiftChange(e.target.value as '' | 'manha' | 'tarde' | 'folga')}
+                      onChange={(e) => handleBulkShiftChange(e.target.value)}
                       className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm"
                     >
                       <option value="">Escolha o turno...</option>
-                      <option value="manha">Manhã (06:00 - 14:00)</option>
-                      <option value="tarde">Tarde (14:00 - 22:00)</option>
+                      {/* Turnos padrão (Regras e Turnos) */}
+                      {turnos.map((t) => <option key={t.id} value={`${t.inicio}-${t.fim}`}>{t.nome} ({t.inicio} - {t.fim})</option>)}
                       <option value="folga">Folga</option>
                     </select>
                   </div>
@@ -832,14 +896,15 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
               </div>
 
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-3">Dias de Trabalho</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-3">Dias de Trabalho</p>
                 <div className="grid grid-cols-4 gap-2">
                   {WEEK_DAYS.map((day) => (
                     <button
                       key={day.value}
                       type="button"
                       onClick={() => toggleScheduleDay(day.value)}
-                      className={`rounded-xl border px-2 py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${scheduleDays.includes(day.value) ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/20'}`}
+                      aria-pressed={scheduleDays.includes(day.value)}
+                      className={`rounded-xl border px-2 py-2 text-[11px] font-bold uppercase tracking-widest transition-all ${scheduleDays.includes(day.value) ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/20'}`}
                     >
                       {day.label}
                     </button>

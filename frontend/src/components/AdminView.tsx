@@ -226,7 +226,7 @@ export function AdminView({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-2.5 py-0.5 rounded-full">
+              <span className="text-[11px] font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-2.5 py-0.5 rounded-full">
                 Modo Administrador Geral
               </span>
               <span className="text-xs text-on-surface-variant font-medium">
@@ -267,7 +267,7 @@ export function AdminView({
             }`}
           >
             <span className="material-symbols-outlined text-[18px]">menu_book</span>
-            Cardápio de Serviços
+            Serviços
           </button>
 
           <button

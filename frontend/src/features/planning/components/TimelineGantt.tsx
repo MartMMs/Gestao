@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { horaInicialDoTurno } from '../../../utils/escalaCalculator';
 import { Employee, Appointment } from '../../../types';
+import { useAuth } from '../../../AuthContext';
+import { useTurnos } from '../../../api';
 import { gerarEscalaComRegras, DiaEscala } from '../../../utils/escalaCalculator';
 
 interface TimelineGanttProps {
@@ -29,6 +31,8 @@ interface TimelineGanttProps {
 }
 
 export function TimelineGantt({ employees, appointments, month, dayRange, selectedMonth, onMonthChange, hideMonthBadge = false, isEditable = false, suggestedKeys = [], onQuickToggleDay, onQuickSetDay, onClick, onShiftDrop, onReplicate, minStaffRequired, overrides = [] }: TimelineGanttProps) {
+  const { token } = useAuth();
+  const { data: turnos = [] } = useTurnos(token);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [quickMenu, setQuickMenu] = useState<{
     employeeId: string;
@@ -313,14 +317,14 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
                 Colaborador
               </div>
 
-              <div className="flex-1 p-3 bg-surface-container-low border-b border-outline-variant/10 text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">
+              <div className="flex-1 p-3 bg-surface-container-low border-b border-outline-variant/10 text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">
                 Grade da equipe
               </div>
             </div>
 
             {/* Coverage summary */}
             <div className="flex items-center">
-              <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-[9px] sm:text-[11px] uppercase tracking-tighter sm:tracking-[0.15em] text-on-surface-variant sticky left-0 z-20 truncate">
+              <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-[10px] sm:text-[11px] uppercase tracking-tighter sm:tracking-[0.15em] text-on-surface-variant sticky left-0 z-20 truncate">
                 Cobertura diária
               </div>
 
@@ -346,7 +350,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
                       title={isLow ? 'Cobertura abaixo do mínimo' : 'Cobertura adequada'}
                     >
                       <div className="flex items-center gap-0.5" aria-label={`Cobertura ${count}/${target}`}>
-                        {isLow && <span className="text-[10px] font-black">!</span>}
+                        {isLow && <span className="text-[11px] font-black">!</span>}
                         <span>{count}</span>
                       </div>
                     </div>
@@ -357,7 +361,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
 
             {/* Heatmap summary (Gargalos de Demanda) */}
             <div className="flex items-center">
-              <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-[9px] sm:text-[11px] uppercase tracking-tighter sm:tracking-[0.15em] text-on-surface-variant sticky left-0 z-20 truncate" title="Sinaliza gargalos cruzando agenda com cobertura">
+              <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-[10px] sm:text-[11px] uppercase tracking-tighter sm:tracking-[0.15em] text-on-surface-variant sticky left-0 z-20 truncate" title="Sinaliza gargalos cruzando agenda com cobertura">
                 Gargalos (Demanda)
               </div>
 
@@ -403,7 +407,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
 
             {/* Vital Skills summary (Habilidades Vitais) */}
             <div className="flex items-center">
-              <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-[9px] sm:text-[11px] uppercase tracking-tighter sm:tracking-[0.15em] text-on-surface-variant sticky left-0 z-20 truncate" title="Garante que há profissionais com Primeiros Socorros no dia">
+              <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-[10px] sm:text-[11px] uppercase tracking-tighter sm:tracking-[0.15em] text-on-surface-variant sticky left-0 z-20 truncate" title="Garante que há profissionais com Primeiros Socorros no dia">
                 Habilidades Vitais
               </div>
 
@@ -442,7 +446,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
 
             {/* Dias do mês */}
             <div className="flex items-center">
-              <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-[9px] sm:text-[11px] uppercase tracking-tighter sm:tracking-[0.15em] text-on-surface-variant sticky left-0 z-20 truncate">
+              <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-[10px] sm:text-[11px] uppercase tracking-tighter sm:tracking-[0.15em] text-on-surface-variant sticky left-0 z-20 truncate">
                 Dias
               </div>
 
@@ -454,9 +458,9 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
                       meta.isToday ? 'bg-primary/10 border-primary/30 text-primary' : meta.isWeekend ? 'bg-surface-container border-outline-variant/10 text-on-surface' : 'bg-surface-container-lowest border-outline-variant/10 text-on-surface-variant'
                     }`}
                   >
-                    {meta.isToday && <span className="absolute -top-1.5 bg-primary text-on-primary text-[7px] px-1 rounded-sm uppercase font-bold shadow-sm">Hoje</span>}
+                    {meta.isToday && <span className="absolute -top-1.5 bg-primary text-on-primary text-[10px] px-1 rounded-sm uppercase font-bold shadow-sm">Hoje</span>}
                     <span className="text-[11px] font-bold leading-none">{meta.day}</span>
-                    <span className="text-[9px] font-semibold uppercase tracking-wide leading-none mt-1">{meta.weekdayLabel}</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-wide leading-none mt-1">{meta.weekdayLabel}</span>
                   </div>
                 ))}
               </div>
@@ -567,12 +571,12 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
                               return (
                                 <div className={`flex flex-col items-center gap-0.5 ${dia?.tipo === 'trabalho' ? 'text-white' : 'text-on-surface-variant opacity-70'}`}>
                                   {cellData && cellData.icon && <span className="material-symbols-outlined text-[14px] leading-none">{cellData.icon}</span>}
-                                  <span className="text-[8px] font-black leading-none">{cellData?.label}</span>
+                                  <span className="text-[10px] font-black leading-none">{cellData?.label}</span>
                                 </div>
                               );
                             })()}
                             {hasAlert && (
-                              <span className={`absolute top-0.5 left-0.5 text-[10px] font-black drop-shadow-sm ${hasCltAlert ? 'text-amber-300' : 'text-orange-300'}`}>!</span>
+                              <span className={`absolute top-0.5 left-0.5 text-[11px] font-black drop-shadow-sm ${hasCltAlert ? 'text-amber-300' : 'text-orange-300'}`}>!</span>
                             )}
                             {isSuggested && (
                               <span className="absolute bottom-0.5 left-0.5 w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
@@ -605,40 +609,40 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
       {/* Legenda */}
       <div className="p-4 bg-surface-container-low border-t border-outline-variant/10 flex flex-wrap gap-4 items-center justify-center">
         <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-blue-600 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[10px]">light_mode</span></span>
-          <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Manhã</span>
+          <span className="w-4 h-4 rounded bg-blue-600 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[11px]">light_mode</span></span>
+          <span className="text-[11px] text-on-surface-variant font-bold uppercase tracking-wider">Manhã</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-indigo-600 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[10px]">partly_cloudy_day</span></span>
-          <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Tarde</span>
+          <span className="w-4 h-4 rounded bg-indigo-600 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[11px]">partly_cloudy_day</span></span>
+          <span className="text-[11px] text-on-surface-variant font-bold uppercase tracking-wider">Tarde</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-purple-700 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[10px]">dark_mode</span></span>
-          <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Noite</span>
+          <span className="w-4 h-4 rounded bg-purple-700 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[11px]">dark_mode</span></span>
+          <span className="text-[11px] text-on-surface-variant font-bold uppercase tracking-wider">Noite</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-emerald-600 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[10px]">routine</span></span>
-          <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Comercial / Outros</span>
+          <span className="w-4 h-4 rounded bg-emerald-600 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[11px]">routine</span></span>
+          <span className="text-[11px] text-on-surface-variant font-bold uppercase tracking-wider">Comercial / Outros</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-4 h-4 rounded bg-surface-variant/60 bg-[repeating-linear-gradient(-45deg,transparent,transparent_2px,rgba(0,0,0,0.1)_2px,rgba(0,0,0,0.1)_4px)] border border-outline-variant/30"></span>
-          <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Folga / FDS</span>
+          <span className="text-[11px] text-on-surface-variant font-bold uppercase tracking-wider">Folga / FDS</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-orange-100 border border-orange-300 flex items-center justify-center text-[9px] font-black text-orange-800">!</span>
-          <span className="text-[10px] text-on-surface-variant font-bold">Cobertura baixa</span>
+          <span className="w-4 h-4 rounded bg-orange-100 border border-orange-300 flex items-center justify-center text-[10px] font-black text-orange-800">!</span>
+          <span className="text-[11px] text-on-surface-variant font-bold">Cobertura baixa</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-surface-container border border-amber-400 flex items-center justify-center text-[9px] font-black text-amber-400">!</span>
-          <span className="text-[10px] text-on-surface-variant font-bold">Alerta CLT</span>
+          <span className="w-4 h-4 rounded bg-surface-container border border-amber-400 flex items-center justify-center text-[10px] font-black text-amber-400">!</span>
+          <span className="text-[11px] text-on-surface-variant font-bold">Alerta CLT</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-error-container border border-error/30 flex items-center justify-center text-[9px] font-black text-error animate-pulse"><span className="material-symbols-outlined text-[10px]">warning</span></span>
-          <span className="text-[10px] text-on-surface-variant font-bold">Gargalo de Demanda</span>
+          <span className="w-4 h-4 rounded bg-error-container border border-error/30 flex items-center justify-center text-[10px] font-black text-error animate-pulse"><span className="material-symbols-outlined text-[11px]">warning</span></span>
+          <span className="text-[11px] text-on-surface-variant font-bold">Gargalo de Demanda</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-orange-100 border border-orange-300 flex items-center justify-center text-[9px] font-black text-orange-800"><span className="material-symbols-outlined text-[10px]">health_and_safety</span></span>
-          <span className="text-[10px] text-on-surface-variant font-bold">Sem Hab. Vital</span>
+          <span className="w-4 h-4 rounded bg-orange-100 border border-orange-300 flex items-center justify-center text-[10px] font-black text-orange-800"><span className="material-symbols-outlined text-[11px]">health_and_safety</span></span>
+          <span className="text-[11px] text-on-surface-variant font-bold">Sem Hab. Vital</span>
         </div>
       </div>
 
@@ -648,37 +652,29 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
           style={{ top: quickMenu.y + 8, left: quickMenu.x - 40 }}
         >
           <div className="border-b border-outline-variant/20 pb-2 mb-1 px-1">
-            <p className="text-[10px] font-bold text-primary uppercase tracking-widest leading-tight">
+            <p className="text-[11px] font-bold text-primary uppercase tracking-widest leading-tight">
               {employees.find((e) => e.id === quickMenu.employeeId)?.name?.split(' ')[0]}
             </p>
-            <p className="text-[9px] text-on-surface-variant mt-0.5">
+            <p className="text-[10px] text-on-surface-variant mt-0.5">
               {quickMenu.day.split('-').reverse().join('/')}
             </p>
           </div>
-          <div className="flex items-center gap-1 w-full justify-between">
+          {/* Turnos padrão (Regras e Turnos) + folga; rótulo curto, nome e horário no title */}
+          <div className="grid grid-cols-4 gap-1 w-full">
             {[
-              { label: 'M', tipo: 'trabalho' as const, turno: '06:00-14:00' },
-              { label: 'T', tipo: 'trabalho' as const, turno: '14:00-22:00' },
-              { label: 'N', tipo: 'trabalho' as const, turno: '22:00-06:00' },
-              { label: 'F', tipo: 'folga' as const, turno: undefined },
+              ...turnos.map((t) => ({ chave: t.id, label: t.nome.slice(0, 3), tipo: 'trabalho' as const, turno: `${t.inicio}-${t.fim}`, titulo: `${t.nome} (${t.inicio}-${t.fim})` })),
+              { chave: 'folga', label: 'Folga', tipo: 'folga' as const, turno: undefined, titulo: 'Marcar Folga' },
             ].map((option) => (
               <button
-                key={option.label}
+                key={option.chave}
                 type="button"
                 onClick={() => {
                   onQuickSetDay?.(quickMenu.employeeId, quickMenu.day, option.tipo, option.turno);
                   setQuickMenu(null);
                 }}
-                className="w-8 h-8 flex-1 rounded-lg border border-outline-variant/20 bg-surface-container-low text-[11px] font-bold text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors"
-                title={
-                  option.label === 'M'
-                    ? 'Manhã (06:00-14:00)'
-                    : option.label === 'T'
-                      ? 'Tarde (14:00-22:00)'
-                      : option.label === 'N'
-                        ? 'Noite (22:00-06:00)'
-                        : 'Marcar Folga'
-                }
+                className="h-8 px-1 rounded-lg border border-outline-variant/20 bg-surface-container-low text-[11px] font-bold text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors truncate"
+                title={option.titulo}
+                aria-label={option.titulo}
               >
                 {option.label}
               </button>

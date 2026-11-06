@@ -5,13 +5,16 @@ import { Appointment, Client, Employee, Service, ServiceEligibilityMode } from '
 import { getDuration } from '../utils/appointmentCore';
 import { AnamneseForm, AnamneseData, initialAnamnese, formatAnamnese } from '../../../components/AnamneseForm';
 import { AppointmentScheduleFields } from '../../../components/AppointmentScheduleFields';
-import { AppointmentModalShell } from '../../../components/AppointmentModalShell';
-import { formatAnamneseStorage, parseClientObservation } from '../../../utils/anamneseUtils';
+import { ModalFormulario } from '../../../components/ModalFormulario';
+import { formatAnamneseStorage, hasAnamnese, parseClientObservation } from '../../../utils/anamneseUtils';
+import { AvisoCliente } from '../../../components/AvisoCliente';
+import { MENSAGEM_ANAMNESE_OBRIGATORIA } from '@shared/anamnese';
+import { useAuth } from '../../../AuthContext';
 import { formatPhone, formatCpf, isTeamMember } from '../../../utils/formatters';
 import { useFormDraft } from '../../../hooks/useFormDraft';
 import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
-import { isApiError } from '../../../api';
+import { isApiError, useCompanyConfig } from '../../../api';
 
 const normalizeSearch = normalizarTexto;
 
@@ -293,6 +296,12 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     setActiveClientIndex(filteredClients.length > 0 ? 0 : -1);
   }, [filteredClients, isClientSearchOpen]);
 
+  // Ficha: a do cadastro (a API diz se existe, mesmo para quem não vê o conteúdo) ou a preenchida agora
+  const { token } = useAuth();
+  const exigirAnamnese = useCompanyConfig(token).data?.exigirAnamnese === true;
+  const clienteEscolhido = clientMode === 'search' ? clients.find((c) => c.id === selectedClientId) : undefined;
+  const clienteTemFicha = Boolean(clienteEscolhido?.temAnamnese) || hasAnamnese(anamneseData);
+
   const selectClient = (client: Client) => {
     const parsed = parseClientObservation(client.observacao);
     // CPF só do próprio cadastro: buscar por nome no histórico misturava homônimos
@@ -310,6 +319,17 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   };
 
   const handleClientSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Esc fecha primeiro a lista (ou o aviso "Nenhum cliente encontrado") que estiver na tela; sem nada aberto,
+    // o Esc segue para o modal (useModal ignora o evento só quando ele foi consumido aqui)
+    if (e.key === 'Escape') {
+      const listaVisivel = isClientSearchOpen && (filteredClients.length > 0 || clientSearchTerm.trim().length >= 2);
+      if (listaVisivel) {
+        e.preventDefault();
+        setIsClientSearchOpen(false);
+      }
+      return;
+    }
+
     if (!isClientSearchOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       setIsClientSearchOpen(true);
       return;
@@ -332,12 +352,6 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     if (e.key === 'Enter' && isClientSearchOpen && activeClientIndex >= 0) {
       e.preventDefault();
       selectClient(filteredClients[activeClientIndex]);
-      return;
-    }
-
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      setIsClientSearchOpen(false);
     }
   };
 
@@ -412,6 +426,12 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       return;
     }
 
+    if (exigirAnamnese && !clienteTemFicha) {
+      setErrorMessage(MENSAGEM_ANAMNESE_OBRIGATORIA);
+      setShowAnamnese(true);
+      return;
+    }
+
     const finalDetails = showAnamnese ? `${bookDetails}${formatAnamnese(anamneseData)}`.trim() : bookDetails;
     const payloadObservation = formatAnamneseStorage(bookClientObservation, anamneseData);
 
@@ -468,7 +488,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
   return (
     <>
-      <AppointmentModalShell
+      <ModalFormulario
         title="Novo Agendamento"
         onClose={handleClose}
         hasUnsavedChanges={hasUnsavedChanges}
@@ -483,7 +503,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
             <div className="flex items-start gap-2">
               <span className="material-symbols-outlined text-[16px] text-error mt-0.5">event_busy</span>
               <div>
-                <p className="font-bold text-error uppercase tracking-[0.12em] text-[10px]">Horário indisponível</p>
+                <p className="font-bold text-error uppercase tracking-[0.12em] text-[11px]">Horário indisponível</p>
                 <p className="text-on-surface-variant mt-1">{conflictMessage}</p>
                 <p className="text-on-surface-variant mt-1">Dica: escolha outro horário ou atualize o colaborador para confirmar os slots livres.</p>
               </div>
@@ -492,19 +512,19 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
         ) : undefined}
       >
         <div className="flex items-center justify-between gap-3">
-          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Modo do cliente</span>
+          <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Modo do cliente</span>
           <div className="inline-flex rounded-xl bg-surface-container p-1 border border-outline-variant/20">
             <button
               type="button"
               onClick={() => switchClientMode('search')}
-              className={`px-3 py-2 rounded-lg text-[10px] sm:text-xs font-bold uppercase tracking-widest transition-colors ${clientMode === 'search' ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:text-primary'}`}
+              className={`px-3 py-2 rounded-lg text-[11px] sm:text-xs font-bold uppercase tracking-widest transition-colors ${clientMode === 'search' ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:text-primary'}`}
             >
               Buscar Cliente
             </button>
             <button
               type="button"
               onClick={() => switchClientMode('new')}
-              className={`px-3 py-2 rounded-lg text-[10px] sm:text-xs font-bold uppercase tracking-widest transition-colors ${clientMode === 'new' ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:text-primary'}`}
+              className={`px-3 py-2 rounded-lg text-[11px] sm:text-xs font-bold uppercase tracking-widest transition-colors ${clientMode === 'new' ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:text-primary'}`}
             >
               Novo Cliente
             </button>
@@ -514,7 +534,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {clientMode === 'search' && (
             <div ref={clientSearchWrapperRef}>
-              <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Buscar Cliente</label>
+              <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Buscar Cliente</label>
               <div className="relative">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline-variant text-[18px]">search</span>
                 <input
@@ -540,13 +560,13 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
                       setSelectedClientId(null);
                       setIsClientSearchOpen(false);
                     }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase font-bold tracking-widest text-on-surface-variant hover:text-primary"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] uppercase font-bold tracking-widest text-on-surface-variant hover:text-primary"
                   >
                     Limpar
                   </button>
                 )}
               </div>
-              <p className="mt-1 text-[10px] text-on-surface-variant">Digite pelo menos 2 caracteres para buscar.</p>
+              <p className="mt-1 text-[11px] text-on-surface-variant">Digite pelo menos 2 caracteres para buscar.</p>
               {isClientSearchOpen && filteredClients.length > 0 && (
                 <div className="mt-2 max-h-44 overflow-y-auto rounded-xl border border-outline-variant/20 bg-surface-container-low custom-scrollbar shadow-sm">
                   {filteredClients.map((c, index) => (
@@ -560,12 +580,12 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
                       className={`w-full text-left px-3 py-2 transition-colors border-b last:border-b-0 border-outline-variant/10 ${(selectedClientId === c.id || index === activeClientIndex) ? 'bg-primary/10' : 'hover:bg-primary/10'}`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-bold text-on-surface truncate">{c.nome}{c.codigo ? <span className="ml-1 font-mono text-on-surface-variant">#{c.codigo}</span> : null}</p>
+                        <p className="text-xs font-bold text-on-surface truncate">{c.nome}{c.codigo ? <span className="ml-1 font-mono text-on-surface-variant">#{c.codigo}</span> : null}<AvisoCliente semFicha={c.temAnamnese === false} /></p>
                         {selectedClientId === c.id && (
-                          <span className="text-[9px] font-bold uppercase tracking-widest text-primary bg-primary/10 px-2 py-0.5 rounded-full">Selecionado</span>
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-primary bg-primary/10 px-2 py-0.5 rounded-full">Selecionado</span>
                         )}
                       </div>
-                      <p className="text-[10px] text-on-surface-variant mt-0.5 truncate">
+                      <p className="text-[11px] text-on-surface-variant mt-0.5 truncate">
                         {c.telefone ? formatPhone(c.telefone) : 'Sem telefone'}{c.cpf ? ` · CPF ${formatCpf(c.cpf)}` : ''}
                       </p>
                     </button>
@@ -581,7 +601,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
           )}
           {clientMode === 'new' ? (
             <div>
-              <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Nome do Cliente</label>
+              <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Nome do Cliente</label>
               <input
                 required
                 type="text"
@@ -590,24 +610,25 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
                 className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm"
                 placeholder="Nome completo"
               />
+              {bookName.trim() && <p className="mt-1"><AvisoCliente naoCadastrado semFicha={!hasAnamnese(anamneseData)} /></p>}
             </div>
           ) : (
             <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Cliente Selecionado</p>
-                <p className="text-sm font-bold text-on-surface truncate">{bookName || 'Nenhum cliente selecionado'}</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Cliente Selecionado</p>
+                <p className="text-sm font-bold text-on-surface truncate">{bookName || 'Nenhum cliente selecionado'}{selectedClientId && <AvisoCliente semFicha={!clienteTemFicha} />}</p>
               </div>
-              {selectedClientId && <span className="text-[10px] text-primary font-bold uppercase tracking-widest">ok</span>}
+              {selectedClientId && <span className="text-[11px] text-primary font-bold uppercase tracking-widest">ok</span>}
             </div>
           )}
           {canShowBookingDetails && (
             <>
               <div>
-                <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Telefone</label>
+                <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Telefone</label>
                 <input type="text" value={bookPhone} onChange={e => setBookPhone(formatPhone(e.target.value))} maxLength={15} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm" placeholder="(00) 00000-0000" />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">CPF</label>
+                <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">CPF</label>
                 <input type="text" value={bookCpf} onChange={e => setBookCpf(formatCpf(e.target.value))} maxLength={14} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm" placeholder="000.000.000-00" />
               </div>
             </>
@@ -651,13 +672,13 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
             detailsLabel="Observações"
             detailsPlaceholder="Ex: Preferências do cliente..."
             detailsAction={(
-              <button type="button" onClick={() => setShowAnamnese(true)} className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors bg-surface-container text-on-surface-variant hover:bg-surface-container-high">
-                + Ficha do Cliente
+              <button type="button" onClick={() => setShowAnamnese(true)} className={`text-[11px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors ${exigirAnamnese && !clienteTemFicha ? 'bg-error/10 text-error hover:bg-error/20' : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'}`}>
+                {exigirAnamnese && !clienteTemFicha ? '+ Ficha do Cliente (obrigatória)' : '+ Ficha do Cliente'}
               </button>
             )}
           />
         )}
-      </AppointmentModalShell>
+      </ModalFormulario>
       {showAnamnese && <AnamneseForm data={anamneseData} onChange={setAnamneseData} onClose={() => setShowAnamnese(false)} />}
     </>
   );

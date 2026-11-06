@@ -1,6 +1,6 @@
 // Listas que o aviso "db_updated" pode mandar recarregar. Os valores são as queryKeys do React Query no frontend:
 // mudar um nome aqui muda nos dois lados ao mesmo tempo.
-export const ESCOPOS_MUDANCA = ['appointments', 'employees', 'services', 'clients', 'scale-overrides', 'turno-swaps'] as const;
+export const ESCOPOS_MUDANCA = ['appointments', 'employees', 'services', 'clients', 'scale-overrides', 'turno-swaps', 'turnos'] as const;
 export type EscopoMudanca = (typeof ESCOPOS_MUDANCA)[number];
 
 export const ehEscopoMudanca = (valor: unknown): valor is EscopoMudanca =>
@@ -19,6 +19,8 @@ export const ESCOPOS = {
   equipe: ['employees', 'appointments'],
   // Override, troca e replicação de escala mexem na escala e nos dados do profissional
   escala: ['employees', 'scale-overrides', 'turno-swaps'],
+  // Turnos padrão só mudam as opções do editor de escala
+  turnos: ['turnos'],
   // Manutenção periódica cancela reservas vencidas e marca não comparecimentos
   manutencao: ['appointments'],
 } as const satisfies Record<string, readonly EscopoMudanca[]>;

@@ -57,7 +57,7 @@ export function AppointmentScheduleFields({
     <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
-          <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Data</label>
+          <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Data</label>
           <input
             required
             type="date"
@@ -68,7 +68,7 @@ export function AppointmentScheduleFields({
           />
         </div>
         <div>
-          <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Horário</label>
+          <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Horário</label>
           <input
             required
             type="time"
@@ -81,7 +81,7 @@ export function AppointmentScheduleFields({
           />
         </div>
         <div className="md:col-span-1">
-          <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Profissional</label>
+          <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Profissional</label>
           <select
             required
             value={employeeId}
@@ -95,13 +95,13 @@ export function AppointmentScheduleFields({
             ))}
           </select>
           {employeeHelperText && (
-            <p className="mt-2 text-[10px] text-on-surface-variant">{employeeHelperText}</p>
+            <p className="mt-2 text-[11px] text-on-surface-variant">{employeeHelperText}</p>
           )}
         </div>
       </div>
 
       <div>
-        <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Serviços</label>
+        <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Serviços</label>
         {showServiceSearch && (
           <input
             type="text"
@@ -129,9 +129,9 @@ export function AppointmentScheduleFields({
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className={`text-xs font-bold leading-tight ${isSelected ? 'text-primary' : 'text-on-surface'}`}>{service.nome}</span>
-                  <span className="text-[9px] text-on-surface-variant uppercase tracking-widest">{isSelected ? 'Selecionado' : 'Toque para incluir'}</span>
+                  <span className="text-[10px] text-on-surface-variant uppercase tracking-widest">{isSelected ? 'Selecionado' : 'Toque para incluir'}</span>
                 </div>
-                {service.descricao && <p className="text-[10px] text-on-surface-variant mt-1 line-clamp-1">{service.descricao}</p>}
+                {service.descricao && <p className="text-[11px] text-on-surface-variant mt-1 line-clamp-1">{service.descricao}</p>}
               </button>
             );
           })}
@@ -140,7 +140,7 @@ export function AppointmentScheduleFields({
 
       <div className="border-t border-outline-variant/20 pt-4 mt-4">
         <div className="flex justify-between items-center mb-2">
-          <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase">{detailsLabel}</label>
+          <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase">{detailsLabel}</label>
           {detailsAction}
         </div>
         <textarea

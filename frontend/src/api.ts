@@ -764,6 +764,36 @@ export const useReplicateScaleDays = (token: string | null) => {
 // =======================
 // SERVIÇOS
 // =======================
+// =======================
+// TURNOS PADRÃO DA ESCALA
+// =======================
+export interface Turno { id: string; nome: string; inicio: string; fim: string }
+
+export const useTurnos = (token: string | null) => useQuery({
+  queryKey: ['turnos'],
+  queryFn: async () => {
+    const turnos = await fetchApi('/turnos', token);
+    return Array.isArray(turnos) ? (turnos as Turno[]) : [];
+  },
+  enabled: !!token,
+});
+
+export const useAddTurno = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Omit<Turno, 'id'>) => fetchApi('/turnos', token, { method: 'POST', body: JSON.stringify(data) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['turnos'] }),
+  });
+};
+
+export const useDeleteTurno = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => fetchApi(`/turnos/${id}`, token, { method: 'DELETE' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['turnos'] }),
+  });
+};
+
 export const useServices = (token: string | null) => useQuery({
   queryKey: ['services'],
   queryFn: async () => {
@@ -805,6 +835,27 @@ export const useClients = (token: string | null) => useQuery({
   queryFn: () => fetchApi('/clientes', token),
   enabled: !!token,
 });
+
+export type NovoCliente = { nome: string; telefone?: string; cpf?: string; email?: string; observacao?: string };
+export type PreviaImportacao = { total: number; validos: number; erros: { linha: number; mensagem: string }[]; ignoradas?: number; importados?: number };
+
+export const useCreateClient = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: NovoCliente) => fetchApi('/clientes', token, { method: 'POST', body: JSON.stringify(data) }) as Promise<Client>,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['clients'] }),
+  });
+};
+
+// confirmar=false só valida (prévia); confirmar=true grava tudo ou nada
+export const useImportClients = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ linhas, confirmar }: { linhas: NovoCliente[] | Record<string, string>[]; confirmar: boolean }) =>
+      fetchApi('/clientes/importar', token, { method: 'POST', body: JSON.stringify({ linhas, confirmar }) }) as Promise<PreviaImportacao>,
+    onSuccess: (_resultado, { confirmar }) => { if (confirmar) queryClient.invalidateQueries({ queryKey: ['clients'] }); },
+  });
+};
 
 export const useEditClient = (token: string | null) => {
   const queryClient = useQueryClient();

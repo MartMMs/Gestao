@@ -151,27 +151,27 @@ export function StepCheckout({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-b border-outline-variant/15 py-4 text-xs">
             <div>
-              <span className="text-outline-variant uppercase text-[10px] font-bold block">Produtos / Serviços</span>
+              <span className="text-outline-variant uppercase text-[11px] font-bold block">Produtos / Serviços</span>
               <span className="font-bold text-on-surface text-sm">{reservation.servicoNome} ({reservation.duracao} min)</span>
             </div>
             <div>
-              <span className="text-outline-variant uppercase text-[10px] font-bold block">Data & Horário</span>
+              <span className="text-outline-variant uppercase text-[11px] font-bold block">Data & Horário</span>
               <span className="font-bold text-primary text-sm">{reservation.data} às {reservation.horario}</span>
             </div>
             <div>
-              <span className="text-outline-variant uppercase text-[10px] font-bold block">Espaço / Sala</span>
+              <span className="text-outline-variant uppercase text-[11px] font-bold block">Espaço / Sala</span>
               <span className="font-bold text-on-surface">{reservation.salaNome}</span>
             </div>
             <div>
-              <span className="text-outline-variant uppercase text-[10px] font-bold block">Profissional Responsável</span>
+              <span className="text-outline-variant uppercase text-[11px] font-bold block">Profissional Responsável</span>
               <span className="font-bold text-on-surface">{reservation.terapeutaNome}</span>
             </div>
             <div>
-              <span className="text-outline-variant uppercase text-[10px] font-bold block">Cliente</span>
+              <span className="text-outline-variant uppercase text-[11px] font-bold block">Cliente</span>
               <span className="font-bold text-on-surface">{clientData.nome} ({clientData.telefone})</span>
             </div>
             <div>
-              <span className="text-outline-variant uppercase text-[10px] font-bold block">Valor Total a Pagar na Recepção</span>
+              <span className="text-outline-variant uppercase text-[11px] font-bold block">Valor Total a Pagar na Recepção</span>
               <span className="font-bold text-emerald-600 text-base">{formatarReais(reservation.valorTotal)}</span>
             </div>
           </div>
@@ -343,7 +343,7 @@ export function StepCheckout({
                   fill="currentColor"
                 />
               </svg>
-              <span className="text-[9px] font-bold uppercase tracking-wider text-primary mt-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-primary mt-1">
                 PIX BACEN
               </span>
             </div>

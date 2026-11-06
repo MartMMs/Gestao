@@ -1,5 +1,5 @@
 import { Router, Request } from 'express';
-import { Prisma } from '@prisma/client';
+import { Prisma, type Cliente } from '@prisma/client';
 import { prisma } from '../db';
 import { getUsuario, usuarioEhSupervisor, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { HttpError, ipDoCliente, responderErro, type Notificar } from '../lib/http';
@@ -8,6 +8,9 @@ import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, mensagemNomeDuplicado, trav
 import { ORIGEM_COLABORADOR, ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN, clientesComAcessoSaude, podeVerSaude, prepararAgendamento } from '../lib/privacidade';
 import { atendimentoSobrepostoDoCliente, validarDisponibilidadeProfissional } from '../services/agendaService';
 import { buscarServicosPorNome } from '../services/servicoService';
+import { erroNomeCliente, limparTexto } from '../../shared/clientes';
+import { getEmpresaConfig } from '../services/configService';
+import { CODIGO_ANAMNESE_OBRIGATORIA, MARCADOR_ANAMNESE, MENSAGEM_ANAMNESE_OBRIGATORIA, MENSAGEM_FICHA_TOTEM_RESERVADA, forjaFichaDoTotem, temFichaAnamnese } from '../../shared/anamnese';
 import { comissaoDosServicos, mesmosServicos, recalcularValores, valorDosServicos } from '../lib/valores';
 import { lerDesde } from '../lib/periodo';
 import { registrarAuditoria } from '../lib/auditoria';
@@ -131,7 +134,7 @@ const resolverCliente = async (
   { clienteAtualId, acessoSaude }: { clienteAtualId?: string; acessoSaude: Set<string> },
 ) => {
   const supervisor = usuarioEhSupervisor(req);
-  const nome = typeof dados.clientName === 'string' ? dados.clientName.trim() : '';
+  const nome = limparTexto(dados.clientName);
   const telefone = typeof dados.contact === 'string' && dados.contact !== SEM_CONTATO && !valorMascarado(dados.contact)
     ? normalizarTelefone(dados.contact) || undefined
     : undefined;
@@ -142,6 +145,10 @@ const resolverCliente = async (
   }
   if (typeof dados.cpf === 'string' && dados.cpf.trim() && !valorMascarado(dados.cpf) && !cpf) throw new HttpError(400, MENSAGEM_CPF_INVALIDO);
   const observacao = typeof dados.clientObservation === 'string' ? dados.clientObservation.slice(0, LIMITE_OBSERVACAO) : undefined;
+  // Conferido contra a ficha gravada do cliente escolhido (ou vazia, para cliente novo) antes de qualquer gravação
+  const recusarFichaForjada = (atual: string | null | undefined) => {
+    if (forjaFichaDoTotem(observacao, atual)) throw new HttpError(400, MENSAGEM_FICHA_TOTEM_RESERVADA);
+  };
 
   // Telefone/CPF só são validados quando serão gravados (cliente novo ou edição por supervisor)
   const validarContato = () => {
@@ -202,6 +209,9 @@ const resolverCliente = async (
     }
     validarContato();
     if (nome.length < 2) throw new HttpError(400, 'Informe o nome do cliente.');
+    // Cliente novo: mesma regra do cadastro (sem HTML nem fórmula de planilha no nome)
+    const erroNome = erroNomeCliente(nome);
+    if (erroNome) throw new HttpError(400, erroNome);
     if (normalizarNome(nome) === normalizarNome(NOME_CLIENTE_REMOVIDO)) throw new HttpError(400, 'Este nome é reservado para cadastros excluídos. Informe o nome do cliente.');
     const homonimo = await clienteComMesmoNome(tx, nome);
     if (homonimo) {
@@ -210,11 +220,13 @@ const resolverCliente = async (
         ? mensagemNomeDuplicado(homonimo, 'marcacao')
         : 'Já existe um cadastro com esse nome. Peça à recepção para vincular o cliente ao atendimento.');
     }
+    recusarFichaForjada(null);
     return tx.cliente.create({
       data: { nome: nome.slice(0, 120), telefone: telefone ?? null, cpf: cpf ?? null, observacao: observacao || null },
     });
   }
 
+  recusarFichaForjada(cliente.observacao);
   const atualizacao: Prisma.ClienteUpdateInput = {};
   if (!editandoCadastro) {
     // Cliente escolhido na busca ou achado por CPF/telefone: o agendamento usa a ficha como está
@@ -226,6 +238,8 @@ const resolverCliente = async (
   // Edição do cliente do atendimento: alterações sem permissão viram erro explícito, nunca são descartadas em silêncio
   if (nome.length >= 2 && normalizarNome(nome) !== normalizarNome(cliente.nome)) {
     if (!gerenciaAgenda(req)) throw new HttpError(403, 'Apenas a recepção ou supervisores podem alterar o nome do cliente.');
+    const erroNome = erroNomeCliente(nome);
+    if (erroNome) throw new HttpError(400, erroNome);
     const homonimo = await clienteComMesmoNome(tx, nome, cliente.id);
     if (homonimo) {
       // Quem não gerencia a agenda não vê a carteira toda: a mensagem não confirma nome nem código
@@ -246,6 +260,36 @@ const resolverCliente = async (
   return Object.keys(atualizacao).length > 0
     ? tx.cliente.update({ where: { id: cliente.id }, data: atualizacao })
     : cliente;
+};
+
+/**
+ * Chave "exigir ficha de anamnese": o cliente do atendimento precisa ter ficha. A que falta pode vir no pedido
+ * (clientObservation) de quem marca, mesmo sem acesso à saúde (recepção): ela é JUNTADA à observação que o cadastro
+ * já tinha, nunca a substitui (quem não vê a observação não pode apagá-la), e a gravação vai para a auditoria sem o
+ * conteúdo. A ficha forjada do totem já foi recusada em resolverCliente.
+ */
+const garantirFichaAnamnese = async (tx: Prisma.TransactionClient, req: Request, cliente: Cliente, fichaEnviada: unknown) => {
+  if (temFichaAnamnese(cliente.observacao)) return cliente;
+  if (typeof fichaEnviada !== 'string' || !temFichaAnamnese(fichaEnviada)) {
+    throw new HttpError(400, MENSAGEM_ANAMNESE_OBRIGATORIA, CODIGO_ANAMNESE_OBRIGATORIA);
+  }
+  // Marcador sem ficha válida (JSON vazio ou quebrado) sai; o texto antes dele é a nota de quem tem acesso e fica
+  const anterior = cliente.observacao ?? '';
+  const i = anterior.indexOf(MARCADOR_ANAMNESE);
+  const nota = (i >= 0 ? anterior.slice(0, i) : anterior).trim();
+  const ficha = fichaEnviada.trim();
+  // A tela de quem já via a observação manda a nota junto: não repete
+  const observacao = nota && !ficha.startsWith(nota) ? `${nota}\n${ficha}` : ficha;
+  if (observacao.length > LIMITE_OBSERVACAO) throw new HttpError(400, 'A ficha de anamnese ficou grande demais. Resuma as observações.');
+  // Conferida no texto exato que vai ser gravado (a checagem de resolverCliente vê o texto cortado, que espaços no
+  // começo deixavam passar)
+  if (forjaFichaDoTotem(observacao, cliente.observacao)) throw new HttpError(400, MENSAGEM_FICHA_TOTEM_RESERVADA);
+  const atualizado = await tx.cliente.update({ where: { id: cliente.id }, data: { observacao } });
+  await registrarAuditoria(req, {
+    acao: 'cliente.anamnese', alvo: `Cliente #${cliente.codigo}`, tx,
+    antes: { fichaAnamnese: false }, depois: { fichaAnamnese: true },
+  });
+  return atualizado;
 };
 
 // Observações do agendamento (podem conter a anamnese): texto aparado e limitado; vazio vira null
@@ -308,6 +352,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
       const { data, horario } = lerDataHorario(req.body.date, req.body.time);
       const inicio = instanteNoFuso(data, horario);
       const acessoSaude = await clientesComAcessoSaude(req);
+      const { exigirAnamnese } = await getEmpresaConfig();
 
       const novo = await transacaoComTravas(async (tx) => {
         await travarAgenda(tx, colaboradorId);
@@ -319,7 +364,8 @@ export function createAgendamentosRouter(notificar: Notificar) {
         const indisponivel = await validarDisponibilidadeProfissional(tx, colaboradorId, inicio, servicos);
         if (indisponivel) throw new HttpError(indisponivel.status, indisponivel.erro);
 
-        const cliente = await resolverCliente(tx, req, req.body, { acessoSaude });
+        let cliente = await resolverCliente(tx, req, req.body, { acessoSaude });
+        if (exigirAnamnese) cliente = await garantirFichaAnamnese(tx, req, cliente, req.body.clientObservation);
         await conflitoDoCliente(tx, cliente.id, inicio, duracaoTotal(servicos));
         return tx.agendamento.create({
           data: {
@@ -358,6 +404,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
         return res.status(403).json({ erro: 'Apenas a recepção ou supervisores podem trocar o profissional do atendimento.' });
       }
 
+      const { exigirAnamnese } = await getEmpresaConfig();
       const atual = partesNoFuso(antigo.data);
       const mudouHorario = req.body.date !== undefined || req.body.time !== undefined;
       const { data, horario } = mudouHorario
@@ -440,6 +487,8 @@ export function createAgendamentosRouter(notificar: Notificar) {
         if (req.body.clientName !== undefined || req.body.clientId !== undefined) {
           const cliente = await resolverCliente(tx, req, req.body, { clienteAtualId: antigo.clienteId, acessoSaude });
           if (encerrado && cliente.id !== antigo.clienteId) throw new HttpError(409, 'Atendimento já encerrado: não dá para trocar o cliente.');
+          // Só na troca de cliente: atendimentos marcados antes da chave ligada continuam remarcáveis
+          if (exigirAnamnese && cliente.id !== antigo.clienteId) await garantirFichaAnamnese(tx, req, cliente, req.body.clientObservation);
           dados.clienteId = cliente.id;
           // Cliente trocado pelo próprio colaborador não libera a ficha de saúde (ver clientesComAcessoSaude)
           if (cliente.id !== antigo.clienteId && !gerenciaAgenda(req)) dados.reservaOrigem = ORIGEM_COLABORADOR;

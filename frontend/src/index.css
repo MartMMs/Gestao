@@ -33,7 +33,8 @@
   /* Text & Content ("On" Colors) */
   --color-on-background: #1C1917;
   --color-on-surface: #1C1917;
-  --color-on-surface-variant: #78716C;
+  /* stone-600: 7,0:1 sobre o fundo (o #78716C anterior dava 4,4:1, abaixo do mínimo AA de 4,5:1) */
+  --color-on-surface-variant: #57534E;
   --color-on-primary: #ffffff;
   --color-on-primary-container: #132107;
   --color-on-primary-fixed: #132107;
@@ -70,8 +71,6 @@
     font-family: var(--font-body);
     background-color: var(--color-background);
     color: var(--color-on-background);
-    background-image: radial-gradient(var(--color-surface-container-highest) 1px, transparent 1px);
-    background-size: 24px 24px;
   }
 
   /* 🌙 PALETA DO MODO ESCURO (Tailwind v4) */

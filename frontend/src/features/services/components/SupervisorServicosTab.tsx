@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { motion } from 'motion/react';
 import { Service, ServiceEligibilityMode } from '../../../types';
@@ -6,6 +6,10 @@ import { isApiError, useCompanyConfig, useToggleServiceActive } from '../../../a
 import { useAuth } from '../../../AuthContext';
 
 const CATEGORIAS_SUGERIDAS = ['Atendimento', 'Consulta', 'Avaliação', 'Procedimento', 'Pacote', 'Outros'];
+// Rótulo envolvendo o campo: o leitor de tela anuncia o nome de cada campo sem precisar de id
+const ROTULO = 'block text-xs font-bold text-on-surface-variant';
+const CAMPO = 'mt-1 w-full h-11 px-3 bg-surface-container-lowest border border-outline-variant/20 rounded-xl text-sm font-normal text-on-surface focus:ring-1 focus:ring-primary outline-none';
+const LEGENDA = 'text-sm font-bold text-on-surface mb-1';
 
 interface SupervisorServicosTabProps {
   services: Service[];
@@ -14,7 +18,7 @@ interface SupervisorServicosTabProps {
   setServiceSearchTerm: (value: string) => void;
   editingServiceId: string | null;
   cancelServiceEdit: () => void;
-  handleServiceSubmit: (e: React.FormEvent) => void;
+  handleServiceSubmit: (e: React.FormEvent) => void | Promise<void>;
   formatDuration: (minutes: number) => string;
   getEligibilitySummary: (service: Service) => string;
   onEditServiceCard: (service: Service) => void;
@@ -96,6 +100,28 @@ export function SupervisorServicosTab({
   setNewServiceDescription,
 }: SupervisorServicosTabProps) {
   const [servicoParaExcluir, setServicoParaExcluir] = useState<Service | null>(null);
+  // Clicar num serviço leva ao formulário (no celular ele fica abaixo da lista) já no campo nome
+  const formRef = useRef<HTMLElement>(null);
+  // Um envio por vez: o duplo clique em salvar mandava dois PUT/POST (o ref segura antes do próximo render)
+  const [salvandoServico, setSalvandoServico] = useState(false);
+  const salvandoRef = useRef(false);
+  const enviarServico = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (salvandoRef.current) return;
+    salvandoRef.current = true;
+    setSalvandoServico(true);
+    try {
+      await handleServiceSubmit(event);
+    } finally {
+      salvandoRef.current = false;
+      setSalvandoServico(false);
+    }
+  };
+  useEffect(() => {
+    if (!editingServiceId || !formRef.current) return;
+    formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    formRef.current.querySelector('input')?.focus({ preventScroll: true });
+  }, [editingServiceId]);
   const { token, currentUser } = useAuth();
   // Comissão é definida só pelo admin (o servidor recusa a alteração vinda de outro papel)
   const podeEditarComissao = currentUser?.role === 'admin';
@@ -134,6 +160,13 @@ export function SupervisorServicosTab({
       setExcluindo(false);
     }
   };
+
+  // Campo da regra "quem pode atender" (cargo, habilidade ou profissional); nenhum no modo livre
+  const regra = serviceEligibilityMode === 'livre' ? null : {
+    cargo: { rotulo: 'Cargos', valor: serviceAllowedCargosInput, alterar: setServiceAllowedCargosInput, opcoes: availableCargos.slice(0, 10), exemplo: 'Ex.: Atendente, Técnico' },
+    habilidade: { rotulo: 'Habilidades', valor: serviceAllowedSkillsInput, alterar: setServiceAllowedSkillsInput, opcoes: availableSkills.slice(0, 12), exemplo: 'Ex.: Drenagem, Microagulhamento' },
+    profissional: { rotulo: 'Profissionais', valor: serviceAllowedProfessionalsInput, alterar: setServiceAllowedProfessionalsInput, opcoes: availableProfessionals, exemplo: 'Ex.: Ana Luiza, Marcos' },
+  }[serviceEligibilityMode];
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
@@ -207,14 +240,14 @@ export function SupervisorServicosTab({
                   <div className="min-w-0 flex-1">
                     <div className="flex justify-between items-start gap-2">
                       <h4 className="font-headline text-lg text-on-surface truncate">{srv.nome}</h4>
-                      {srv.ativo === false && <span className="shrink-0 text-[9px] uppercase tracking-widest font-bold text-on-surface-variant bg-surface-container px-2 py-1 rounded-full">Fora de linha</span>}
-                      {srv.categoria && <span className="shrink-0 text-[9px] uppercase tracking-widest font-bold text-primary bg-primary/10 px-2 py-1 rounded-full">{srv.categoria}</span>}
+                      {srv.ativo === false && <span className="shrink-0 text-[10px] uppercase tracking-widest font-bold text-on-surface-variant bg-surface-container px-2 py-1 rounded-full">Fora de linha</span>}
+                      {srv.categoria && <span className="shrink-0 text-[10px] uppercase tracking-widest font-bold text-primary bg-primary/10 px-2 py-1 rounded-full">{srv.categoria}</span>}
                     </div>
                     <div className="flex flex-wrap gap-2 mt-2 text-sm text-on-surface-variant">
                       <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-1 rounded-lg text-xs">
                         <span className="material-symbols-outlined text-[14px]">schedule</span> 
                         {formatDuration(Number(srv.duracao || 60))}
-                        {srv.tempoHigienizacaoMin ? <span className="text-[10px] opacity-70 ml-1">+ {srv.tempoHigienizacaoMin}m prep</span> : ''}
+                        {srv.tempoHigienizacaoMin ? <span className="text-[11px] opacity-70 ml-1">+ {srv.tempoHigienizacaoMin}m prep</span> : ''}
                       </span>
                       <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-1 rounded-lg text-xs">
                         <span className="material-symbols-outlined text-[14px]">payments</span> R$ {Number(srv.preco).toFixed(2)}
@@ -224,7 +257,7 @@ export function SupervisorServicosTab({
                           <span className="material-symbols-outlined text-[14px]">percent</span> {srv.comissaoPercentual}%
                         </span>
                       )}
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-primary">
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-1 text-[11px] font-bold uppercase tracking-widest text-primary">
                         <span className="material-symbols-outlined text-[14px]">verified_user</span>
                         {eligibilityModeLabel}
                       </span>
@@ -234,7 +267,7 @@ export function SupervisorServicosTab({
                         {srv.descricao}
                       </p>
                     )}
-                    <p className="text-[10px] text-on-surface-variant mt-1 line-clamp-2">
+                    <p className="text-[11px] text-on-surface-variant mt-1 line-clamp-2">
                       {getEligibilitySummary(srv)}
                     </p>
                   </div>
@@ -259,158 +292,111 @@ export function SupervisorServicosTab({
         </div>
       </div>
 
-      <div className="xl:col-span-5 bg-surface-container-low p-8 rounded-3xl border border-outline-variant/20 h-fit sticky top-24">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-headline text-primary flex items-center gap-2"><span className="material-symbols-outlined">{editingServiceId ? 'edit' : 'add_circle'}</span> {editingServiceId ? 'Editar Serviço' : 'Adicionar Novo Serviço'}</h3>
-          {editingServiceId && <button onClick={cancelServiceEdit} className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant hover:text-on-surface transition-colors">Cancelar</button>}
-        </div>
-        <form onSubmit={handleServiceSubmit} className="space-y-4">
-          <div>
-            <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Ícone de Identificação</label>
-            <div className="flex gap-2 mb-4">
-              {serviceIcons.map(icon => (
-                <button key={icon} type="button" onClick={() => setNewServiceIcon(icon)} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${newServiceIcon === icon ? 'bg-primary text-on-primary shadow-md' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/20 hover:border-primary/50'}`}>
-                  <span className="material-symbols-outlined text-[20px]">{icon}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="md:col-span-2">
-              <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Nome do Tratamento</label>
-              <input required type="text" value={newServiceName} onChange={e => setNewServiceName(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all" placeholder="Ex: Avaliação inicial" />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Categoria do Serviço</label>
-              <input list="categorias-servico" maxLength={60} value={newServiceCategoria} onChange={e => setNewServiceCategoria(e.target.value)} placeholder="Escolha ou digite uma nova" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all text-on-surface" />
+      <section ref={formRef} aria-labelledby="form-servico-titulo" className="xl:col-span-5 bg-surface-container-low p-6 rounded-3xl border border-outline-variant/20 h-fit xl:sticky xl:top-24">
+        <h3 id="form-servico-titulo" className="text-lg font-headline text-on-surface mb-5">{editingServiceId ? 'Editar serviço' : 'Novo serviço'}</h3>
+        <form onSubmit={enviarServico} className="space-y-6">
+          <fieldset className="space-y-4">
+            <legend className={LEGENDA}>1. Dados básicos</legend>
+            <label className={ROTULO}>
+              Nome <span className="text-error" aria-hidden="true">*</span>
+              <input required type="text" value={newServiceName} onChange={e => setNewServiceName(e.target.value)} className={CAMPO} placeholder="Ex.: Avaliação inicial" />
+            </label>
+            <label className={ROTULO}>
+              Categoria
+              <input list="categorias-servico" maxLength={60} value={newServiceCategoria} onChange={e => setNewServiceCategoria(e.target.value)} placeholder="Escolha ou digite uma nova" className={CAMPO} />
               <datalist id="categorias-servico">
                 {categorias.map((c) => <option key={c} value={c} />)}
               </datalist>
-            </div>
+            </label>
             <div>
-              <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Preço (R$)</label>
-              <input required type="number" step="0.01" min="0" value={newServicePrice} onChange={e => setNewServicePrice(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all" placeholder="Ex: 150.00" />
+              <p className={ROTULO} id="icone-servico">Ícone</p>
+              <div role="radiogroup" aria-labelledby="icone-servico" className="mt-1 flex flex-wrap gap-2">
+                {serviceIcons.map(icon => (
+                  <button key={icon} type="button" role="radio" aria-checked={newServiceIcon === icon} aria-label={icon} onClick={() => setNewServiceIcon(icon)} className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${newServiceIcon === icon ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/20 hover:border-primary/50'}`}>
+                    <span className="material-symbols-outlined text-[20px]" aria-hidden="true">{icon}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            {usarComissao && <div>
-              <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Comissão (%) - Opcional</label>
-              <input type="number" step="0.1" min="0" max="100" value={newServiceComissao} onChange={e => setNewServiceComissao(e.target.value)} disabled={!podeEditarComissao} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all disabled:opacity-60" placeholder={podeEditarComissao ? 'Deixe em branco se não houver' : 'Sem comissão'} />
-              {!podeEditarComissao && <p className="text-[11px] text-on-surface-variant mt-1">Definida pelo administrador.</p>}
-            </div>}
-            <div>
-              <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Duração (Min)</label>
-              <input required type="number" min="5" step="5" value={newServiceDuration} onChange={e => setNewServiceDuration(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all" placeholder="Ex: 60" />
+            <label className={ROTULO}>
+              Descrição <span className="font-normal text-on-surface-variant">(opcional: aparece no totem)</span>
+              <textarea value={newServiceDescription} onChange={e => setNewServiceDescription(e.target.value)} rows={2} className={`${CAMPO} h-auto py-2 resize-none`} placeholder="Ex.: Utiliza óleos essenciais e toalhas quentes" />
+            </label>
+          </fieldset>
+
+          <fieldset className="space-y-4">
+            <legend className={LEGENDA}>2. Preço e tempo</legend>
+            <div className="grid grid-cols-2 gap-3">
+              <label className={ROTULO}>
+                Preço (R$) <span className="text-error" aria-hidden="true">*</span>
+                <input required type="number" inputMode="decimal" step="0.01" min="0" value={newServicePrice} onChange={e => setNewServicePrice(e.target.value)} className={CAMPO} placeholder="150,00" />
+              </label>
+              {usarComissao && (
+                <label className={ROTULO}>
+                  Comissão (%)
+                  <input type="number" inputMode="decimal" step="0.1" min="0" max="100" value={newServiceComissao} onChange={e => setNewServiceComissao(e.target.value)} disabled={!podeEditarComissao} className={`${CAMPO} disabled:opacity-60`} placeholder={podeEditarComissao ? 'Sem comissão' : '—'} />
+                  {!podeEditarComissao && <span className="block mt-1 text-[11px] font-normal text-on-surface-variant">Definida pelo administrador.</span>}
+                </label>
+              )}
+              <label className={ROTULO}>
+                Duração (min) <span className="text-error" aria-hidden="true">*</span>
+                <input required type="number" inputMode="numeric" min="5" step="5" value={newServiceDuration} onChange={e => setNewServiceDuration(e.target.value)} className={CAMPO} placeholder="60" />
+              </label>
+              <label className={ROTULO}>
+                Preparo da sala (min)
+                <input type="number" inputMode="numeric" min="0" step="5" value={newServiceTempoHigienizacao} onChange={e => setNewServiceTempoHigienizacao(e.target.value)} className={CAMPO} placeholder="0" />
+              </label>
             </div>
-            <div>
-              <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Tempo de Preparo (Min)</label>
-              <input type="number" min="0" step="5" value={newServiceTempoHigienizacao} onChange={e => setNewServiceTempoHigienizacao(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all" placeholder="Ex: 15" title="Tempo necessário para preparo e higienização da sala antes ou depois" />
-            </div>
-          </div>
-          <div className="space-y-3 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest p-4">
-            <div>
-              <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Elegibilidade do Serviço</label>
-              <select
-                value={serviceEligibilityMode}
-                onChange={(e) => setServiceEligibilityMode(e.target.value as ServiceEligibilityMode)}
-                className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm"
-              >
-                <option value="livre">Livre (qualquer profissional)</option>
-                <option value="cargo">Restrito por cargo</option>
-                <option value="habilidade">Restrito por habilidade</option>
-                <option value="profissional">Restrito por profissional específico</option>
-              </select>
-              <p className="text-[10px] text-on-surface-variant mt-2">
-                Defina quem pode executar este serviço. No modo livre, todos os profissionais ficam disponíveis.
+            {Number(newServiceDuration) > 0 && (
+              <p className="text-xs text-on-surface-variant">
+                Ocupa a agenda por <strong className="text-on-surface">{formatDuration(Number(newServiceDuration) + (Number(newServiceTempoHigienizacao) || 0))}</strong>
+                {Number(newServiceTempoHigienizacao) > 0 ? ' (atendimento + preparo).' : '.'}
               </p>
-            </div>
+            )}
+          </fieldset>
 
-            {serviceEligibilityMode === 'cargo' && (
+          <fieldset className="space-y-3">
+            <legend className={LEGENDA}>3. Quem pode atender</legend>
+            <label className={ROTULO}>
+              Regra
+              <select value={serviceEligibilityMode} onChange={(e) => setServiceEligibilityMode(e.target.value as ServiceEligibilityMode)} className={CAMPO}>
+                <option value="livre">Qualquer profissional</option>
+                <option value="cargo">Só alguns cargos</option>
+                <option value="habilidade">Só quem tem certas habilidades</option>
+                <option value="profissional">Só profissionais escolhidos</option>
+              </select>
+            </label>
+            {regra && (
               <div>
-                <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Cargos Permitidos</label>
-                <input
-                  type="text"
-                  value={serviceAllowedCargosInput}
-                  onChange={(e) => setServiceAllowedCargosInput(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm"
-                  placeholder="Ex: Atendente, Técnico, Consultor"
-                />
-                {availableCargos.length > 0 && (
+                <label className={ROTULO}>
+                  {regra.rotulo} <span className="font-normal text-on-surface-variant">(separados por vírgula)</span>
+                  <input type="text" value={regra.valor} onChange={(e) => regra.alterar(e.target.value)} className={CAMPO} placeholder={regra.exemplo} />
+                </label>
+                {regra.opcoes.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {availableCargos.slice(0, 10).map((cargo) => (
-                      <button
-                        key={cargo}
-                        type="button"
-                        onClick={() => setServiceAllowedCargosInput((prev) => appendRuleToken(prev, cargo))}
-                        className="text-[10px] px-2 py-1 rounded-full bg-primary/10 text-primary font-bold uppercase tracking-widest hover:bg-primary/20"
-                      >
-                        + {cargo}
+                    {regra.opcoes.map((opcao) => (
+                      <button key={opcao} type="button" onClick={() => regra.alterar((prev) => appendRuleToken(prev, opcao))} className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary font-bold hover:bg-primary/20">
+                        + {opcao}
                       </button>
                     ))}
                   </div>
                 )}
               </div>
             )}
+          </fieldset>
 
-            {serviceEligibilityMode === 'habilidade' && (
-              <div>
-                <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Habilidades Permitidas</label>
-                <input
-                  type="text"
-                  value={serviceAllowedSkillsInput}
-                  onChange={(e) => setServiceAllowedSkillsInput(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm"
-                  placeholder="Ex: Drenagem, Microagulhamento"
-                />
-                {availableSkills.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {availableSkills.slice(0, 12).map((skill) => (
-                      <button
-                        key={skill}
-                        type="button"
-                        onClick={() => setServiceAllowedSkillsInput((prev) => appendRuleToken(prev, skill))}
-                        className="text-[10px] px-2 py-1 rounded-full bg-secondary-container/60 text-on-secondary-container font-bold uppercase tracking-widest hover:bg-secondary-container"
-                      >
-                        + {skill}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+          <div className="flex gap-3">
+            {editingServiceId && (
+              <button type="button" onClick={cancelServiceEdit} className="flex-1 h-11 rounded-xl border border-outline-variant/30 text-sm font-bold text-on-surface hover:bg-surface-container">
+                Cancelar
+              </button>
             )}
-
-            {serviceEligibilityMode === 'profissional' && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
-                <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Profissionais Habilitados</label>
-                <input
-                  type="text"
-                  value={serviceAllowedProfessionalsInput}
-                  onChange={(e) => setServiceAllowedProfessionalsInput(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm"
-                  placeholder="Ex: Ana Luiza, Marcos"
-                />
-                {availableProfessionals.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {availableProfessionals.map((prof) => (
-                      <button
-                        key={prof}
-                        type="button"
-                        onClick={() => setServiceAllowedProfessionalsInput((prev) => appendRuleToken(prev, prof))}
-                        className="text-[10px] px-2 py-1 rounded-full bg-tertiary-container/60 text-on-tertiary-container font-bold uppercase tracking-widest hover:bg-tertiary-container"
-                      >
-                        + {prof.split(' ')[0]}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </motion.div>
-            )}
+            <button type="submit" disabled={salvandoServico} className="flex-1 h-11 bg-primary text-on-primary rounded-xl text-sm font-bold hover:bg-primary-dim disabled:opacity-60">
+              {salvandoServico ? 'Salvando...' : editingServiceId ? 'Salvar alterações' : 'Adicionar serviço'}
+            </button>
           </div>
-          <div>
-            <label className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Detalhes / Produtos Utilizados (Opcional)</label>
-            <textarea value={newServiceDescription} onChange={e => setNewServiceDescription(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm transition-all resize-none min-h-20" placeholder="Ex: Utiliza óleos essenciais relaxantes, pedras aquecidas e toalhas quentes..." />
-          </div>
-          <button type="submit" className="w-full mt-4 bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim transition-all active:scale-[0.98]">{editingServiceId ? 'Salvar Alterações' : 'Salvar Serviço'}</button>
         </form>
-      </div>
+      </section>
       <ConfirmDialog
         open={Boolean(servicoParaExcluir)}
         title={`Excluir o serviço ${servicoParaExcluir?.nome ?? ''}?`}

@@ -226,9 +226,9 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
                     <span className="material-symbols-outlined text-[20px]">{preset.icone}</span>
                   </div>
                   <h4 className="font-bold text-xs text-on-surface leading-tight mb-1">{preset.nome}</h4>
-                  <p className="text-[10px] text-on-surface-variant line-clamp-2">{preset.slogan}</p>
+                  <p className="text-[11px] text-on-surface-variant line-clamp-2">{preset.slogan}</p>
                 </div>
-                <div className="mt-3 pt-2 border-t border-outline-variant/15 text-[10px] text-primary font-bold">
+                <div className="mt-3 pt-2 border-t border-outline-variant/15 text-[11px] text-primary font-bold">
                   {preset.termoProfissional} · {preset.termoEspaco}
                 </div>
               </button>
@@ -425,13 +425,29 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
             </span>
           </label>
 
+          <label className="flex items-start gap-3 bg-surface-container-low border border-outline-variant/30 rounded-2xl p-4 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.exigirAnamnese === true}
+              onChange={(e) => setForm({ ...form, exigirAnamnese: e.target.checked })}
+              className="mt-1 accent-primary"
+            />
+            <span>
+              <span className="block text-sm font-bold text-on-surface">Exigir ficha de anamnese</span>
+              <span className="block text-xs text-on-surface-variant">
+                Ligado, não dá para cadastrar um cliente nem agendar para ele sem a ficha preenchida. O totem continua
+                agendando sem ficha; esses clientes aparecem com o aviso "Sem ficha" na lista e na agenda.
+              </span>
+            </span>
+          </label>
+
           {saveError && (
             <p role="alert" className="rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{saveError}</p>
           )}
 
           {/* Cartão de Pré-visualização do Header */}
           <div className="bg-surface-container-low border border-outline-variant/30 rounded-2xl p-5 space-y-3">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+            <span className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant/70">
               Pré-visualização no Cabeçalho
             </span>
             <div className="flex items-center gap-3 bg-surface-container-lowest p-3 rounded-xl border border-outline-variant/20">

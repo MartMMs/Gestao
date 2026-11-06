@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
+import { useModal } from '../hooks/useModal';
 
 export interface CltAlert {
   id: string;
@@ -16,6 +17,7 @@ interface AuditorModalProps {
 }
 
 export function AuditorModal({ open, alerts, onClose, onResolve }: AuditorModalProps) {
+  useModal(open, onClose);
   if (!open) return null;
 
   return (
@@ -26,6 +28,9 @@ export function AuditorModal({ open, alerts, onClose, onResolve }: AuditorModalP
       }}
     >
       <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Alertas do auditor"
         initial={{ opacity: 0, y: 20, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         className="bg-surface-container-lowest p-6 rounded-3xl shadow-2xl border border-outline-variant/20 w-full max-w-lg flex flex-col max-h-[85vh]"
@@ -58,7 +63,7 @@ export function AuditorModal({ open, alerts, onClose, onResolve }: AuditorModalP
                 <div key={alerta.id} className="bg-error/5 border border-error/20 rounded-2xl p-4">
                   <div className="flex justify-between items-start mb-2">
                     <h4 className="text-sm font-bold text-on-surface">{alerta.nome}</h4>
-                    <span className="bg-error text-white text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md shadow-sm">Urgente</span>
+                    <span className="bg-error text-white text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md shadow-sm">Urgente</span>
                   </div>
                   <ul className="space-y-2 mt-3">
                     {alerta.resumo.map((msg, idx) => (
@@ -83,7 +88,7 @@ export function AuditorModal({ open, alerts, onClose, onResolve }: AuditorModalP
         </div>
 
         <div className="mt-6 pt-4 border-t border-outline-variant/20 flex justify-between items-center">
-          <span className="text-[10px] text-on-surface-variant uppercase tracking-widest">Motor de validação ativo</span>
+          <span className="text-[11px] text-on-surface-variant uppercase tracking-widest">Motor de validação ativo</span>
           <button onClick={onClose} className="px-5 py-2.5 bg-surface-container hover:bg-surface-container-high rounded-xl text-xs font-bold text-on-surface uppercase tracking-wider transition-colors">
             Fechar
           </button>

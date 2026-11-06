@@ -53,7 +53,7 @@ function LegendaPeriodo() {
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2" aria-label="Legenda de cores">
       {(Object.keys(ESTADOS_PERIODO) as EstadoPeriodo[]).map((estado) => (
-        <span key={estado} className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">
+        <span key={estado} className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-on-surface-variant">
           <span className={`w-3 h-3 rounded-full ring-1 ring-on-surface/25 ${ESTADOS_PERIODO[estado].cor}`} />
           {ESTADOS_PERIODO[estado].rotulo}
         </span>
@@ -127,7 +127,7 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
       <div className="overflow-x-auto">
         <div className="grid grid-cols-7 gap-1 min-w-[700px]">
           {DIAS_SEMANA.map((d) => (
-            <span key={d} className="text-center text-[10px] font-bold uppercase tracking-widest text-outline py-1">{d}</span>
+            <span key={d} className="text-center text-[11px] font-bold uppercase tracking-widest text-on-surface-variant py-1">{d}</span>
           ))}
           {dias.map((dia) => {
             const lista = porDia.get(dia) ?? [];
@@ -145,10 +145,10 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
                   aria-label={`${Number(dia.slice(8))}: ${lista.length === 0 ? 'sem atendimentos' : `${lista.length} ${lista.length === 1 ? 'atendimento' : 'atendimentos'}`}. Abrir na grade`}
                 >
                   {/* Fora do mês só o número esmaece: os atendimentos continuam legíveis */}
-                  <span className={`text-xs font-bold ${dia === todayStr ? 'text-primary' : foraDoMes ? 'text-outline' : 'text-on-surface'}`}>{Number(dia.slice(8))}</span>
+                  <span className={`text-xs font-bold ${dia === todayStr ? 'text-primary' : foraDoMes ? 'text-on-surface-variant' : 'text-on-surface'}`}>{Number(dia.slice(8))}</span>
                   {/* Dia vazio fica em silêncio na tela ('Livre' sugeriria vaga em domingo ou feriado); o leitor de tela ouve pelo aria-label */}
                   {lista.length > 0 && (
-                    <span className="text-[10px] font-bold text-on-surface-variant" aria-hidden="true">
+                    <span className="text-[11px] font-bold text-on-surface-variant" aria-hidden="true">
                       {lista.length} {visao === 'semana' ? (lista.length === 1 ? 'atendimento' : 'atendimentos') : 'atend.'}
                     </span>
                   )}
@@ -166,19 +166,19 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
                     {visao === 'semana' ? (
                       // Semana: espaço para ler cliente e profissional sem abrir o atendimento
                       <span className="min-w-0">
-                        <span className="block text-[10px] font-bold tabular-nums text-on-surface-variant">{app.time} · {nomes.get(app.assignedEmployeeId) ?? ''}</span>
+                        <span className="block text-[11px] font-bold tabular-nums text-on-surface-variant">{app.time} · {nomes.get(app.assignedEmployeeId) ?? ''}</span>
                         <span className={`block text-[11px] leading-tight line-clamp-2 break-words ${app.status === 'completed' ? 'line-through text-on-surface-variant' : 'text-on-surface'}`}>{app.clientName}</span>
                       </span>
                     ) : (
                       <>
-                        <span className="text-[10px] font-bold tabular-nums text-on-surface-variant">{app.time}</span>
-                        <span className={`text-[10px] truncate ${app.status === 'completed' ? 'line-through text-on-surface-variant' : 'text-on-surface'}`}>{app.clientName}</span>
+                        <span className="text-[11px] font-bold tabular-nums text-on-surface-variant">{app.time}</span>
+                        <span className={`text-[11px] truncate ${app.status === 'completed' ? 'line-through text-on-surface-variant' : 'text-on-surface'}`}>{app.clientName}</span>
                       </>
                     )}
                   </button>
                 ))}
                 {lista.length > maxPorCelula && (
-                  <button type="button" onClick={() => onAbrirDia(dia)} className="text-[10px] font-bold text-primary text-left px-1.5">
+                  <button type="button" onClick={() => onAbrirDia(dia)} className="text-[11px] font-bold text-primary text-left px-1.5">
                     +{lista.length - maxPorCelula} mais
                   </button>
                 )}

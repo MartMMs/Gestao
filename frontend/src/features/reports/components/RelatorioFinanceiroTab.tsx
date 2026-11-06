@@ -71,7 +71,7 @@ function DetalheProfissional({ colaboradorId, de, ate, usarComissao }: { colabor
       </p>
     )}
     <table className="w-full text-xs">
-      <thead className="text-[10px] uppercase tracking-widest text-outline">
+      <thead className="text-[11px] uppercase tracking-widest text-on-surface-variant">
         <tr>
           <th className="text-left py-2 px-3">Data</th>
           <th className="text-left py-2 px-3">Cliente</th>
@@ -89,7 +89,7 @@ function DetalheProfissional({ colaboradorId, de, ate, usarComissao }: { colabor
             <td className="py-2 px-3">{a.servicos.join(', ')}</td>
             <td className="py-2 px-3">
               {STATUS_ROTULO[a.status] ?? a.status}
-              {a.status === 'sem_baixa' && <span className="block text-[10px] text-on-surface-variant">Conclua ou marque falta na agenda</span>}
+              {a.status === 'sem_baixa' && <span className="block text-[11px] text-on-surface-variant">Conclua ou marque falta na agenda</span>}
             </td>
             <td className="py-2 px-3 text-right tabular-nums">{reais(a.valor)}</td>
             {usarComissao && <td className="py-2 px-3 text-right tabular-nums">{reais(a.comissao)}</td>}
@@ -175,11 +175,11 @@ export function RelatorioFinanceiroTab() {
             </button>
             );
           })}
-          <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+          <label className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">
             De
             <input type="date" value={periodo.de} max={periodo.ate} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, de: e.target.value }))} className="block mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-2 text-sm normal-case" />
           </label>
-          <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+          <label className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">
             Até
             <input type="date" value={periodo.ate} min={periodo.de} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, ate: e.target.value }))} className="block mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-2 text-sm normal-case" />
           </label>
@@ -209,7 +209,7 @@ export function RelatorioFinanceiroTab() {
             {cartoes.map((c) => (
               <div key={c.rotulo} className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-4">
                 <span className="material-symbols-outlined text-primary text-[20px]">{c.icone}</span>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mt-1">{c.rotulo}</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mt-1">{c.rotulo}</p>
                 <p className="text-lg font-bold text-on-surface tabular-nums">{c.valor}</p>
               </div>
             ))}
@@ -217,7 +217,7 @@ export function RelatorioFinanceiroTab() {
 
           <div className="bg-surface-container-lowest border border-outline-variant/10 rounded-3xl overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-surface-container-low text-[10px] uppercase tracking-widest text-outline">
+              <thead className="bg-surface-container-low text-[11px] uppercase tracking-widest text-on-surface-variant">
                 <tr>
                   <th className="text-left py-3 px-4">Profissional</th>
                   <th className="text-right py-3 px-4">Concluídos</th>
@@ -251,7 +251,7 @@ export function RelatorioFinanceiroTab() {
                         <span className="material-symbols-outlined text-[16px] align-middle mr-1 text-on-surface-variant" aria-hidden="true">{aberto === p.colaboradorId ? 'expand_less' : 'expand_more'}</span>
                         {p.nome}
                       </button>
-                      {!p.ativo && <span className="ml-2 text-[10px] uppercase text-on-surface-variant">desligado</span>}
+                      {!p.ativo && <span className="ml-2 text-[11px] uppercase text-on-surface-variant">desligado</span>}
                     </td>
                     <td className="py-3 px-4 text-right tabular-nums">{p.concluidos}</td>
                     <td className="py-3 px-4 min-w-48">

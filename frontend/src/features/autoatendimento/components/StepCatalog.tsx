@@ -177,7 +177,7 @@ export function StepCatalog({
             >
               {/* Badge visual de Selecionado no topo do Card */}
               {isSelected && (
-                <div className="absolute top-0 right-0 bg-primary text-on-primary text-[10px] font-bold px-3 py-0.5 rounded-bl-xl uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                <div className="absolute top-0 right-0 bg-primary text-on-primary text-[11px] font-bold px-3 py-0.5 rounded-bl-xl uppercase tracking-wider flex items-center gap-1 shadow-xs">
                   <span className="material-symbols-outlined text-[13px]">check</span>
                   Adicionado
                 </div>
@@ -197,7 +197,7 @@ export function StepCatalog({
                       {formatarReais(service.preco)}
                     </span>
                     {percentualSinal ? (
-                      <p className="text-[10px] text-on-surface-variant font-medium">
+                      <p className="text-[11px] text-on-surface-variant font-medium">
                         Sinal de {formatarReais(valorSinal)}
                       </p>
                     ) : null}
@@ -217,7 +217,7 @@ export function StepCatalog({
                     <span className="material-symbols-outlined text-[15px]">schedule</span>
                   </div>
                   <span className="font-semibold">{service.duracao || 60} min</span>
-                  <span className="text-[10px] text-on-surface-variant/70">
+                  <span className="text-[11px] text-on-surface-variant/70">
                     (+{tempoBuffer}m preparo)
                   </span>
                 </div>
@@ -266,7 +266,7 @@ export function StepCatalog({
                   className="inline-flex items-center gap-1.5 bg-primary/10 text-primary border border-primary/20 px-2.5 py-1 rounded-xl text-xs font-medium"
                 >
                   <span>{item.nome}</span>
-                  <span className="text-[10px] opacity-75">({item.duracao || 60}m · {formatarReais(item.preco)})</span>
+                  <span className="text-[11px] opacity-75">({item.duracao || 60}m · {formatarReais(item.preco)})</span>
                   {onToggleService && (
                     <button
                       type="button"

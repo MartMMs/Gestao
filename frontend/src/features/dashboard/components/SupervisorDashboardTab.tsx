@@ -71,16 +71,16 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
-          <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Total de Atendimentos</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Total de Atendimentos</p>
           <p className="text-4xl font-headline text-primary">{appointments.filter(a => a.status === 'completed').length}</p>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm flex flex-col justify-center overflow-hidden">
           <div className="flex justify-between items-center mb-2 gap-2">
-            <p className="text-[10px] font-bold text-outline uppercase tracking-widest">Faturamento</p>
+            <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Faturamento</p>
             <select 
               value={revenueFilter}
               onChange={(e) => setRevenueFilter(e.target.value as 'all' | 'month')}
-              className="bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-[9px] uppercase tracking-widest font-bold rounded px-1.5 py-0.5 border-none outline-none cursor-pointer shrink-0"
+              className="bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-[10px] uppercase tracking-widest font-bold rounded px-1.5 py-0.5 border-none outline-none cursor-pointer shrink-0"
             >
               <option value="month">Este mês</option>
               <option value="all">Últimos 12 meses</option>
@@ -94,11 +94,11 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
         </div>
       </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
-          <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Agendamentos Pendentes</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Agendamentos Pendentes</p>
           <p className="text-4xl font-headline text-primary">{pendingAppointmentsCount}</p>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
-          <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Média da Equipe</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Média da Equipe</p>
           <div className="flex items-center gap-2">
             <p className="text-4xl font-headline text-primary">
               {employees.length > 0 ? (employees.reduce((acc, emp) => acc + emp.rating, 0) / employees.length).toFixed(1) : '0.0'}
@@ -107,13 +107,13 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
           </div>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm flex flex-col justify-center">
-          <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Destaque do Mês</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Destaque do Mês</p>
           {topEmployee ? (
             <div className="flex items-center gap-3 mt-1">
               <img src={topEmployee.avatar} alt={topEmployee.name} className="w-10 h-10 rounded-full object-cover border border-primary/20" />
               <div>
               <p className="text-sm font-bold text-primary leading-tight">{topEmployee.name?.split(' ')[0] || 'Desconhecido'}</p>
-                <p className="text-[10px] text-on-surface-variant font-medium">{topEmployee.monthlyCount} concluídos</p>
+                <p className="text-[11px] text-on-surface-variant font-medium">{topEmployee.monthlyCount} concluídos</p>
               </div>
             </div>
           ) : (
@@ -121,7 +121,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
           )}
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm flex flex-col justify-center">
-          <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Faltas no Mês</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Faltas no Mês</p>
           <div className="flex items-center gap-2 mt-1">
             <p className="text-4xl font-headline text-error">{monthlyNoShows}</p>
             <span className="material-symbols-outlined text-error text-2xl">event_busy</span>
@@ -141,7 +141,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
            <div className="bg-surface-container-lowest p-8 rounded-3xl border border-outline-variant/10 shadow-sm">
               <div className="flex justify-between items-end mb-6 border-b border-outline-variant/20 pb-4">
                 <h3 className="text-lg font-headline text-primary">Faturamento Diário</h3>
-                <span className="text-[10px] font-bold text-outline uppercase tracking-widest">Últimos 7 dias</span>
+                <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Últimos 7 dias</span>
               </div>
               <div className="flex items-end justify-between h-48 gap-2">
                 {last7DaysData.days.map((day) => (
@@ -151,12 +151,12 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
                         className="w-full bg-primary/80 hover:bg-primary transition-all rounded-t-lg relative"
                         style={{ height: `${(day.revenue / last7DaysData.maxRev) * 100}%` }}
                       >
-                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-surface-container-highest text-on-surface text-[10px] font-bold py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap shadow-md">
+                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-surface-container-highest text-on-surface text-[11px] font-bold py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap shadow-md">
                           {day.revenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         </div>
                       </div>
                     </div>
-                    <span className="text-[10px] text-on-surface-variant uppercase mt-2 font-medium">{day.label}</span>
+                    <span className="text-[11px] text-on-surface-variant uppercase mt-2 font-medium">{day.label}</span>
                   </div>
                 ))}
               </div>
@@ -192,7 +192,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
          <div className="bg-surface-container-lowest p-8 rounded-3xl border border-outline-variant/10 shadow-sm h-fit">
             <div className="flex justify-between items-end mb-6 border-b border-outline-variant/20 pb-4">
               <h3 className="text-lg font-headline text-primary">Próximos Clientes</h3>
-              <span className="text-[10px] font-bold text-primary bg-primary-container px-2 py-1 rounded-md uppercase tracking-widest">Hoje</span>
+              <span className="text-[11px] font-bold text-primary bg-primary-container px-2 py-1 rounded-md uppercase tracking-widest">Hoje</span>
             </div>
             <div className="space-y-4">
               {upcomingClients.length === 0 ? (
@@ -205,7 +205,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
                   </div>
                   <div className="flex flex-col items-end">
                     <span className="text-lg font-headline text-primary font-bold">{app.time}</span>
-                    <span className="text-[10px] text-on-surface-variant uppercase tracking-widest">{employees.find(e => e.id === app.assignedEmployeeId)?.name?.split(' ')[0] || 'Não atribuído'}</span>
+                    <span className="text-[11px] text-on-surface-variant uppercase tracking-widest">{employees.find(e => e.id === app.assignedEmployeeId)?.name?.split(' ')[0] || 'Não atribuído'}</span>
                   </div>
                 </div>
               ))}

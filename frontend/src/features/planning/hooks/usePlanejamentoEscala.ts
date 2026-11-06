@@ -272,6 +272,7 @@ export function usePlanejamentoEscala({
     setSelectedScaleEmployeeId(planningEmployeeFilter);
   }, [planningEmployeeFilter]);
 
+  // Filtro por período do dia (manhã/tarde/noite/comercial) pela hora de início: vale para qualquer turno cadastrado
   const classifyShift = useCallback((dia: DiaEscala): Exclude<PlanningShiftFilter, 'all' | 'folga'> | null => {
     if (dia.tipo !== 'trabalho') return null;
 
@@ -504,6 +505,8 @@ export function usePlanejamentoEscala({
     const month = monthRaw || new Date().getMonth() + 1;
     const daysInMonth = new Date(year, month, 0).getDate();
     const sundayPatternLength = planningSundayFrequency === '1x1' ? 2 : 3;
+    // shortcut: a sugestão automática gira os 3 turnos de 24h (manhã/tarde/noite) fixos, não os turnos padrão cadastrados;
+    // usar useTurnos aqui quando a empresa precisar de sugestão com turnos próprios
     const shiftRotation = ['06:00-14:00', '14:00-22:00', '22:00-06:00'];
 
     const nextSuggested: Record<string, ScaleOverridePayload> = {};
@@ -720,6 +723,9 @@ export function usePlanejamentoEscala({
 
 
   return {
+    scaleByEmployee,
+    activeNonAdminEmployees,
+    todayStr,
     setSelectedScaleEmployeeId,
     selectedScaleMonth,
     setSelectedScaleMonth,

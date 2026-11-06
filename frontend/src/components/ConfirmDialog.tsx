@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef } from 'react';
 import { motion } from 'motion/react';
+import { useModal } from '../hooks/useModal';
 
 export interface ConfirmDialogProps {
   open: boolean;
@@ -78,6 +79,8 @@ export function ConfirmDialog({
       if (anterior?.isConnected) anterior.focus();
     };
   }, [open, tone]);
+  // Só a trava de rolagem: o Esc e o foco já são tratados acima
+  useModal(open);
 
   if (!open) return null;
   const estilo = TOM[tone];

@@ -134,7 +134,7 @@ export function LoginView({
             )}
             
             <div>
-              <label htmlFor="email" className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">E-mail</label>
+              <label htmlFor="email" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">E-mail</label>
               <input 
                 id="email"
                 required 
@@ -145,11 +145,11 @@ export function LoginView({
                 className={`w-full bg-surface-container border ${emailError ? 'border-error focus:ring-error' : 'border-outline-variant focus:ring-primary'} rounded-xl p-4 focus:ring-1 focus:outline-none text-sm transition-all placeholder:text-on-surface-variant text-on-surface`} 
                 placeholder="seu@email.com" 
               />
-              {emailError && <span className="text-error text-[10px] mt-1 ml-1 font-medium tracking-wide">Formato de e-mail inválido</span>}
+              {emailError && <span className="text-error text-[11px] mt-1 ml-1 font-medium tracking-wide">Formato de e-mail inválido</span>}
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-[10px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Senha</label>
+              <label htmlFor="password" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Senha</label>
               <input 
                 id="password"
                 required 

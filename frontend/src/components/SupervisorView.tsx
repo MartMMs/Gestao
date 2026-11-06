@@ -3,6 +3,7 @@ import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { normalizarTexto } from '@shared/validadores';
 import { NO_SCALE_OVERRIDES } from '../features/scale/components/SupervisorEscalaTab';
 import { useToast } from '../hooks/useToast';
+import { useModal } from '../hooks/useModal';
 import { motion } from 'motion/react';
 import { Appointment, Bloqueio, Client, Employee, Service, TurnoSwapRequest, TurnoSwapStatus, ServiceEligibilityMode, EmployeeUpdate } from '../types';
 import { getLocalTodayString } from '../features/appointments/utils/appointmentCore';
@@ -172,18 +173,8 @@ export function SupervisorView({ employees, appointments, services, clients, sca
   // Estado para controlar o Toast de sucesso
   const { toastMessage, setToastMessage } = useToast();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  // Esc fecha o aviso de erro (como nos outros diálogos)
-  useEffect(() => {
-    if (!errorMessage) return;
-    // Captura + stopPropagation (como o ConfirmDialog): o Esc fecha só o aviso, não o formulário por baixo
-    const aoTeclar = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      setErrorMessage(null);
-    };
-    window.addEventListener('keydown', aoTeclar, true);
-    return () => window.removeEventListener('keydown', aoTeclar, true);
-  }, [errorMessage]);
+  // Esc fecha só o aviso de erro (o de cima da pilha), não o formulário por baixo
+  useModal(!!errorMessage, () => setErrorMessage(null));
 
   // Estado e regras da Grade de Escalas
   const planejamento = usePlanejamentoEscala({
@@ -381,6 +372,10 @@ export function SupervisorView({ employees, appointments, services, clients, sca
     return { viewingEmployeeRevenue: revenue, viewingEmployeeNoShows: noShows, viewingEmployeeSemBaixa: semBaixa };
   }, [viewingEmployee, appointments, services]);
 
+  useModal(!!employeeToDelete, () => { setEmployeeToDelete(null); setReallocateToId(''); });
+  useModal(!!serviceToDelete, () => setServiceToDelete(null));
+  useModal(!!viewingEmployee, () => setViewingEmployee(null));
+
   return (
     <div className="w-full max-w-6xl">
       <div className="mb-6 space-y-4">
@@ -567,6 +562,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
         {employeeToDelete && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <motion.div 
+              role="dialog" aria-modal="true" aria-label="Excluir colaborador"
               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
               className="bg-surface-container-lowest p-8 rounded-3xl shadow-xl max-w-md w-full border border-outline-variant/20"
             >
@@ -623,6 +619,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
         {serviceToDelete && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <motion.div 
+              role="dialog" aria-modal="true" aria-label="Excluir serviço"
               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
               className="bg-surface-container-lowest p-8 rounded-3xl shadow-xl max-w-md w-full border border-outline-variant/20"
             >
@@ -662,6 +659,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
         {viewingEmployee && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <motion.div 
+              role="dialog" aria-modal="true" aria-label="Detalhes do colaborador"
               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
               className="bg-surface-container-lowest p-8 rounded-3xl shadow-xl max-w-3xl w-full border border-outline-variant/20 max-h-[90vh] flex flex-col"
             >
@@ -698,23 +696,23 @@ export function SupervisorView({ employees, appointments, services, clients, sca
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
-                   <p className="text-[10px] font-bold text-outline uppercase tracking-widest">Serviços Concluídos</p>
+                   <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Serviços Concluídos</p>
                    <p className="text-2xl font-headline text-primary">{viewingEmployee.completedServices}</p>
                  </div>
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
-                   <p className="text-[10px] font-bold text-outline uppercase tracking-widest">Média de Avaliação</p>
+                   <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Média de Avaliação</p>
                    <div className="flex items-center gap-1 text-2xl font-headline text-primary">
                      {viewingEmployee.rating.toFixed(1)} <span className="material-symbols-outlined star-active text-xl">star</span>
                    </div>
                  </div>
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
-                   <p className="text-[10px] font-bold text-outline uppercase tracking-widest">Faturamento</p>
+                   <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Faturamento</p>
                    <p className="text-2xl font-headline text-primary truncate" title={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingEmployeeRevenue)}>
                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingEmployeeRevenue)}
                    </p>
                  </div>
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
-                   <p className="text-[10px] font-bold text-outline uppercase tracking-widest">Faltas</p>
+                   <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Faltas</p>
                    <div className="flex items-center gap-1 text-2xl font-headline text-error">
                      {viewingEmployeeNoShows} <span className="material-symbols-outlined text-xl mb-0.5">event_busy</span>
                    </div>
@@ -741,10 +739,10 @@ export function SupervisorView({ employees, appointments, services, clients, sca
                 <table className="w-full text-left border-collapse">
                   <thead className="bg-surface-container-low sticky top-0 shadow-sm z-10">
                     <tr>
-                      <th className="py-3 px-4 text-[10px] font-bold text-outline uppercase tracking-widest">Data/Hora</th>
-                      <th className="py-3 px-4 text-[10px] font-bold text-outline uppercase tracking-widest">Cliente</th>
-                      <th className="py-3 px-4 text-[10px] font-bold text-outline uppercase tracking-widest">Serviços</th>
-                      <th className="py-3 px-4 text-[10px] font-bold text-outline uppercase tracking-widest">Status</th>
+                      <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Data/Hora</th>
+                      <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Cliente</th>
+                      <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Serviços</th>
+                      <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -758,8 +756,8 @@ export function SupervisorView({ employees, appointments, services, clients, sca
                             {app.specialNeeds && app.specialNeeds.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1 cursor-help" title={app.observation ? `Observações: ${app.observation}` : 'Nenhuma observação detalhada.'}>
                                 {app.specialNeeds.map((need: string) => (
-                                  <span key={need} className="bg-error/10 text-error text-[8px] px-1.5 py-0.5 rounded uppercase font-bold tracking-widest flex items-center gap-0.5 w-fit">
-                                    <span className="material-symbols-outlined text-[9px]">medical_services</span>
+                                  <span key={need} className="bg-error/10 text-error text-[10px] px-1.5 py-0.5 rounded uppercase font-bold tracking-widest flex items-center gap-0.5 w-fit">
+                                    <span className="material-symbols-outlined text-[10px]">medical_services</span>
                                     {need}
                                   </span>
                                 ))}
@@ -768,7 +766,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
                           </td>
                           <td className="py-3 px-4 text-xs text-on-surface-variant max-w-37.5 truncate" title={app.services.join(', ')}>{app.services.join(', ')}</td>
                           <td className="py-3 px-4 text-xs">
-                            <span className={`px-2 py-1 rounded-full font-bold uppercase tracking-wider text-[9px] ${app.status === 'completed' ? 'bg-primary/10 text-primary' : 'bg-secondary-container text-on-secondary-container'}`}>
+                            <span className={`px-2 py-1 rounded-full font-bold uppercase tracking-wider text-[10px] ${app.status === 'completed' ? 'bg-primary/10 text-primary' : 'bg-secondary-container text-on-secondary-container'}`}>
                               {app.status === 'completed' ? 'Concluído' : 'Agendado'}
                             </span>
                           </td>
@@ -790,15 +788,15 @@ export function SupervisorView({ employees, appointments, services, clients, sca
               <h3 className="text-lg font-headline text-primary mb-4">Configuração Contratual</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10">
-                  <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-1">Padrão de Escala</p>
+                  <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Padrão de Escala</p>
                   <p className="text-xl font-headline text-on-surface">{viewingEmployee.tipoEscala || '6x1'}</p>
                 </div>
                 <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10">
-                  <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-1">Folgas Dominicais (Mês)</p>
+                  <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Folgas Dominicais (Mês)</p>
                   <p className="text-xl font-headline text-on-surface">{viewingEmployee.folgasDomingoNoMes ?? 2} domingos</p>
                 </div>
                 <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10">
-                  <p className="text-[10px] font-bold text-outline uppercase tracking-widest mb-1">Carga Horária Base</p>
+                  <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Carga Horária Base</p>
                   <p className="text-xl font-headline text-on-surface">{viewingEmployee.cargaHorariaSemanal ?? 40}h / semana</p>
                 </div>
               </div>

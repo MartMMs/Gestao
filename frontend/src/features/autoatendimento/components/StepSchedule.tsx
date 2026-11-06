@@ -158,7 +158,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
             <span className="material-symbols-outlined text-[17px]">{icon}</span>
           </div>
           <span>{title}</span>
-          <span className="text-[10px] text-on-surface-variant/70 font-normal">
+          <span className="text-[11px] text-on-surface-variant/70 font-normal">
             ({items.filter((i) => i.disponivel).length} vagas livres)
           </span>
         </div>
@@ -197,7 +197,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
 
                 {slot.disponivel && slot.sala && (
                   <p
-                    className={`text-[10px] truncate ${
+                    className={`text-[11px] truncate ${
                       isSelected ? 'text-on-primary/90' : 'text-on-surface-variant'
                     }`}
                   >
@@ -206,7 +206,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
                 )}
                 {slot.disponivel && slot.terapeuta && (
                   <p
-                    className={`text-[10px] truncate ${
+                    className={`text-[11px] truncate ${
                       isSelected ? 'text-on-primary/80' : 'text-on-surface-variant/80'
                     }`}
                   >
@@ -214,7 +214,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
                   </p>
                 )}
                 {!slot.disponivel && (
-                  <p className="text-[9px] text-error/80 truncate">Ocupado</p>
+                  <p className="text-[10px] text-error/80 truncate">Ocupado</p>
                 )}
               </button>
             );
@@ -267,11 +267,11 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
                     : 'bg-surface-container-lowest border-outline-variant/25 text-on-surface hover:border-primary/40'
                 }`}
               >
-                <span className="block text-[10px] uppercase font-bold tracking-wider mb-0.5 opacity-80">
+                <span className="block text-[11px] uppercase font-bold tracking-wider mb-0.5 opacity-80">
                   {item.isToday ? 'Hoje' : item.weekday}
                 </span>
                 <span className="block text-lg font-bold font-headline">{item.day}</span>
-                <span className="block text-[10px] opacity-75">{item.month}</span>
+                <span className="block text-[11px] opacity-75">{item.month}</span>
               </button>
             );
           })}
@@ -325,7 +325,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
               <span className="text-on-surface-variant block">
                 {selectedDate} às <strong className="text-primary">{selectedSlot.horario}</strong>
               </span>
-              <span className="text-[10px] text-outline-variant">
+              <span className="text-[11px] text-outline-variant">
                 {selectedSlot.sala?.nome} · {selectedSlot.terapeuta?.nome}
               </span>
             </div>

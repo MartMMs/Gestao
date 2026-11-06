@@ -14,6 +14,7 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
+    "test:e2e:global": "playwright test --project=configuracao-global --no-deps",
     "test:regression": "node scripts/test-regression.mjs",
     "test:regression:quick": "npm run lint && npm run test:unit && npm run build",
     "build": "npm --prefix frontend run build",
@@ -36,6 +37,7 @@
     "motion": "^12.23.24",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "read-excel-file": "9.3.14",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3"
   },

@@ -6,6 +6,7 @@ import { prepararBloqueio } from '../lib/privacidade';
 import { registrarAuditoria } from '../lib/auditoria';
 import { MODOS_ELEGIBILIDADE, agendamentosDoDia, normalizarModoElegibilidade } from '../services/agendaService';
 import { dataValida, horarioValido, horarioParaMinutos } from '../../shared/agenda';
+import { normalizarNome } from '../../shared/validadores';
 
 const listaDeTextos = (valor: unknown): string[] => {
   if (!Array.isArray(valor)) return [];
@@ -89,6 +90,16 @@ const MAX_DIAS_BLOQUEIO = 62;
 // Comissão define quanto cada profissional recebe: como a chave geral (usarComissao), só o admin altera
 const ERRO_COMISSAO_SO_ADMIN = 'Só o administrador pode definir a comissão dos serviços.';
 
+// "Só profissionais escolhidos" com um nome que não está na equipe ativa deixaria o serviço sem ninguém para atender.
+// Na edição, só os nomes novos são conferidos: quem saiu da equipe depois não trava a edição do resto do serviço
+const profissionalDesconhecido = async (permitidos: string[], jaGravados: string[] = []) => {
+  if (permitidos.length === 0) return null;
+  const equipe = new Set((await prisma.colaborador.findMany({ where: { ativo: true }, select: { nome: true } })).map((c) => normalizarNome(c.nome)));
+  const anteriores = new Set(jaGravados.map(normalizarNome));
+  return permitidos.find((nome) => !equipe.has(normalizarNome(nome)) && !anteriores.has(normalizarNome(nome))) ?? null;
+};
+const erroProfissional = (nome: string) => `"${nome}" não está na equipe. Escolha um profissional ativo (use os botões com os nomes).`;
+
 export function createServicosRouter(notificar: Notificar) {
   const router = Router();
 
@@ -115,6 +126,8 @@ export function createServicosRouter(notificar: Notificar) {
       if (!validacao.data) return res.status(400).json({ erro: validacao.erro });
       if (validacao.data.comissaoPercentual !== null && !usuarioEhAdmin(req)) return res.status(403).json({ erro: ERRO_COMISSAO_SO_ADMIN });
       if (await nomeEmUso(validacao.data.nome)) return res.status(409).json({ erro: 'Já existe um serviço com este nome.' });
+      const desconhecido = await profissionalDesconhecido(validacao.data.profissionaisPermitidos);
+      if (desconhecido) return res.status(400).json({ erro: erroProfissional(desconhecido) });
 
       const servico = await prisma.servico.create({ data: validacao.data });
       // Serviço que já nasce com preço e comissão entra no histórico, como as alterações depois
@@ -134,6 +147,8 @@ export function createServicosRouter(notificar: Notificar) {
       if (!validacao.data) return res.status(400).json({ erro: validacao.erro });
       const anterior = await prisma.servico.findUnique({ where: { id } });
       if (!anterior) return res.status(404).json({ erro: 'Serviço não encontrado.' });
+      const desconhecido = await profissionalDesconhecido(validacao.data.profissionaisPermitidos, anterior.profissionaisPermitidos ?? []);
+      if (desconhecido) return res.status(400).json({ erro: erroProfissional(desconhecido) });
       if (!usuarioEhAdmin(req)) {
         // Campo omitido mantém a comissão atual; mudar o valor exige admin
         if (req.body?.comissaoPercentual === undefined) validacao.data.comissaoPercentual = anterior.comissaoPercentual;

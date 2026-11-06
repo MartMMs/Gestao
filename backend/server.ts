@@ -24,6 +24,10 @@ try {
 
 const app = express();
 const server = http.createServer(app);
+// Conexão ociosa fica aberta mais que o padrão de 5 s do Node: cliente que reaproveita a conexão (navegador, proxy,
+// Playwright) no instante em que o servidor a fecha recebia ECONNRESET. headersTimeout precisa ser maior que ele
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 66_000;
 
 // CORS_ORIGINS="https://app.exemplo.com,http://192.168.0.10:3000" define as origens aceitas (obrigatório em produção).
 // Sem a variável (só fora de produção), aceita a própria máquina (inclusive subdomínios de localhost, ex.:
@@ -75,12 +79,17 @@ app.use(cors((req, callback) => callback(null, {
     : origemPermitida(req.headers.origin, hostDaRequisicao(req.headers.host)),
 })));
 // Guarda o corpo bruto para validar a assinatura do webhook de pagamento
-app.use(express.json({
-  limit: '100kb',
+const lerJson = (limit: string) => express.json({
+  limit,
   verify: (req, _res, buf) => {
     (req as Request & { rawBody?: Buffer }).rawBody = buf;
   },
-}));
+});
+const jsonPadrao = lerJson('100kb');
+// A importação de clientes aceita até 500 linhas (~320 bytes cada no pior caso válido): limite próprio, o resto fica pequeno
+// Montado antes do padrão: o express.json não lê de novo um corpo já lido
+app.use('/api/clientes/importar', lerJson('400kb'));
+app.use(jsonPadrao);
 
 app.use('/api', createRouter(eventos));
 app.use('/api/autoatendimento', createAutoatendimentoRouter(eventos));

@@ -16,6 +16,8 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:3000';
  */
 export default defineConfig({
   testDir: './e2e',
+  // Desliga a chave global de anamnese no início (ver e2e/global-setup.ts)
+  globalSetup: './e2e/global-setup.ts',
   timeout: 90_000,
   expect: { timeout: 25_000 },
   fullyParallel: true,
@@ -28,7 +30,14 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: /\.global\.spec\.ts$/ },
+    // Specs que mudam configuração global da empresa (ex.: exigir anamnese) rodam sozinhas, depois de todas as outras:
+    // em paralelo, a chave ligada faria os agendamentos dos outros testes falharem. Atenção: se algum teste do projeto
+    // chromium falhar, este projeto é pulado (aparece como "did not run"); para rodá-lo sozinho depois de corrigir:
+    // npm run test:e2e:global (usa --no-deps)
+    { name: 'configuracao-global', use: { ...devices['Desktop Chrome'] }, testMatch: /\.global\.spec\.ts$/, dependencies: ['chromium'], fullyParallel: false },
+  ],
   webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
     ? undefined
     : {

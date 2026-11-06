@@ -13,6 +13,7 @@ export const CONTAS = {
   supervisor: 'supervisor@serenidade.com',
   colaboradora: 'helena@serenidade.com',
   colaboradoraAlternativa: 'ana@serenidade.com',
+  recepcao: 'recepcao@serenidade.com',
 } as const;
 
 // Login pela tela digitando e-mail e senha
@@ -99,19 +100,58 @@ export async function reservarHorarioNoTotem(page: Page) {
   throw new Error('Nenhum horário livre no totem em 6 tentativas.');
 }
 
-// Apaga (pela API de supervisão) os clientes de teste com esse nome e os agendamentos deles
-export async function apagarClienteDeTeste(request: APIRequestContext, nome: string) {
-  const login = await postLogin(request, { data: { email: CONTAS.supervisor, senha: E2E_PASSWORD }, headers: { 'X-Auth-Mode': 'token' } });
-  const { token } = await login.json();
-  const headers = { Authorization: `Bearer ${token}` };
-  const clientes = (await (await request.get(`${apiBase()}/clientes`, { headers })).json()) as Array<{ id: string; nome: string }>;
-  // Também os cadastros à parte que o totem cria para homônimos ("Nome (tel. final 22)")
-  for (const cliente of clientes.filter((c) => c.nome === nome || c.nome.startsWith(`${nome} (tel. final `))) {
-    // Cliente com atendimento marcado não pode ser excluído (409): apaga antes os agendamentos dele. Sem isso cada
-    // execução deixava uma reserva do totem para trás, até lotar os dias e o teste não achar horário livre
-    const agendamentos = (await (await request.get(`${apiBase()}/agendamentos?clienteId=${cliente.id}`, { headers })).json()) as Array<{ id: string; atualizadoEm: string }>;
-    for (const ag of agendamentos) await request.delete(`${apiBase()}/agendamentos/${ag.id}`, { headers, data: { version: ag.atualizadoEm } });
-    const removido = await request.delete(`${apiBase()}/clientes/${cliente.id}`, { headers });
-    expect(removido.ok(), `limpeza do cliente de teste: ${await removido.text()}`).toBeTruthy();
+// Repete uma chamada que falhou por rede (ex.: ECONNRESET com a API sob carga da suíte); erro de regra não se repete
+const comRepeticao = async <T>(chamada: () => Promise<T>, tentativas = 3): Promise<T> => {
+  for (let i = 1; ; i += 1) {
+    try {
+      return await chamada();
+    } catch (error) {
+      if (i >= tentativas || !/ECONNRESET|ECONNREFUSED|socket hang up|ETIMEDOUT/.test(String(error))) throw error;
+      await new Promise((resolver) => setTimeout(resolver, 300 * i));
+    }
   }
+};
+
+/**
+ * Apaga (pela API de supervisão) os clientes de teste com esses nomes e os agendamentos deles. Tenta todos mesmo que
+ * um falhe (uma falha de rede no primeiro não deixa os outros no banco) e só então acusa o erro.
+ */
+export async function apagarClienteDeTeste(request: APIRequestContext, nomes: string | string[]) {
+  const headers = await comRepeticao(() => authHeaders(request, CONTAS.supervisor));
+  const clientes = await comRepeticao(async () => (await (await request.get(`${apiBase()}/clientes`, { headers })).json()) as Array<{ id: string; nome: string }>);
+  const falhas: string[] = [];
+  for (const nome of Array.isArray(nomes) ? nomes : [nomes]) {
+    // Também os cadastros à parte que o totem cria para homônimos ("Nome (tel. final 22)")
+    for (const cliente of clientes.filter((c) => c.nome === nome || c.nome.startsWith(`${nome} (tel. final `))) {
+      try {
+        // Cliente com atendimento marcado não pode ser excluído (409): apaga antes os agendamentos dele. Sem isso cada
+        // execução deixava uma reserva do totem para trás, até lotar os dias e o teste não achar horário livre
+        const agendamentos = await comRepeticao(async () => (await (await request.get(`${apiBase()}/agendamentos?clienteId=${cliente.id}`, { headers })).json()) as Array<{ id: string; atualizadoEm: string }>);
+        for (const ag of agendamentos) await comRepeticao(() => request.delete(`${apiBase()}/agendamentos/${ag.id}`, { headers, data: { version: ag.atualizadoEm } }));
+        const removido = await comRepeticao(() => request.delete(`${apiBase()}/clientes/${cliente.id}`, { headers }));
+        if (!removido.ok()) falhas.push(`${nome}: ${await removido.text()}`);
+      } catch (error) {
+        falhas.push(`${nome}: ${String(error)}`);
+      }
+    }
+  }
+  expect(falhas, 'limpeza dos clientes de teste').toEqual([]);
+}
+
+// Cabeçalho de autenticação (token) de uma conta de teste; falha o teste se o login não passar
+export async function authHeaders(request: APIRequestContext, email: string, senha = E2E_PASSWORD) {
+  const res = await postLogin(request, { data: { email, senha }, headers: { 'X-Auth-Mode': 'token' } });
+  expect(res.ok(), `login de ${email}: ${await res.text()}`).toBeTruthy();
+  return { Authorization: `Bearer ${(await res.json()).token}` };
+}
+
+// Dia daqui a N dias no fuso da empresa (AAAA-MM-DD): perto da meia-noite UTC o dia de São Paulo ainda é o anterior
+export const diaFuturo = (dias: number) => new Date(Date.now() + dias * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+
+// Apaga (pela API) o colaborador de teste com esse e-mail, se existir: limpeza de teste que cria conta pela tela
+export async function apagarColaboradorDeTeste(request: APIRequestContext, email: string) {
+  const headers = await authHeaders(request, CONTAS.admin);
+  const equipe = (await (await request.get(`${apiBase()}/colaboradores`, { headers })).json()) as Array<{ id: string; email: string }>;
+  const alvo = equipe.find((c) => c.email === email);
+  if (alvo) expect((await request.delete(`${apiBase()}/colaboradores/${alvo.id}`, { headers })).ok(), `limpeza de ${email}`).toBeTruthy();
 }

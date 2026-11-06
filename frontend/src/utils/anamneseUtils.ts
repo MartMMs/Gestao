@@ -1,6 +1,6 @@
 import { AnamneseData, initialAnamnese } from '../components/AnamneseForm';
 
-export const ANAMNESE_MARKER = '__ANAMNESE_JSON__:';
+import { MARCADOR_ANAMNESE, fichaPreenchida } from '@shared/anamnese';
 
 export interface ParsedAnamnese {
   note: string;
@@ -30,8 +30,8 @@ const FIELD_LABELS: Record<string, string> = {
   aromaterapia: 'Aromaterapia',
 };
 
-export const hasAnamnese = (data: AnamneseData) =>
-  Object.values(data).some(v => (Array.isArray(v) ? v.length > 0 : String(v || '').trim().length > 0));
+// Mesma regra da API (shared/anamnese.ts)
+export const hasAnamnese = (data: AnamneseData) => fichaPreenchida(data);
 
 export function parseClientObservation(obs?: string): ParsedAnamnese {
   const raw = (obs || '').trim();
@@ -39,13 +39,13 @@ export function parseClientObservation(obs?: string): ParsedAnamnese {
     return { note: '', anamSummary: [], anamJson: '', anamData: initialAnamnese };
   }
 
-  const idx = raw.indexOf(ANAMNESE_MARKER);
+  const idx = raw.indexOf(MARCADOR_ANAMNESE);
   if (idx < 0) {
     return { note: raw, anamSummary: [], anamJson: '', anamData: initialAnamnese };
   }
 
   const note = raw.slice(0, idx).trim();
-  const jsonPart = raw.slice(idx + ANAMNESE_MARKER.length).trim();
+  const jsonPart = raw.slice(idx + MARCADOR_ANAMNESE.length).trim();
 
   try {
     const parsed = JSON.parse(jsonPart) as Record<string, unknown>;
@@ -69,5 +69,5 @@ export function parseClientObservation(obs?: string): ParsedAnamnese {
 
 export function formatAnamneseStorage(note: string, data: AnamneseData): string {
   if (!hasAnamnese(data)) return note.trim();
-  return `${note.trim()}\n${ANAMNESE_MARKER}${JSON.stringify(data)}`.trim();
+  return `${note.trim()}\n${MARCADOR_ANAMNESE}${JSON.stringify(data)}`.trim();
 }

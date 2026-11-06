@@ -172,7 +172,7 @@ export function DraggableCalendarioEscala({
             <button
               type="button"
               onClick={openMonthPicker}
-              className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.15em] px-3 py-1 rounded-full bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
+              className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.15em] px-3 py-1 rounded-full bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
             >
               <span>{monthLabel}</span>
               <span className="material-symbols-outlined text-[14px]">expand_more</span>
@@ -188,12 +188,12 @@ export function DraggableCalendarioEscala({
             />
           </div>
         ) : !hideMonthBadge ? (
-          <span className="text-[10px] font-bold uppercase tracking-[0.15em] px-3 py-1 rounded-full bg-primary/20 text-primary">
+          <span className="text-[11px] font-bold uppercase tracking-[0.15em] px-3 py-1 rounded-full bg-primary/20 text-primary">
             {monthLabel}
           </span>
         ) : null}
         {isDraggable && (
-          <span className="text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full bg-primary/20 text-primary">
+          <span className="text-[11px] font-bold uppercase tracking-widest px-3 py-1 rounded-full bg-primary/20 text-primary">
             🖱️ Arrastar para reorganizar
           </span>
         )}
@@ -201,7 +201,7 @@ export function DraggableCalendarioEscala({
 
       <div className="grid grid-cols-7 gap-1 text-center mb-3">
         {DAY_HEADERS.map((day) => (
-          <span key={day} className="text-[10px] font-bold text-primary/70 uppercase tracking-widest py-2">
+          <span key={day} className="text-[11px] font-bold text-primary/70 uppercase tracking-widest py-2">
             {day}
           </span>
         ))}
@@ -251,29 +251,29 @@ export function DraggableCalendarioEscala({
               <div className="flex items-start justify-between gap-1">
                 <div className={`text-sm font-bold ${isToday ? 'text-primary' : 'text-on-surface'}`}>{day}</div>
                 {hasCltAlert && (
-                  <span className="text-[9px] font-black text-error">!</span>
+                  <span className="text-[10px] font-black text-error">!</span>
                 )}
                 {escala?.folgaDominicalConfigurada && (
-                  <span className="text-[7px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-primary/80 text-on-primary">
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-primary/80 text-on-primary">
                     Dom
                   </span>
                 )}
               </div>
 
               <div className="flex flex-col gap-0.5">
-                <div className={`text-[10px] font-black tracking-wide ${escala?.tipo === 'folga' ? 'text-secondary' : escala?.tipo === 'fds' ? 'text-tertiary' : 'text-on-surface-variant'}`}>
+                <div className={`text-[11px] font-black tracking-wide ${escala?.tipo === 'folga' ? 'text-secondary' : escala?.tipo === 'fds' ? 'text-tertiary' : 'text-on-surface-variant'}`}>
                   {getLabel(escala)}
                 </div>
 
                 {escala?.tipo === 'trabalho' && escala?.turno?.includes('-') && (
-                  <div className="text-[9px] font-semibold text-on-surface-variant truncate max-w-full">
+                  <div className="text-[10px] font-semibold text-on-surface-variant truncate max-w-full">
                     {escala.turno.split('-')[1] || ''}
                   </div>
                 )}
 
                 {/* Indicador de dragável */}
                 {isDraggable && escala && (
-                  <div className="text-[8px] text-primary-dim font-bold mt-1">
+                  <div className="text-[10px] text-primary-dim font-bold mt-1">
                     ⇄ Mover
                   </div>
                 )}
@@ -287,20 +287,20 @@ export function DraggableCalendarioEscala({
       <div className="mt-5 pt-4 border-t border-outline-variant/10 grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="flex items-center gap-2">
           <span className="w-4 h-4 rounded bg-surface-container border border-outline-variant/30"></span>
-          <span className="text-[9px] text-on-surface-variant font-bold">Trabalho</span>
+          <span className="text-[10px] text-on-surface-variant font-bold">Trabalho</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-4 h-4 rounded bg-secondary-container/45 border border-secondary/50"></span>
-          <span className="text-[9px] text-on-surface-variant font-bold">Folga</span>
+          <span className="text-[10px] text-on-surface-variant font-bold">Folga</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-4 h-4 rounded bg-tertiary/25 border border-tertiary/50"></span>
-          <span className="text-[9px] text-on-surface-variant font-bold">FDS</span>
+          <span className="text-[10px] text-on-surface-variant font-bold">FDS</span>
         </div>
         {(isInteractive || isDraggable) && (
           <div className="flex items-center gap-2">
             <span className="text-lg">{isDraggable ? '⇄' : '👆'}</span>
-            <span className="text-[9px] text-on-surface-variant font-bold">
+            <span className="text-[10px] text-on-surface-variant font-bold">
               {isDraggable ? 'Arrastar' : 'Clicável'}
             </span>
           </div>

@@ -63,14 +63,14 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
             </div>
             <div>
               <h3 className="text-lg font-serif italic text-primary">{empresa?.nomeEmpresa || 'Comprovante Oficial'}</h3>
-              <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">
+              <p className="text-[11px] uppercase font-bold tracking-widest text-on-surface-variant">
                 Voucher Oficial de Atendimento
               </p>
             </div>
           </div>
 
           <div className="text-left sm:text-right">
-            <span className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant block">
+            <span className="text-[11px] uppercase font-bold tracking-widest text-on-surface-variant block">
               Código da Reserva
             </span>
             <span className="text-lg sm:text-xl font-mono font-bold text-primary tracking-wider">
@@ -82,7 +82,7 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
         {/* Detalhes do Cliente e do Atendimento */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
           <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/15">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
+            <span className="text-[11px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
               Hóspede / Cliente
             </span>
             <p className="font-bold text-sm text-on-surface">{voucher.clienteNome}</p>
@@ -90,7 +90,7 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
           </div>
 
           <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/15">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
+            <span className="text-[11px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
               Produtos / Serviços & Duração
             </span>
             <p className="font-bold text-sm text-primary">{voucher.terapiaNome}</p>
@@ -98,17 +98,17 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
           </div>
 
           <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/15">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
+            <span className="text-[11px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
               Data & Horário
             </span>
             <p className="font-bold text-sm text-on-surface">
               {voucher.data} às <strong className="text-primary">{voucher.horario}</strong>
             </p>
-            <p className="text-[10px] text-emerald-600 font-medium">Chegada recomendada: 10 min antes</p>
+            <p className="text-[11px] text-emerald-600 font-medium">Chegada recomendada: 10 min antes</p>
           </div>
 
           <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/15">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
+            <span className="text-[11px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
               Espaço & Profissional
             </span>
             <p className="font-bold text-sm text-on-surface">{voucher.salaNome}</p>
@@ -119,7 +119,7 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
         {/* Status de Pagamento */}
         <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between">
           <div>
-            <span className="text-[10px] uppercase font-bold tracking-widest text-emerald-700 block">
+            <span className="text-[11px] uppercase font-bold tracking-widest text-emerald-700 block">
               Status do Pagamento
             </span>
             <span className="text-sm font-bold text-emerald-800">
@@ -157,7 +157,7 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
         </div>
 
         {/* Política de Cancelamento */}
-        <div className="text-[10px] text-outline-variant border-t border-outline-variant/15 pt-3">
+        <div className="text-[11px] text-outline-variant border-t border-outline-variant/15 pt-3">
           <strong>Política de Cancelamento:</strong> {voucher.politicaCancelamento}
         </div>
       </div>
