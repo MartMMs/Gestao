@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CONTAS, apagarColaboradorDeTeste, apiBase, authHeaders, loginPelaTela } from './credenciais';
+import { CONTAS, apagarColaboradorDeTeste, apiBase, authHeaders, loginPelaTela, postLogin } from './credenciais';
 
 /**
  * Modal aberto bloqueia a página de fundo (clique no cabeçalho e rolagem) e fecha com Esc; e o cadastro de
@@ -31,7 +31,7 @@ test.describe('Modais e cadastro de profissional', () => {
     const perguntas: string[] = [];
     const registrar = (d: import('@playwright/test').Dialog) => { perguntas.push(d.message()); void d.dismiss(); };
     page.on('dialog', registrar);
-    await dialogo.getByPlaceholder('Especialidade', { exact: true }).click();
+    await dialogo.getByPlaceholder('Cargo (ex.: Massagista)').click();
     await page.keyboard.press('Escape');
     await expect(dialogo).toBeHidden();
     expect(perguntas).toHaveLength(0);
@@ -56,29 +56,43 @@ test.describe('Modais e cadastro de profissional', () => {
 
     // Preenchido pelo fill (sem tecla nem clique): a comparação vem do estado, não de uma foto da tela
     await page.getByRole('button', { name: /Criar Usuário/i }).click();
-    await dialogo.getByPlaceholder('Especialidade', { exact: true }).fill('Massagem');
+    await dialogo.getByPlaceholder('Cargo (ex.: Massagista)').fill('Massagem');
     await dialogo.getByRole('button', { name: 'Fechar' }).click();
     await expect(dialogo).toBeVisible();
     expect(perguntas).toHaveLength(1);
 
     // Desfeito: volta a "não mudou" e o X fecha sem perguntar
-    await dialogo.getByPlaceholder('Especialidade', { exact: true }).fill('');
+    await dialogo.getByPlaceholder('Cargo (ex.: Massagista)').fill('');
     await dialogo.getByRole('button', { name: 'Fechar' }).click();
     await expect(dialogo).toBeHidden();
     expect(perguntas).toHaveLength(1);
   });
 
-  test('e-mail sugerido pode ser apagado (não volta sozinho) e vazio é recusado', async ({ page }) => {
-    await page.getByRole('button', { name: /Criar Usuário/i }).click();
-    const dialogo = page.getByRole('dialog', { name: /Criar Usuário/i });
-    await dialogo.getByPlaceholder('Nome', { exact: true }).fill('Fulana Sugestao');
-    const email = dialogo.getByPlaceholder('E-mail');
-    await expect(email).toHaveValue(/fulana\.sugestao@/);
-    await email.fill('');
-    await expect(email).toHaveValue('');
-    await dialogo.getByPlaceholder('Especialidade', { exact: true }).fill('Massagem');
-    await dialogo.getByRole('button', { name: /Cadastrar/i }).click();
-    await expect(page.getByText('Informe o e-mail do colaborador.')).toBeVisible();
+  test('cadastra sem e-mail e a pessoa entra com o usuário de acesso', async ({ page, request }) => {
+    const sufixo = Array.from({ length: 6 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join('');
+    const usuario = `sem.email.${sufixo}`;
+    const admin = await authHeaders(request, CONTAS.admin);
+    try {
+      await page.getByRole('button', { name: /Criar Usuário/i }).click();
+      const dialogo = page.getByRole('dialog', { name: /Criar Usuário/i });
+      await dialogo.getByPlaceholder('Nome', { exact: true }).fill(`Sem Email ${sufixo}`);
+      await dialogo.getByPlaceholder('Cargo (ex.: Massagista)').fill('Massagem');
+      // Sem usuário o formulário não envia (o e-mail é opcional, o usuário não)
+      await dialogo.getByRole('button', { name: /Cadastrar/i }).click();
+      await expect(dialogo).toBeVisible();
+      await dialogo.getByLabel('Usuário de acesso').fill(usuario);
+      await dialogo.getByRole('button', { name: /Cadastrar/i }).click();
+      const credenciais = page.getByRole('dialog', { name: 'Credenciais' });
+      await expect(credenciais.getByText(usuario)).toBeVisible();
+      const senha = (await credenciais.locator('p').nth(5).innerText()).trim();
+      const login = await postLogin(request, { data: { email: usuario.toUpperCase(), senha }, headers: { 'X-Auth-Mode': 'token' } });
+      expect(login.status(), await login.text()).toBe(200);
+      expect((await login.json()).usuario.email).toBeNull();
+    } finally {
+      const equipe = (await (await request.get(`${apiBase()}/colaboradores`, { headers: admin })).json()) as Array<{ id: string; usuario: string | null }>;
+      const alvo = equipe.find((c) => c.usuario === usuario);
+      if (alvo) await request.delete(`${apiBase()}/colaboradores/${alvo.id}`, { headers: admin });
+    }
   });
 
   test('cadastra profissional com e-mail digitado', async ({ page, request }) => {
@@ -88,10 +102,11 @@ test.describe('Modais e cadastro de profissional', () => {
       await page.getByRole('button', { name: /Criar Usuário/i }).click();
       const dialogo = page.getByRole('dialog', { name: /Criar Usuário/i });
       await dialogo.getByPlaceholder('Nome', { exact: true }).fill(`Tela Cadastro ${sufixo}`);
-      await dialogo.getByPlaceholder('E-mail').fill(email);
-      await dialogo.getByPlaceholder('Especialidade', { exact: true }).fill('Massagem');
+      await dialogo.getByLabel('Usuário de acesso').fill(`tela.${sufixo}`);
+      await dialogo.getByPlaceholder('E-mail (opcional)').fill(email);
+      await dialogo.getByPlaceholder('Cargo (ex.: Massagista)').fill('Massagem');
       await dialogo.getByRole('button', { name: /Cadastrar/i }).click();
-      await expect(page.getByText(email).first()).toBeVisible();
+      await expect(page.getByRole('dialog', { name: 'Credenciais' }).getByText(`tela.${sufixo}`)).toBeVisible();
       const equipe = (await (await request.get(`${apiBase()}/colaboradores`, { headers: await authHeaders(request, CONTAS.admin) })).json()) as Array<{ email: string }>;
       expect(equipe.some((c) => c.email === email)).toBe(true);
     } finally {

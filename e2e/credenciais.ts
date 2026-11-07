@@ -16,10 +16,10 @@ export const CONTAS = {
   recepcao: 'recepcao@serenidade.com',
 } as const;
 
-// Login pela tela digitando e-mail e senha
-export async function loginPelaTela(page: Page, email: string) {
+// Login pela tela digitando o login (e-mail ou usuário de acesso) e a senha (padrão: a das contas do seed)
+export async function loginPelaTela(page: Page, email: string, senha = E2E_PASSWORD) {
   await page.getByRole('textbox', { name: /E-mail/i }).fill(email);
-  await page.getByRole('textbox', { name: /Senha/i }).fill(E2E_PASSWORD);
+  await page.getByRole('textbox', { name: /Senha/i }).fill(senha);
   await page.getByRole('button', { name: /Entrar/i }).click();
   // Em modo de segurança o login resolve uma prova de trabalho antes de entrar: espera o botão terminar
   await expect(page.getByRole('button', { name: /Acessando|Confirmando/i })).toHaveCount(0, { timeout: 90_000 });

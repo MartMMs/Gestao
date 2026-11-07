@@ -444,30 +444,45 @@ export function usePlanejamentoEscala({
 
   const applyManualPlanningOverride = useCallback((payload: ScaleOverridePayload, successMessage: string) => {
     const key = `${payload.colaboradorId}:${payload.data}`;
+    let previousOverride: ScaleOverridePayload | undefined;
 
-    setPlanningOverrides((prev) => ({
-      ...prev,
-      [key]: payload,
-    }));
+    setPlanningOverrides((prev) => {
+      previousOverride = prev[key];
+      return {
+        ...prev,
+        [key]: payload,
+      };
+    });
 
     setSuggestedPlanningKeys((prev) => prev.filter((item) => item !== key));
 
     void (async () => {
+      const revertOverride = () => {
+        setPlanningOverrides((prev) => {
+          const next = { ...prev };
+          if (previousOverride) next[key] = previousOverride;
+          else delete next[key];
+          return next;
+        });
+      };
+
       try {
         if (onSaveScaleOverride) {
           const success = await onSaveScaleOverride(payload);
           if (success === false) {
-            setToastMessage('Alteração aplicada localmente. Sincronização pendente.');
+            revertOverride();
+            setErrorMessage('Não foi possível sincronizar a alteração da escala com o servidor.');
             return;
           }
         }
 
         setToastMessage(successMessage);
       } catch (error) {
-        setToastMessage('Alteração aplicada localmente. Falha na sincronização com servidor.');
+        revertOverride();
+        setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da escala com o servidor.');
       }
     })();
-  }, [onSaveScaleOverride]);
+  }, [onSaveScaleOverride, setErrorMessage, setToastMessage]);
 
   const handleQuickToggleTimelineDay = useCallback((employeeId: string, day: string, current?: DiaEscala) => {
     const nextType: DiaEscala['tipo'] = current?.tipo === 'trabalho' ? 'folga' : 'trabalho';
@@ -712,12 +727,23 @@ export function usePlanejamentoEscala({
     };
   }, []);
 
-  const handleUpdateSwapStatus = async (id: string, status: Exclude<TurnoSwapStatus, 'pendente'>) => {
-    if (!onUpdateTurnoSwapRequestStatus) return;
+  const [updatingSwapId, setUpdatingSwapId] = useState<string | null>(null);
 
-    const success = await onUpdateTurnoSwapRequestStatus(id, status);
-    if (success !== false) {
-      setToastMessage(`Solicitacao ${status === 'aprovada' ? 'aprovada' : 'rejeitada'} com sucesso.`);
+  const handleUpdateSwapStatus = async (id: string, status: Exclude<TurnoSwapStatus, 'pendente'>) => {
+    if (!onUpdateTurnoSwapRequestStatus || updatingSwapId === id) return;
+    setUpdatingSwapId(id);
+
+    try {
+      const success = await onUpdateTurnoSwapRequestStatus(id, status);
+      if (success !== false) {
+        setToastMessage(`Solicitacao ${status === 'aprovada' ? 'aprovada' : 'rejeitada'} com sucesso.`);
+      } else {
+        setErrorMessage('Não foi possível atualizar a solicitação de troca.');
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível atualizar a solicitação de troca.');
+    } finally {
+      setUpdatingSwapId(null);
     }
   };
 
@@ -801,5 +827,7 @@ export function usePlanejamentoEscala({
     pendingTurnoSwapRequests,
     visibleCltToastAlerts,
     handleUpdateSwapStatus,
+    updatingSwapId,
+    setErrorMessage,
   };
 }

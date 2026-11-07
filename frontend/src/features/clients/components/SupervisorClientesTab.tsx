@@ -3,22 +3,22 @@ import { normalizarTexto } from '@shared/validadores';
 import { motion } from 'motion/react';
 import { Appointment, Client, Service } from '../../../types';
 import { AnamneseForm, AnamneseData } from '../../../components/AnamneseForm';
-import { formatAnamneseStorage, parseClientObservation } from '../../../utils/anamneseUtils';
+import { fichaOculta, formatAnamneseStorage, parseClientObservation } from '../../../utils/anamneseUtils';
 import { useSearch } from '../../../hooks/useSearch';
 import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { formatCpf, formatPhone } from '../../../utils/formatters';
 import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import { useAuth } from '../../../AuthContext';
-import { useClientAppointments } from '../../../api';
+import { useClientAppointments, useClients, useCompanyConfig } from '../../../api';
 import { LIMITE_HISTORICO_CLIENTE } from '@shared/agendaJanela';
 import { valorDoAtendimento } from '../../../utils/valorAtendimento';
 import { NovoClienteModal } from './NovoClienteModal';
 import { AvisoCliente } from '../../../components/AvisoCliente';
+import { FichaAnamneseModal } from '../../../components/FichaAnamneseModal';
 import { ImportarClientesModal } from './ImportarClientesModal';
 
 interface SupervisorClientesTabProps {
-  clients: Client[];
   appointments: Appointment[];
   services: Service[];
   onEditClient?: (id: string, clientData: Partial<Client>) => Promise<boolean | void> | void;
@@ -29,8 +29,9 @@ interface SupervisorClientesTabProps {
 }
 
 const ITEMS_PER_PAGE = 10;
+const SEM_CLIENTES: Client[] = [];
 
-export function SupervisorClientesTab({ clients, appointments, services, onEditClient, onDeleteClient, somenteAnamnese = false, setToastMessage }: SupervisorClientesTabProps) {
+export function SupervisorClientesTab({ appointments, services, onEditClient, onDeleteClient, somenteAnamnese = false, setToastMessage }: SupervisorClientesTabProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
@@ -38,8 +39,10 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
   const [editingClientNote, setEditingClientNote] = useState('');
   const [editingClientAlergias, setEditingClientAlergias] = useState('');
   const [editingClientPreferencias, setEditingClientPreferencias] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
   const [clientToDelete, setClientToDelete] = useState<string | null>(null);
-  const [summaryClient, setSummaryClient] = useState<{ id: string; name: string; note: string; items: string[]; data: AnamneseData } | null>(null);
+  // Só o id: a ficha aberta acompanha a lista quando ela recarrega (alteração feita em outro aparelho)
+  const [fichaClientId, setFichaClientId] = useState<string | null>(null);
   const [editingAnamneseClient, setEditingAnamneseClient] = useState<{ id: string; name: string; note: string; data: AnamneseData } | null>(null);
   const [historyClient, setHistoryClient] = useState<Client | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | '7days' | 'month'>('all');
@@ -47,9 +50,15 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
   const [abertoImportar, setAbertoImportar] = useState(false);
 
   // A agenda carregada cobre só o último ano; o histórico aberto busca o período todo do cliente
-  const { token } = useAuth();
+  const { token, currentUser } = useAuth();
+  const ehRecepcao = currentUser?.role === 'receptionist';
   const { data: fullClientAppointments, isLoading: loadingClientHistory, isError: clientHistoryError } = useClientAppointments(token, historyClient?.id ?? null);
+  // A aba lê a própria lista: o aviso de atualização e o de erro são da mesma consulta que ela mostra.
+  // A primeira carga fica com o carregador global do App (ele só monta as telas com os clientes prontos)
+  const { data: clients = SEM_CLIENTES, isFetching: atualizandoClientes, isError: erroClientes } = useClients(token);
+  const exigirAnamnese = useCompanyConfig(token).data?.exigirAnamnese === true;
 
+  const fichaClient = fichaClientId ? clients.find((c) => c.id === fichaClientId) ?? null : null;
   const filteredClients = useSearch(clients, searchTerm, (client) => [client.nome, client.telefone, client.cpf, client.email ?? undefined, client.codigo ? `#${client.codigo}` : undefined]);
 
   const normalizeValue = (value?: string) => normalizarTexto(value);
@@ -119,33 +128,49 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
 
   const mensagemDeErro = (error: unknown, padrao: string) => (error instanceof Error && error.message ? error.message : padrao);
 
+  const extrairListaTexto = (texto?: string, lista?: string[]) => {
+    if (lista && lista.length > 0) return lista;
+    if (!texto || !texto.trim()) return [];
+    return texto.split(',').map((item) => item.trim()).filter(Boolean);
+  };
+
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingClient || !onEditClient || isSaving) return;
+    setEditError(null);
 
     const parsedCurrent = parseClientObservation(editingClient.observacao);
-    const finalObservation = formatAnamneseStorage(editingClientNote, parsedCurrent.anamData);
+    const updatedAnamData: AnamneseData = {
+      ...parsedCurrent.anamData,
+      alergia: editingClientAlergias.trim(),
+      preferencia: editingClientPreferencias.trim(),
+    };
+    const finalObservation = formatAnamneseStorage(editingClientNote, updatedAnamData);
 
     setIsSaving(true);
     try {
-      // Sem permissão de cadastro (colaborador), envia só a anamnese; telefone/CPF mascarados nunca voltam à API
-      const resultado = await onEditClient(editingClient.id, somenteAnamnese
+      // Colaborador envia só a anamnese; recepção envia o telefone (e usa o modal da ficha para anamnese); supervisão envia tudo
+      const payload: Partial<Client> = somenteAnamnese
         ? { observacao: finalObservation }
-        : {
-          nome: editingClient.nome,
-          telefone: editingClient.telefone,
-          cpf: editingClient.cpf,
-          email: editingClient.email ?? '',
-          observacao: finalObservation,
-        });
+        : ehRecepcao
+          ? { telefone: editingClient.telefone }
+          : {
+            nome: editingClient.nome,
+            telefone: editingClient.telefone,
+            cpf: editingClient.cpf,
+            email: editingClient.email ?? '',
+            observacao: finalObservation,
+          };
+      const resultado = await onEditClient(editingClient.id, payload);
       if (resultado === false) throw new Error('Não foi possível atualizar o cliente.');
       mostrarMensagem('Cliente atualizado!');
       setEditingClient(null);
       setEditingClientNote('');
       setEditingClientAlergias('');
       setEditingClientPreferencias('');
+      setEditError(null);
     } catch (error) {
-      mostrarMensagem(mensagemDeErro(error, 'Não foi possível atualizar o cliente.'));
+      setEditError(mensagemDeErro(error, 'Não foi possível atualizar o cliente.'));
     } finally {
       setIsSaving(false);
     }
@@ -194,7 +219,6 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
   const edicaoAlterada = useAlterado(!!editingClient, [editingClient, editingClientNote, editingClientAlergias, editingClientPreferencias]);
   const fecharEdicao = () => { if (!isSaving && confirmarSaida(edicaoAlterada)) setEditingClient(null); };
   useModal(!!editingClient, fecharEdicao);
-  useModal(!!summaryClient, () => setSummaryClient(null));
   useModal(!!historyClient, () => setHistoryClient(null));
 
   return (
@@ -202,7 +226,12 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
       <div className="bg-surface-container-lowest p-8 rounded-3xl border border-outline-variant/10 shadow-sm">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
           <div>
-            <h3 className="text-2xl font-headline text-primary">Base de Clientes</h3>
+            <h3 className="text-2xl font-headline text-primary flex items-center gap-2">
+              Base de Clientes
+              {atualizandoClientes && (
+                <span role="status" className="material-symbols-outlined animate-spin text-[18px] text-on-surface-variant" aria-label="Atualizando lista">progress_activity</span>
+              )}
+            </h3>
             <p className="text-sm text-on-surface-variant">Gerencie o cadastro e historico dos seus clientes.</p>
           </div>
           <div className="flex w-full md:w-auto flex-col sm:flex-row gap-3">
@@ -246,20 +275,24 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
               </tr>
             </thead>
             <tbody>
-              {currentClients.map(client => (
+              {currentClients.map(client => {
+                const parsedObs = parseClientObservation(client.observacao);
+                const alergiasCliente = extrairListaTexto(parsedObs.anamData.alergia, client.alergias);
+                const preferenciasCliente = extrairListaTexto(parsedObs.anamData.preferencia, client.preferencias);
+                return (
                 <tr key={client.id} className="border-t border-outline-variant/10 hover:bg-surface/50">
-                  <td className="py-4 px-4 text-sm font-medium text-on-surface">{client.nome}{client.codigo ? <span className="ml-2 font-mono text-xs text-on-surface-variant">#{client.codigo}</span> : null}<AvisoCliente semFicha={client.temAnamnese === false} /></td>
+                  <td className="py-4 px-4 text-sm font-medium text-on-surface"><button type="button" onClick={() => setFichaClientId(client.id)} className="text-left hover:text-primary hover:underline">{client.nome}</button>{client.codigo ? <span className="ml-2 font-mono text-xs text-on-surface-variant">#{client.codigo}</span> : null}<AvisoCliente semFicha={client.temAnamnese === false} /></td>
                   <td className="py-4 px-4 text-sm text-on-surface-variant">{client.cpf ? formatCpf(client.cpf) : '-'}</td>
                   <td className="py-4 px-4 text-sm text-on-surface-variant">{client.telefone ? formatPhone(client.telefone) : '-'}</td>
                   <td className="py-4 px-4 text-xs hidden lg:table-cell">
                     <div className="flex flex-wrap gap-1">
-                      {client.alergias && client.alergias.length > 0 && <span className="bg-error/10 text-error px-2 py-0.5 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1"><span className="material-symbols-outlined text-[11px]">medical_information</span> Alergias</span>}
-                      {client.preferencias && client.preferencias.length > 0 && <span className="bg-tertiary/10 text-tertiary px-2 py-0.5 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1"><span className="material-symbols-outlined text-[11px]">favorite</span> Preferências</span>}
-                      {!client.alergias?.length && !client.preferencias?.length && <span className="text-on-surface-variant opacity-50">-</span>}
+                      {alergiasCliente.length > 0 && <span className="bg-error/10 text-error px-2 py-0.5 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1"><span className="material-symbols-outlined text-[11px]">medical_information</span> Alergias</span>}
+                      {preferenciasCliente.length > 0 && <span className="bg-tertiary/10 text-tertiary px-2 py-0.5 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1"><span className="material-symbols-outlined text-[11px]">favorite</span> Preferências</span>}
+                      {!alergiasCliente.length && !preferenciasCliente.length && <span className="text-on-surface-variant opacity-50">-</span>}
                     </div>
                   </td>
-                  <td className="py-4 px-4 text-xs text-on-surface-variant max-w-xs truncate hidden md:table-cell" title={parseClientObservation(client.observacao).note}>
-                    {parseClientObservation(client.observacao).note || 'Nenhuma'}
+                  <td className="py-4 px-4 text-xs text-on-surface-variant max-w-xs truncate hidden md:table-cell" title={parsedObs.note}>
+                    {parsedObs.note || 'Nenhuma'}
                   </td>
                   <td className="py-4 px-4 text-right">
                     <button
@@ -272,21 +305,20 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        const parsed = parseClientObservation(client.observacao);
-                        setSummaryClient({ id: client.id, name: client.nome, note: parsed.note, items: parsed.anamSummary, data: parsed.anamData });
-                      }}
+                      onClick={() => setFichaClientId(client.id)}
                       className="p-2 text-on-surface-variant hover:text-primary rounded-full"
-                      title="Resumo da ficha"
+                      title="Ver ficha de anamnese"
+                      aria-label="Ver ficha de anamnese"
                     >
                       <span className="material-symbols-outlined text-xl">summarize</span>
                     </button>
                     <button
                       onClick={() => {
+                        setEditError('');
                         setEditingClient(client);
-                        setEditingClientNote(parseClientObservation(client.observacao).note);
-                        setEditingClientAlergias((client.alergias || []).join(', '));
-                        setEditingClientPreferencias((client.preferencias || []).join(', '));
+                        setEditingClientNote(parsedObs.note);
+                        setEditingClientAlergias(alergiasCliente.join(', '));
+                        setEditingClientPreferencias(preferenciasCliente.join(', '));
                       }}
                       disabled={!onEditClient}
                       className="p-2 text-on-surface-variant hover:text-primary rounded-full disabled:opacity-40"
@@ -302,12 +334,15 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
 
-        {filteredClients.length === 0 && (
+        {erroClientes && clients.length === 0 ? (
+          <p role="alert" className="text-center py-16 text-sm text-error">Não foi possível carregar os clientes. Atualize a página.</p>
+        ) : filteredClients.length === 0 && (
           <div className="text-center py-16 text-on-surface-variant">
             <span className="material-symbols-outlined text-5xl opacity-50">person_search</span>
             <p className="mt-4 font-medium">Nenhum cliente encontrado.</p>
@@ -349,12 +384,17 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
               </button>
             </div>
             <form onSubmit={handleEditSubmit} className="space-y-4">
+              {editError && (
+                <p role="alert" className="text-xs text-error bg-error/10 border border-error/20 rounded-xl px-3 py-2">
+                  {editError}
+                </p>
+              )}
               <div>
                 <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Nome</label>
                 <input
                   required
                   type="text"
-                  value={editingClient.nome} readOnly={somenteAnamnese}
+                  value={editingClient.nome} readOnly={somenteAnamnese || ehRecepcao}
                   onChange={e => setEditingClient({ ...editingClient, nome: e.target.value })}
                   className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface"
                 />
@@ -374,13 +414,13 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
                 <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">CPF</label>
                 <input
                   type="text"
-                  value={editingClient.cpf || ''} readOnly={somenteAnamnese}
+                  value={editingClient.cpf || ''} readOnly={somenteAnamnese || ehRecepcao}
                   onChange={e => setEditingClient({ ...editingClient, cpf: formatCpf(e.target.value) })}
                   maxLength={14}
                   className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface"
                 />
               </div>
-              {!somenteAnamnese && (
+              {!somenteAnamnese && !ehRecepcao && (
                 <div>
                   <label htmlFor="cliente-email" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">E-mail</label>
                   <input
@@ -393,25 +433,29 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
                   />
                 </div>
               )}
-              <div>
-                <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Alergias e Restrições (Separado por vírgula)</label>
-                <input type="text" value={editingClientAlergias} onChange={e => setEditingClientAlergias(e.target.value)} placeholder="Ex: Óleo de Amêndoas, Lavanda" className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Preferências (Separado por vírgula)</label>
-                <input type="text" value={editingClientPreferencias} onChange={e => setEditingClientPreferencias(e.target.value)} placeholder="Ex: Pressão Forte, Chá Verde" className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Observacoes</label>
-                <textarea
-                  rows={3}
-                  value={editingClientNote}
-                  onChange={e => setEditingClientNote(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface resize-none"
-                />
-              </div>
-              <button type="submit" className="w-full bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim transition-all">
-                Salvar Alteracoes
+              {!ehRecepcao && (
+                <>
+                  <div>
+                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Alergias e Restrições (Separado por vírgula)</label>
+                    <input type="text" value={editingClientAlergias} onChange={e => setEditingClientAlergias(e.target.value)} placeholder="Ex: Óleo de Amêndoas, Lavanda" className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Preferências (Separado por vírgula)</label>
+                    <input type="text" value={editingClientPreferencias} onChange={e => setEditingClientPreferencias(e.target.value)} placeholder="Ex: Pressão Forte, Chá Verde" className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Observacoes</label>
+                    <textarea
+                      rows={3}
+                      value={editingClientNote}
+                      onChange={e => setEditingClientNote(e.target.value)}
+                      className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface resize-none"
+                    />
+                  </div>
+                </>
+              )}
+              <button type="submit" disabled={isSaving} className="w-full bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim transition-all disabled:opacity-50">
+                {isSaving ? 'Salvando...' : 'Salvar Alteracoes'}
               </button>
             </form>
           </div>
@@ -434,44 +478,20 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
         onConfirm={handleDeleteConfirm}
       />
 
-      {summaryClient && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div role="dialog" aria-modal="true" aria-label="Resumo da Ficha" className="bg-surface-container-lowest p-8 rounded-3xl shadow-xl max-w-xl w-full border border-outline-variant/20">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-headline text-primary">Resumo da Ficha</h2>
-              <button onClick={() => setSummaryClient(null)} className="p-2 hover:bg-surface-container rounded-full text-on-surface-variant">
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-            <p className="text-sm text-on-surface-variant mb-4">Cliente: <strong className="text-on-surface">{summaryClient.name}</strong></p>
-            {summaryClient.items.length === 0 ? (
-              <p className="text-sm text-on-surface-variant">Nenhuma ficha de anamnese registrada para este cliente.</p>
-            ) : (
-              <div className="max-h-72 overflow-y-auto custom-scrollbar space-y-2 pr-1">
-                {summaryClient.items.map((item, idx) => (
-                  <div key={`anam-${idx}`} className="bg-surface-container-low border border-outline-variant/20 rounded-xl px-3 py-2 text-sm text-on-surface">
-                    {item}
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setEditingAnamneseClient({ id: summaryClient.id, name: summaryClient.name, note: summaryClient.note, data: summaryClient.data });
-                  setSummaryClient(null);
-                }}
-                disabled={!onEditClient}
-                className="px-4 py-2 rounded-xl bg-surface-container border border-outline-variant/30 text-on-surface text-xs font-bold uppercase tracking-widest hover:bg-surface-container-high transition-colors disabled:opacity-40"
-              >
-                Alterar Ficha
-              </button>
-              <button onClick={() => setSummaryClient(null)} className="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold uppercase tracking-widest hover:bg-primary-dim transition-colors">
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
+      {fichaClient && (
+        <FichaAnamneseModal
+          nome={fichaClient.nome}
+          observacao={fichaClient.observacao}
+          restrita={fichaOculta(fichaClient)}
+          exigirAnamnese={exigirAnamnese}
+          // Supervisão/profissional autorizado ou recepção (atualização cega no balcão)
+          onEditar={onEditClient && (fichaClient.acessoSaude || ehRecepcao) ? () => {
+            const parsed = parseClientObservation(fichaClient.observacao);
+            setEditingAnamneseClient({ id: fichaClient.id, name: fichaClient.nome, note: parsed.note, data: parsed.anamData });
+            setFichaClientId(null);
+          } : undefined}
+          onClose={() => setFichaClientId(null)}
+        />
       )}
 
       {editingAnamneseClient && (
@@ -540,22 +560,26 @@ export function SupervisorClientesTab({ clients, appointments, services, onEditC
               const noShows = filteredHistory.filter((appointment) => appointment.status !== 'completed' && appointment.date < todayStr);
               const totalSpent = completedFiltered.reduce((sum, appointment) => sum + getAppointmentValue(appointment), 0);
 
+              const parsedHistoryObs = parseClientObservation(historyClient.observacao);
+              const alergiasHistorico = extrairListaTexto(parsedHistoryObs.anamData.alergia, historyClient.alergias);
+              const preferenciasHistorico = extrairListaTexto(parsedHistoryObs.anamData.preferencia, historyClient.preferencias);
+
               return (
                 <>
                   <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/20 mb-6 flex flex-col md:flex-row gap-6">
                      <div className="flex-1">
                         <h4 className="text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-2 flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">medical_information</span> Alergias & Restrições</h4>
-                        {historyClient.alergias?.length ? (
+                        {alergiasHistorico.length ? (
                            <div className="flex flex-wrap gap-1.5">
-                             {historyClient.alergias.map(a => <span key={a} className="bg-error/10 text-error px-2 py-1 rounded text-[11px] font-bold uppercase tracking-wider">{a}</span>)}
+                             {alergiasHistorico.map(a => <span key={a} className="bg-error/10 text-error px-2 py-1 rounded text-[11px] font-bold uppercase tracking-wider">{a}</span>)}
                            </div>
                         ) : <p className="text-xs text-on-surface-variant">Nenhuma restrição declarada.</p>}
                      </div>
                      <div className="flex-1 border-t md:border-t-0 md:border-l border-outline-variant/20 pt-4 md:pt-0 md:pl-6">
                         <h4 className="text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-2 flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">favorite</span> Preferências</h4>
-                        {historyClient.preferencias?.length ? (
+                        {preferenciasHistorico.length ? (
                            <div className="flex flex-wrap gap-1.5">
-                             {historyClient.preferencias.map(p => <span key={p} className="bg-tertiary/10 text-tertiary px-2 py-1 rounded text-[11px] font-bold uppercase tracking-wider">{p}</span>)}
+                             {preferenciasHistorico.map(p => <span key={p} className="bg-tertiary/10 text-tertiary px-2 py-1 rounded text-[11px] font-bold uppercase tracking-wider">{p}</span>)}
                            </div>
                         ) : <p className="text-xs text-on-surface-variant">Nenhuma preferência declarada.</p>}
                      </div>

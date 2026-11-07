@@ -6,7 +6,8 @@ import { getDuration } from '../utils/appointmentCore';
 import { AnamneseForm, AnamneseData, initialAnamnese, formatAnamnese } from '../../../components/AnamneseForm';
 import { AppointmentScheduleFields } from '../../../components/AppointmentScheduleFields';
 import { ModalFormulario } from '../../../components/ModalFormulario';
-import { formatAnamneseStorage, hasAnamnese, parseClientObservation } from '../../../utils/anamneseUtils';
+import { fichaOculta, formatAnamneseStorage, hasAnamnese, parseClientObservation } from '../../../utils/anamneseUtils';
+import { FichaAnamneseModal } from '../../../components/FichaAnamneseModal';
 import { AvisoCliente } from '../../../components/AvisoCliente';
 import { MENSAGEM_ANAMNESE_OBRIGATORIA } from '@shared/anamnese';
 import { useAuth } from '../../../AuthContext';
@@ -19,7 +20,7 @@ import { isApiError, useCompanyConfig } from '../../../api';
 const normalizeSearch = normalizarTexto;
 
 const normalizeEligibilityMode = (mode?: string): ServiceEligibilityMode => {
-  if (mode === 'cargo' || mode === 'habilidade' || mode === 'livre') return mode;
+  if (mode === 'cargo' || mode === 'habilidade' || mode === 'profissional' || mode === 'livre') return mode;
   return 'livre';
 };
 
@@ -33,6 +34,13 @@ const normalizeStringList = (value: unknown): string[] => {
 const isEmployeeEligibleForService = (employee: Employee, service: Service): boolean => {
   const mode = normalizeEligibilityMode(service.modoElegibilidade);
   if (mode === 'livre') return true;
+
+  if (mode === 'profissional') {
+    const allowedProfessionals = normalizeStringList(service.profissionaisPermitidos);
+    if (allowedProfessionals.length === 0) return true;
+    const employeeNameNorm = normalizeSearch(employee.name || '');
+    return allowedProfessionals.some((item) => item === employee.id || normalizeSearch(item) === employeeNameNorm);
+  }
 
   if (mode === 'cargo') {
     const allowedCargos = normalizeStringList(service.cargosPermitidos).map((cargo) => normalizeSearch(cargo));
@@ -149,6 +157,8 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const [showAnamnese, setShowAnamnese] = useState(() => Boolean(draft.showAnamnese));
   const [anamneseData, setAnamneseData] = useState<AnamneseData>(() => draft.anamneseData ?? initialAnamnese);
+  // Cliente já cadastrado: abre primeiro a visualização da ficha (o formulário vazio parecia ficha apagada)
+  const [verFicha, setVerFicha] = useState(false);
   const clientSearchWrapperRef = useRef<HTMLDivElement | null>(null);
   const canShowBookingDetails = clientMode === 'new' || Boolean(selectedClientId);
   const bookingBusy = Boolean(isAddingAppointment || isSubmitting);
@@ -297,10 +307,25 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   }, [filteredClients, isClientSearchOpen]);
 
   // Ficha: a do cadastro (a API diz se existe, mesmo para quem não vê o conteúdo) ou a preenchida agora
-  const { token } = useAuth();
+  const { token, currentUser } = useAuth();
   const exigirAnamnese = useCompanyConfig(token).data?.exigirAnamnese === true;
   const clienteEscolhido = clientMode === 'search' ? clients.find((c) => c.id === selectedClientId) : undefined;
   const clienteTemFicha = Boolean(clienteEscolhido?.temAnamnese) || hasAnamnese(anamneseData);
+  const gerenciaAgenda = currentUser?.role === 'receptionist' || currentUser?.role === 'supervisor' || currentUser?.role === 'admin';
+  // Quem grava a ficha: cliente novo, quem tem acesso à saúde, ou a recepção no balcão (sem ver o histórico anterior)
+  const podeEditarFicha = !clienteEscolhido || clienteEscolhido.acessoSaude === true || gerenciaAgenda || (exigirAnamnese && !clienteEscolhido.temAnamnese);
+  // Uma regra para o botão dos detalhes: com ficha (ou sem poder preencher) mostra a ficha; senão abre o formulário
+  const mostraFicha = Boolean(clienteEscolhido) && (clienteTemFicha || !podeEditarFicha);
+  const rotuloFicha = mostraFicha ? 'Ver Ficha do Cliente' : exigirAnamnese && !clienteTemFicha ? '+ Ficha do Cliente (obrigatória)' : '+ Ficha do Cliente';
+
+  const limparDadosClienteSelecionado = () => {
+    setSelectedClientId(null);
+    setBookName('');
+    setBookPhone('');
+    setBookCpf('');
+    setBookClientObservation('');
+    setAnamneseData(initialAnamnese);
+  };
 
   const selectClient = (client: Client) => {
     const parsed = parseClientObservation(client.observacao);
@@ -359,7 +384,12 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     setClientMode(mode);
     setConflictMessage(null);
     if (mode === 'new') {
-      setSelectedClientId(null);
+      if (selectedClientId) {
+        limparDadosClienteSelecionado();
+      } else {
+        setBookClientObservation('');
+        setAnamneseData(initialAnamnese);
+      }
       setClientSearchTerm('');
       setIsClientSearchOpen(false);
       return;
@@ -545,7 +575,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
                   onChange={e => {
                     setConflictMessage(null);
                     setClientSearchTerm(e.target.value);
-                    setSelectedClientId(null);
+                    if (selectedClientId) limparDadosClienteSelecionado();
                     setIsClientSearchOpen(true);
                   }}
                   className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl pl-10 p-3 pr-24 focus:ring-1 focus:ring-primary text-sm"
@@ -557,7 +587,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
                     type="button"
                     onClick={() => {
                       setClientSearchTerm('');
-                      setSelectedClientId(null);
+                      limparDadosClienteSelecionado();
                       setIsClientSearchOpen(false);
                     }}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] uppercase font-bold tracking-widest text-on-surface-variant hover:text-primary"
@@ -618,7 +648,11 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
                 <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Cliente Selecionado</p>
                 <p className="text-sm font-bold text-on-surface truncate">{bookName || 'Nenhum cliente selecionado'}{selectedClientId && <AvisoCliente semFicha={!clienteTemFicha} />}</p>
               </div>
-              {selectedClientId && <span className="text-[11px] text-primary font-bold uppercase tracking-widest">ok</span>}
+              {clienteEscolhido && (
+                <button type="button" onClick={() => setVerFicha(true)} className="text-[11px] text-primary font-bold uppercase tracking-widest hover:underline whitespace-nowrap">
+                  Ver ficha
+                </button>
+              )}
             </div>
           )}
           {canShowBookingDetails && (
@@ -672,13 +706,24 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
             detailsLabel="Observações"
             detailsPlaceholder="Ex: Preferências do cliente..."
             detailsAction={(
-              <button type="button" onClick={() => setShowAnamnese(true)} className={`text-[11px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors ${exigirAnamnese && !clienteTemFicha ? 'bg-error/10 text-error hover:bg-error/20' : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'}`}>
-                {exigirAnamnese && !clienteTemFicha ? '+ Ficha do Cliente (obrigatória)' : '+ Ficha do Cliente'}
+              <button type="button" onClick={() => (mostraFicha ? setVerFicha(true) : setShowAnamnese(true))} className={`text-[11px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors ${exigirAnamnese && !clienteTemFicha ? 'bg-error/10 text-error hover:bg-error/20' : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'}`}>
+                {rotuloFicha}
               </button>
             )}
           />
         )}
       </ModalFormulario>
+      {verFicha && clienteEscolhido && (
+        <FichaAnamneseModal
+          nome={clienteEscolhido.nome}
+          // Estado atual do formulário: a ficha do cadastro (carregada em selectClient) com o que foi alterado agora
+          observacao={formatAnamneseStorage(bookClientObservation, anamneseData)}
+          restrita={fichaOculta(clienteEscolhido) && !hasAnamnese(anamneseData)}
+          exigirAnamnese={exigirAnamnese}
+          onEditar={podeEditarFicha ? () => { setVerFicha(false); setShowAnamnese(true); } : undefined}
+          onClose={() => setVerFicha(false)}
+        />
+      )}
       {showAnamnese && <AnamneseForm data={anamneseData} onChange={setAnamneseData} onClose={() => setShowAnamnese(false)} />}
     </>
   );

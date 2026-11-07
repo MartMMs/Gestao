@@ -78,6 +78,8 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
     visibleCltToastAlerts,
     pendingTurnoSwapRequests,
     handleUpdateSwapStatus,
+    updatingSwapId,
+    setErrorMessage,
     setDismissedCltAlertIds,
     selectedScaleEmployee,
     selectedScaleCalendar,
@@ -508,15 +510,17 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                           <div className="mt-2 flex gap-2">
                             <button
                               type="button"
+                              disabled={updatingSwapId === request.id}
                               onClick={() => handleUpdateSwapStatus(request.id, 'aprovada')}
-                              className="flex-1 h-7 rounded-lg bg-primary text-on-primary text-[11px] font-bold uppercase tracking-wider"
+                              className="flex-1 h-7 rounded-lg bg-primary text-on-primary text-[11px] font-bold uppercase tracking-wider disabled:opacity-50"
                             >
                               Aprovar
                             </button>
                             <button
                               type="button"
+                              disabled={updatingSwapId === request.id}
                               onClick={() => handleUpdateSwapStatus(request.id, 'rejeitada')}
-                              className="flex-1 h-7 rounded-lg bg-error/20 text-error text-[11px] font-bold uppercase tracking-wider"
+                              className="flex-1 h-7 rounded-lg bg-error/20 text-error text-[11px] font-bold uppercase tracking-wider disabled:opacity-50"
                             >
                               Rejeitar
                             </button>
@@ -551,26 +555,44 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                         if (!fromDia || !toDia) return;
 
                         const employeeId = selectedScaleEmployee.id;
+                        const fromKey = `${employeeId}:${fromDate}`;
+                        const toKey = `${employeeId}:${toDate}`;
+                        let prevFrom: ScaleOverridePayload | undefined;
+                        let prevTo: ScaleOverridePayload | undefined;
 
-                        setPlanningOverrides((prev) => ({
-                          ...prev,
-                          [`${employeeId}:${fromDate}`]: {
-                            colaboradorId: employeeId,
-                            data: fromDate,
-                            tipo: toDia.tipo,
-                            turno: toDia.tipo === 'trabalho' ? toDia.turno : undefined,
-                            descricao: toDia.descricao,
-                          },
-                          [`${employeeId}:${toDate}`]: {
-                            colaboradorId: employeeId,
-                            data: toDate,
-                            tipo: fromDia.tipo,
-                            turno: fromDia.tipo === 'trabalho' ? fromDia.turno : undefined,
-                            descricao: fromDia.descricao,
-                          },
-                        }));
+                        setPlanningOverrides((prev) => {
+                          prevFrom = prev[fromKey];
+                          prevTo = prev[toKey];
+                          return {
+                            ...prev,
+                            [fromKey]: {
+                              colaboradorId: employeeId,
+                              data: fromDate,
+                              tipo: toDia.tipo,
+                              turno: toDia.tipo === 'trabalho' ? toDia.turno : undefined,
+                              descricao: toDia.descricao,
+                            },
+                            [toKey]: {
+                              colaboradorId: employeeId,
+                              data: toDate,
+                              tipo: fromDia.tipo,
+                              turno: fromDia.tipo === 'trabalho' ? fromDia.turno : undefined,
+                              descricao: fromDia.descricao,
+                            },
+                          };
+                        });
 
                         void (async () => {
+                          const revertSwap = () => {
+                            setPlanningOverrides((prev) => {
+                              const next = { ...prev };
+                              if (prevFrom) next[fromKey] = prevFrom;
+                              else delete next[fromKey];
+                              if (prevTo) next[toKey] = prevTo;
+                              else delete next[toKey];
+                              return next;
+                            });
+                          };
                           try {
                             if (onSwapScaleDays) {
                               const success = await onSwapScaleDays({
@@ -594,14 +616,16 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                                 },
                               });
                               if (success === false) {
-                                setToastMessage('Troca aplicada localmente. Sincronização pendente.');
+                                revertSwap();
+                                setErrorMessage('Não foi possível sincronizar a troca de dias com o servidor.');
                                 return;
                               }
                             }
 
                             setToastMessage(`Dia ${from} trocado com dia ${to}.`);
                           } catch (error) {
-                            setToastMessage('Troca aplicada localmente. Falha na sincronização com servidor.');
+                            revertSwap();
+                            setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da troca de dias com o servidor.');
                           }
                         })();
                       }}
@@ -657,25 +681,44 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                       const toDia = buildScaleForEmployee(toEmp).find((d) => d.data === toDay);
                       if (!fromDia || !toDia) return;
 
-                      setPlanningOverrides((prev) => ({
-                        ...prev,
-                        [`${fromEmp}:${fromDay}`]: {
-                          colaboradorId: fromEmp,
-                          data: fromDay,
-                          tipo: toDia.tipo,
-                          turno: toDia.tipo === 'trabalho' ? toDia.turno : undefined,
-                          descricao: toDia.descricao,
-                        },
-                        [`${toEmp}:${toDay}`]: {
-                          colaboradorId: toEmp,
-                          data: toDay,
-                          tipo: fromDia.tipo,
-                          turno: fromDia.tipo === 'trabalho' ? fromDia.turno : undefined,
-                          descricao: fromDia.descricao,
-                        },
-                      }));
+                      const fromKey = `${fromEmp}:${fromDay}`;
+                      const toKey = `${toEmp}:${toDay}`;
+                      let prevFrom: ScaleOverridePayload | undefined;
+                      let prevTo: ScaleOverridePayload | undefined;
+
+                      setPlanningOverrides((prev) => {
+                        prevFrom = prev[fromKey];
+                        prevTo = prev[toKey];
+                        return {
+                          ...prev,
+                          [fromKey]: {
+                            colaboradorId: fromEmp,
+                            data: fromDay,
+                            tipo: toDia.tipo,
+                            turno: toDia.tipo === 'trabalho' ? toDia.turno : undefined,
+                            descricao: toDia.descricao,
+                          },
+                          [toKey]: {
+                            colaboradorId: toEmp,
+                            data: toDay,
+                            tipo: fromDia.tipo,
+                            turno: fromDia.tipo === 'trabalho' ? fromDia.turno : undefined,
+                            descricao: fromDia.descricao,
+                          },
+                        };
+                      });
 
                       void (async () => {
+                        const revertSwap = () => {
+                          setPlanningOverrides((prev) => {
+                            const next = { ...prev };
+                            if (prevFrom) next[fromKey] = prevFrom;
+                            else delete next[fromKey];
+                            if (prevTo) next[toKey] = prevTo;
+                            else delete next[toKey];
+                            return next;
+                          });
+                        };
                         try {
                           if (onSwapScaleDays) {
                             const success = await onSwapScaleDays({
@@ -699,14 +742,16 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                               },
                             });
                             if (success === false) {
-                              setToastMessage('Transferência aplicada localmente. Sincronização pendente.');
+                              revertSwap();
+                              setErrorMessage('Não foi possível sincronizar a transferência de turno com o servidor.');
                               return;
                             }
                           }
 
                           setToastMessage(`Transferência aplicada: ${fromDay} → ${toDay}`);
                         } catch (error) {
-                          setToastMessage('Transferência aplicada localmente. Falha na sincronização com servidor.');
+                          revertSwap();
+                          setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da transferência com o servidor.');
                         }
                       })();
                     }}
@@ -723,7 +768,9 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                       const sourceDia = buildScaleForEmployee(empId).find((d) => d.data === fromDate);
                       if (!sourceDia) return;
 
+                      let prevSnapshot: Record<string, ScaleOverridePayload> = {};
                       setPlanningOverrides((prev) => {
+                        prevSnapshot = prev;
                         const next = { ...prev };
                         targetDates.forEach((targetDate) => {
                           next[`${empId}:${targetDate}`] = {
@@ -738,6 +785,17 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                       });
 
                       void (async () => {
+                        const revertReplication = () => {
+                          setPlanningOverrides((prev) => {
+                            const next = { ...prev };
+                            targetDates.forEach((targetDate) => {
+                              const key = `${empId}:${targetDate}`;
+                              if (prevSnapshot[key]) next[key] = prevSnapshot[key];
+                              else delete next[key];
+                            });
+                            return next;
+                          });
+                        };
                         try {
                           if (onReplicateScaleDays) {
                             const success = await onReplicateScaleDays({
@@ -751,14 +809,16 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                               },
                             });
                             if (success === false) {
-                              setToastMessage('Replicação aplicada localmente. Sincronização pendente.');
+                              revertReplication();
+                              setErrorMessage('Não foi possível sincronizar a replicação da escala com o servidor.');
                               return;
                             }
                           }
 
                           setToastMessage(`Replicação aplicada em ${targetDates.length} dia(s).`);
                         } catch (error) {
-                          setToastMessage('Replicação aplicada localmente. Falha na sincronização com servidor.');
+                          revertReplication();
+                          setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da replicação com o servidor.');
                         }
                       })();
                     }}
@@ -790,17 +850,23 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
               const data = selectedPlanningDay.data;
               const employeeId = selectedPlanningEmployeeId || selectedScaleEmployee?.id;
               if (!employeeId) return;
+              const key = `${employeeId}:${data}`;
+              const previousDayState = selectedPlanningDay;
+              let previousOverride: ScaleOverridePayload | undefined;
 
-              setPlanningOverrides((prev) => ({
-                ...prev,
-                [`${employeeId}:${data}`]: {
-                  colaboradorId: employeeId,
-                  data,
-                  tipo,
-                  turno: tipo === 'trabalho' ? turno : undefined,
-                  descricao,
-                },
-              }));
+              setPlanningOverrides((prev) => {
+                previousOverride = prev[key];
+                return {
+                  ...prev,
+                  [key]: {
+                    colaboradorId: employeeId,
+                    data,
+                    tipo,
+                    turno: tipo === 'trabalho' ? turno : undefined,
+                    descricao,
+                  },
+                };
+              });
 
               setSelectedPlanningDay((prev) => {
                 if (!prev || prev.data !== data) return prev;
@@ -816,6 +882,16 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                 };
               });
 
+              const revertPopoverChange = () => {
+                setPlanningOverrides((prev) => {
+                  const next = { ...prev };
+                  if (previousOverride) next[key] = previousOverride;
+                  else delete next[key];
+                  return next;
+                });
+                setSelectedPlanningDay(previousDayState);
+              };
+
               try {
                 if (onSaveScaleOverride) {
                   const success = await onSaveScaleOverride({
@@ -826,14 +902,16 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     descricao,
                   });
                   if (success === false) {
-                    setToastMessage('Dia atualizado localmente. Sincronização pendente.');
+                    revertPopoverChange();
+                    setErrorMessage('Não foi possível sincronizar a atualização do dia com o servidor.');
                     return;
                   }
                 }
 
                 setToastMessage('Dia planejado salvo com sucesso.');
               } catch (error) {
-                setToastMessage('Dia atualizado localmente. Falha na sincronização com servidor.');
+                revertPopoverChange();
+                setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização do dia com o servidor.');
               }
             }}
           />

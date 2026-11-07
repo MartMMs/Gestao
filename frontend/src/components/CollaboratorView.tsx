@@ -123,12 +123,18 @@ export function CollaboratorView({
     };
   }, [myAppointments, currentUser]);
 
+  const [completingId, setCompletingId] = useState<string | null>(null);
+
   const handleComplete = async (id: string) => {
+    if (completingId === id) return;
+    setCompletingId(id);
     try {
       await onCompleteAppointment(id);
       setToastMessage('Atendimento concluído com sucesso!');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Não foi possível concluir o atendimento.');
+    } finally {
+      setCompletingId(null);
     }
   };
 
@@ -340,7 +346,7 @@ export function CollaboratorView({
                         <span className={`text-xs font-bold leading-none ${isCompleted ? 'text-outline-variant line-through' : (isNoShow || delayMinutes > 0) ? 'text-error' : 'text-primary'}`}>{app.time}</span>
                         {!isCompleted && (
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-surface-container-lowest/90 rounded-full shadow-sm p-1 border border-outline-variant/20 absolute right-1.5 top-1.5 z-30">
-                            <button onClick={() => handleComplete(app.id)} className="text-on-surface-variant hover:text-primary p-1 rounded-full flex items-center justify-center" title="Concluir Atendimento">
+                            <button onClick={(e) => { e.stopPropagation(); void handleComplete(app.id); }} disabled={completingId === app.id} className="text-on-surface-variant hover:text-primary p-1 rounded-full flex items-center justify-center disabled:opacity-40" title="Concluir Atendimento">
                               <span className="material-symbols-outlined text-base">check_circle</span>
                             </button>
                             <button onClick={(e) => { e.stopPropagation(); handleDeleteAppointmentClick(app.id); }} className="text-on-surface-variant hover:text-error p-1 rounded-full" title="Cancelar Agendamento">
@@ -395,7 +401,6 @@ export function CollaboratorView({
 
       <div className={`w-full max-w-6xl mt-8 ${activeTab === 'clientes' ? '' : 'hidden'}`}>
         <SupervisorClientesTab
-          clients={clients}
           appointments={appointments}
           services={services}
           onEditClient={onEditClient}

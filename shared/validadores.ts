@@ -86,3 +86,11 @@ export const variantesCpf = (cpf: unknown): string[] => {
   if (d.length !== 11) return [d];
   return [d, `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`];
 };
+
+// Credenciais de login da equipe: mesma regra na API, na tela de login e no cadastro.
+// Usuário sem "@" (é o "@" que separa usuário de e-mail no login); hífen escapado para valer também no atributo
+// pattern do HTML (que compila com a flag v, onde "-" solto numa classe é erro)
+export const USUARIO_REGEX = /^[a-z0-9._\-]{3,40}$/;
+export const MENSAGEM_USUARIO_INVALIDO = 'Usuário de acesso inválido: use de 3 a 40 letras sem acento, números, ponto, hífen ou sublinhado.';
+// Formato simples de e-mail (login, contato da empresa); o cadastro de clientes usa emailValido, mais rígido
+export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

@@ -159,6 +159,7 @@ const parseStoredUser = (): Employee | null => {
       id: String(parsed.id),
       name: typeof parsed.name === 'string' ? parsed.name : 'Usuário',
       email: typeof parsed.email === 'string' ? parsed.email : '',
+      usuario: typeof parsed.usuario === 'string' ? parsed.usuario : undefined,
       role,
       specialty: typeof parsed.specialty === 'string' ? parsed.specialty : '',
       avatar: typeof parsed.avatar === 'string'
@@ -240,7 +241,7 @@ interface AuthContextType {
   currentUser: Employee | null;
   token: string | null;
   loginError: string | null;
-  handleLogin: (email: string, pass: string, opcoes?: OpcoesLogin) => Promise<void>;
+  handleLogin: (login: string, pass: string, opcoes?: OpcoesLogin) => Promise<void>;
   handleLogout: () => void;
   // Resposta de POST /minha-senha: sessão nova, sem a marca de senha provisória
   concluirTrocaDeSenha: (resposta: RespostaTrocaSenha) => void;
@@ -262,14 +263,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loginError, setLoginError] = useState<string | null>(null);
   const lastActivityRef = useRef(0);
 
-  const handleLogin = useCallback(async (email: string, pass: string, opcoes: OpcoesLogin = {}) => {
+  // O login digitado (usuário ou e-mail) vai no campo "email" do corpo, que a API mantém por compatibilidade
+  const handleLogin = useCallback(async (login: string, pass: string, opcoes: OpcoesLogin = {}) => {
     try {
       await logoutPendente;
       const enviarUmaVez = (desafio?: { id: string; nonce: string }) => fetch(`${getApiUrl()}/login`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, senha: pass, campo_controle: opcoes.site, ...(desafio ? { desafio } : {}) }),
+        body: JSON.stringify({ email: login, senha: pass, campo_controle: opcoes.site, ...(desafio ? { desafio } : {}) }),
       });
       // Outra senha desta conta estava sendo conferida (dura menos de 1 s): tenta de novo sozinho, sem a pessoa ver
       const enviar = async (desafio?: { id: string; nonce: string }) => {
@@ -299,7 +301,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const erro = await response.json().catch(() => null);
         // Prova vencida no caminho (aba em segundo plano): a mensagem do servidor parece algo ainda em andamento
         if (erro?.code === CODIGO_DESAFIO_NECESSARIO) throw new Error('A verificação demorou demais. Digite a senha e clique em Entrar de novo.');
-        throw new Error(erro?.erro || 'E-mail ou senha incorretos.');
+        throw new Error(erro?.erro || 'Usuário ou senha incorretos.');
       }
 
       const data = await response.json();
@@ -313,7 +315,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const loggedUser: Employee = {
         id: String(data.usuario.id),
         name: data.usuario.nome || 'Usuário',
-        email: data.usuario.email || email,
+        // Quem entrou pelo usuário não tem e-mail: o login digitado não vira e-mail na sessão
+        email: data.usuario.email || '',
+        usuario: data.usuario.usuario || undefined,
         role: (['admin', 'supervisor', 'receptionist'].includes(data.usuario.papel) ? data.usuario.papel : 'collaborator'),
         specialty: data.usuario.especialidade,
         avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${data.usuario.nome || 'usuario'}`,

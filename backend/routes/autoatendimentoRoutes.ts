@@ -16,7 +16,7 @@ import {
   erroElegibilidade,
   existeTrava,
   mensagemIndisponibilidadeEscala, mensagemForaDoTurno,
-  verificarCLTInterjornada,
+  verificarCLTInterjornadaEmMemoria,
 } from '../services/agendaService';
 import { HttpError, responderErro, ipDoCliente } from '../lib/http';
 import { redactSensitiveData } from '../../shared/redact';
@@ -191,7 +191,10 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       // Avisa já na escolha (não só ao reservar) que a soma dos serviços passa do limite do totem
       if (resumo.duracaoTotalSlot > DURACAO_MAXIMA_TOTEM_MIN) return res.status(400).json({ erro: MENSAGEM_DURACAO_MAXIMA });
 
-      const [colaboradores, salas, agendamentos, escalas] = await Promise.all([
+      const referenciaDiaMs = new Date(`${data}T12:00:00Z`).getTime();
+      const janelaCltMs = 48 * 3_600_000;
+
+      const [colaboradores, salas, agendamentos, escalas, agendamentosVizinhos] = await Promise.all([
         prisma.colaborador.findMany({
           where: { ativo: true, papel: { in: PAPEIS_ATENDIMENTO } },
           include: { bloqueios: { where: { data } } },
@@ -200,7 +203,22 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         prisma.sala.findMany({ where: { ativa: true }, orderBy: { numero: 'asc' } }),
         agendamentosDoDia(prisma, data),
         prisma.escalaOverride.findMany({ where: { data } }),
+        prisma.agendamento.findMany({
+          where: {
+            status: { notIn: ['cancelled', 'no_show'] },
+            data: { gte: new Date(referenciaDiaMs - janelaCltMs), lte: new Date(referenciaDiaMs + janelaCltMs) },
+          },
+          include: { servicos: true },
+          orderBy: { data: 'asc' },
+        }),
       ]);
+
+      const agendamentosPorColab = new Map<string, typeof agendamentosVizinhos>();
+      for (const ag of agendamentosVizinhos) {
+        const lista = agendamentosPorColab.get(ag.colaboradorId) ?? [];
+        lista.push(ag);
+        agendamentosPorColab.set(ag.colaboradorId, lista);
+      }
 
       const indisponivelNaEscala = new Set(escalas.filter((e) => mensagemIndisponibilidadeEscala(e)).map((e) => e.colaboradorId));
       const elegiveis = colaboradores.filter((c) => !indisponivelNaEscala.has(c.id) && !erroElegibilidade(c, servicos));
@@ -230,7 +248,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
           if (agendamentos.some((ag) => ag.colaboradorId === colab.id && intervalosSobrepoem(inicio, fim, ag.inicioMin, ag.fimMin))) continue;
           if (await existeTrava(blocos.map((t) => chaveTravaProfissional(data, t, colab.id)))) continue;
           // Mesma regra de CLT usada na reserva: evita oferecer horário que seria recusado em seguida
-          if (await verificarCLTInterjornada(prisma, colab.id, instanteNoFuso(data, horario), resumo.duracaoTotalSlot)) continue;
+          if (verificarCLTInterjornadaEmMemoria(agendamentosPorColab.get(colab.id) ?? [], instanteNoFuso(data, horario), resumo.duracaoTotalSlot)) continue;
           terapeuta = colab;
           break;
         }

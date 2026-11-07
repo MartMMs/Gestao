@@ -12,8 +12,9 @@ export const ORIGEM_TOTEM_CHECKIN = 'autoatendimento_checkin';
 /**
  * Regras de LGPD para respostas da API:
  * - supervisores e admins veem tudo;
- * - demais usuários veem CPF e telefone mascarados;
- * - dados de saúde (anamnese) só aparecem para o profissional do próprio atendimento.
+ * - recepção vê o telefone completo (para ligar/confirmar com o cliente), mas CPF e e-mail mascarados;
+ * - colaboradores veem CPF e telefone mascarados;
+ * - dados de saúde (anamnese) só aparecem em tela para a supervisão e para o profissional do atendimento.
  */
 
 export const mascararCpf = (cpf?: string | null) => {
@@ -35,10 +36,12 @@ type ClienteBase = { id: string; cpf?: string | null; telefone?: string | null; 
 
 export const prepararCliente = <T extends ClienteBase>(cliente: T, req: Request, veSaude: boolean): T => {
   if (!cliente || usuarioEhSupervisor(req)) return cliente;
+  // A recepção precisa do telefone completo para ligar/confirmar caso o cliente atrase ou não compareça
+  const veTelefone = usuarioGerenciaAgenda(req);
   return {
     ...cliente,
     cpf: mascararCpf(cliente.cpf),
-    telefone: mascararTelefone(cliente.telefone),
+    telefone: veTelefone ? cliente.telefone : mascararTelefone(cliente.telefone),
     // E-mail não tem máscara útil: só a supervisão vê
     ...('email' in cliente ? { email: null } : {}),
     observacao: veSaude ? cliente.observacao : null,
@@ -64,11 +67,10 @@ const ACESSO_DEPOIS_DIAS = 30; // atendimento concluído nos últimos 30 dias
 
 /**
  * Clientes cuja anamnese o profissional pode ver/editar. Regras:
- * - só profissionais que atendem (recepção não tem acesso à saúde);
- * - só atendimentos ativos e próximos (até 7 dias à frente) ou concluídos há até 30 dias:
- *   cancelado, falta ou atendimento antigo não dão acesso permanente;
- * - agendamentos que o próprio colaborador criou não liberam acesso
- *   (senão bastaria agendar qualquer cliente para si para ler a ficha de saúde dele).
+ * - só profissionais que atendem (recepção não vê o histórico de saúde em tela);
+ * - só atendimentos ativos e próximos (até 7 dias à frente) ou concluídos há até 30 dias
+ *   (inclusive quando o próprio profissional criou o agendamento para executar o serviço);
+ * - reserva do totem ainda sem check-in na recepção não libera acesso.
  */
 export const clientesComAcessoSaude = async (req: Request): Promise<Set<string>> => {
   const usuario = getUsuario(req);
@@ -80,7 +82,7 @@ export const clientesComAcessoSaude = async (req: Request): Promise<Set<string>>
       // Reserva do totem só libera a ficha depois do check-in na recepção: qualquer pessoa com nome, telefone e CPF
       // de alguém consegue reservar ali (inclusive o próprio profissional, escolhendo a si mesmo)
       AND: [
-        { OR: [{ reservaOrigem: null }, { reservaOrigem: { notIn: [ORIGEM_COLABORADOR, ORIGEM_TOTEM] } }] },
+        { OR: [{ reservaOrigem: null }, { reservaOrigem: { not: ORIGEM_TOTEM } }] },
         {
           OR: [
             { status: 'scheduled', data: { gte: new Date(agora - 12 * 3_600_000), lte: new Date(agora + ACESSO_ANTES_HORAS * 3_600_000) } },

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Role } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { LinksDocumentosLegais } from './DocumentosLegais';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -211,7 +212,8 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
           <span className="opacity-40">|</span>
           <span>Sistema Interno</span>
         </div>
-        <div className="flex gap-10">
+        <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-3">
+          <LinksDocumentosLegais />
           <span className="text-outline-variant">Uso Exclusivo para Colaboradores</span>
         </div>
       </footer>

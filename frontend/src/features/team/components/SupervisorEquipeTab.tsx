@@ -4,13 +4,12 @@ import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import { motion } from 'motion/react';
 import { Employee, Role, EmployeeUpdate } from '../../../types';
 import { useAuth } from '../../../AuthContext';
-import { isApiError, useAddTurno, useCompanyConfig, useDeleteTurno, useServices, useTurnos } from '../../../api';
+import { isApiError, useAddTurno, useDeleteTurno, useServices, useTurnos } from '../../../api';
 import { useSearch } from '../../../hooks/useSearch';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
-import { isTeamMember, gerarSenhaProvisoria, gerarEmailUnico } from '../../../utils/formatters';
-
-const PROVEDORES_PUBLICOS = /^(gmail|googlemail|hotmail|outlook|live|msn|yahoo|ymail|icloud|me|uol|bol|terra|ig|globo|protonmail|proton)\./;
+import { isTeamMember, gerarSenhaProvisoria } from '../../../utils/formatters';
+import { MENSAGEM_USUARIO_INVALIDO, USUARIO_REGEX } from '@shared/validadores';
 
 interface SupervisorEquipeTabProps {
   employees: Employee[];
@@ -38,9 +37,11 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   ];
   const [newEmpName, setNewEmpName] = useState('');
   const [newEmpEmail, setNewEmpEmail] = useState('');
-  // Na criação o campo mostra o e-mail sugerido até a pessoa mexer nele; depois vale o que ela digitou (até vazio)
-  const [emailEditado, setEmailEditado] = useState(false);
-  const [newEmpSpecialty, setNewEmpSpecialty] = useState('');
+  const [newEmpUsuario, setNewEmpUsuario] = useState('');
+  // Valores gravados da conta em edição: só vai para a API o que de fato mudou (e-mail antigo com maiúsculas,
+  // intocado, não conta como troca de credencial)
+  const [credenciaisOriginais, setCredenciaisOriginais] = useState({ email: '', usuario: '' });
+  const [newEmpSenhaAtual, setNewEmpSenhaAtual] = useState('');
   const [newEmpCargo, setNewEmpCargo] = useState('');
   const [newEmpTipoEscala, setNewEmpTipoEscala] = useState<Employee['tipoEscala']>('6x1');
   // number | '' para o campo poder ficar vazio enquanto a pessoa redigita (o valor é validado ao salvar)
@@ -49,7 +50,6 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const [newEmpHabilidades, setNewEmpHabilidades] = useState<string[]>([]);
   const [newEmpRole, setNewEmpRole] = useState<Role>('collaborator');
   const { currentUser, token } = useAuth();
-  const { data: empresa } = useCompanyConfig(token);
   const { data: servicos } = useServices(token);
   const podeGerenciarSupervisores = currentUser?.role === 'admin';
   const [newEmpDiasTrabalho, setNewEmpDiasTrabalho] = useState<string[]>(['1','2','3','4','5','6']);
@@ -69,12 +69,14 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const [bulkShiftSelection, setBulkShiftSelection] = useState<string>('');
   const [bulkTargetDate, setBulkTargetDate] = useState(getTodayLocalDate());
   const [isApplyingBulkShift, setIsApplyingBulkShift] = useState(false);
-  const [createdCredentials, setCreatedCredentials] = useState<{ name: string; email: string; password: string; redefinida?: boolean } | null>(null);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [createdCredentials, setCreatedCredentials] = useState<{ name: string; login: string; password: string; redefinida?: boolean } | null>(null);
   const [employeeToResetPassword, setEmployeeToResetPassword] = useState<Employee | null>(null);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   // Própria senha não se redefine aqui (derrubaria a sessão antes de mostrar a nova); supervisor só redefine quem não é supervisor/admin
-  const podeRedefinirSenha = (emp: Employee) => emp.id !== currentUser?.id
-    && (podeGerenciarSupervisores || (emp.role !== 'supervisor' && emp.role !== 'admin'));
+  // Mesma regra da API: só admin mexe em contas de supervisor/admin (a própria conta cada um edita)
+  const podeGerenciarConta = (emp: Employee) => podeGerenciarSupervisores || (emp.role !== 'supervisor' && emp.role !== 'admin');
+  const podeRedefinirSenha = (emp: Employee) => emp.id !== currentUser?.id && podeGerenciarConta(emp);
   const EMPLOYEES_PER_PAGE = 6;
   // Habilidades que valem alguma coisa: as exigidas pelos serviços (regra "Somente habilidades") e as já usadas na
   // equipe. Nada fixo de um ramo de negócio
@@ -133,24 +135,28 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   };
 
 
-  // Domínio do e-mail de contato da empresa (ex.: contato@suaclinica.com.br -> nome@suaclinica.com.br). Provedor
-  // público não serve: joao.silva@gmail.com é o endereço de outra pessoa
-  const dominioContato = empresa?.emailContato?.split('@')[1]?.toLowerCase();
-  const dominioEmail = dominioContato && !PROVEDORES_PUBLICOS.test(dominioContato) ? dominioContato : undefined;
-  const generateEmployeeEmail = (fullName: string) => gerarEmailUnico(fullName, employees.map((emp) => emp.email), dominioEmail);
-
-  const liveGeneratedEmail = generateEmployeeEmail(newEmpName);
 
   const filteredEmployees = useSearch(
     employees,
     searchTerm,
-    emp => [emp.name, emp.email, emp.specialty, emp.role]
+    emp => [emp.name, emp.usuario ?? '', emp.email, emp.specialty, emp.role]
   );
+
+  const emailAlterado = Boolean(editingEmployeeId) && newEmpEmail.trim().toLowerCase() !== credenciaisOriginais.email.toLowerCase();
+  const usuarioAlterado = Boolean(editingEmployeeId) && newEmpUsuario.trim().toLowerCase() !== credenciaisOriginais.usuario;
+  // Trocar usuário ou e-mail da própria conta exige a senha atual (a API recusa sem ela)
+  const editandoPropriaConta = Boolean(editingEmployeeId) && editingEmployeeId === currentUser?.id;
+  const pedeSenhaAtual = editandoPropriaConta && (emailAlterado || usuarioAlterado);
+  // Conta antiga (só com e-mail) pode seguir sem usuário; quem não tem e-mail precisa de usuário
+  const exigeUsuario = !editingEmployeeId || !newEmpEmail.trim();
 
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newEmpName.trim() || !newEmpSpecialty.trim()) {
-      setErrorMessage('Preencha o nome e a especialidade do profissional.');
+    // Erro da tentativa anterior sai: a mesma mensagem de novo volta a aparecer (e um acerto não fica com erro velho)
+    setErrorMessage(null);
+    // Contas antigas (criadas só com e-mail) podem ser editadas sem usuário: entram pelo e-mail
+    if (!newEmpName.trim() || !newEmpCargo.trim() || (exigeUsuario && !newEmpUsuario.trim())) {
+      setErrorMessage('Preencha o nome, o usuário de acesso e o cargo.');
       return;
     }
     if (newEmpCargaHoraria === '' || !Number.isInteger(newEmpCargaHoraria) || newEmpCargaHoraria < 1 || newEmpCargaHoraria > 44) {
@@ -169,9 +175,11 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
       if (editingEmployeeId) {
         success = await onEditEmployee(editingEmployeeId, {
           name: newEmpName,
-          email: newEmpEmail,
-          specialty: newEmpSpecialty,
-          cargo: newEmpCargo.trim() || newEmpSpecialty.trim(),
+          // Especialidade não vai: o formulário não a mostra, e reenviar o cargo nela apagaria a gravada
+          ...(emailAlterado ? { email: newEmpEmail.trim() } : {}),
+          ...(usuarioAlterado ? { usuario: newEmpUsuario.trim() } : {}),
+          ...(pedeSenhaAtual ? { senhaAtual: newEmpSenhaAtual } : {}),
+          cargo: newEmpCargo.trim(),
           tipoEscala: newEmpTipoEscala,
           folgasDomingoNoMes: newEmpFolgasDomingoNoMes,
           cargaHorariaSemanal: newEmpCargaHoraria,
@@ -180,22 +188,17 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
           diasTrabalho: newEmpDiasTrabalho.join(','),
         });
         if (typeof success === 'string') { setErrorMessage(success); success = false; }
-        else if (success !== false) { setToastMessage('Colaborador atualizado com sucesso!'); }
+        else if (success !== false) { setToastMessage(pedeSenhaAtual ? `Dados de acesso atualizados. No próximo login, entre com ${newEmpUsuario.trim().toLowerCase() || newEmpEmail.trim().toLowerCase()}.` : 'Colaborador atualizado com sucesso!'); }
       } else {
-        // E-mail digitado vence o sugerido: o sugerido pode colidir com uma conta desativada (a lista só tem as ativas)
-        const generatedEmail = emailEditado ? newEmpEmail.trim() : generateEmployeeEmail(newEmpName);
-        if (!generatedEmail) {
-          setErrorMessage('Informe o e-mail do colaborador.');
-          return;
-        }
         const senhaProvisoria = gerarSenhaProvisoria();
         success = await onAddEmployee({
           name: newEmpName,
-          email: generatedEmail,
+          email: newEmpEmail.trim(),
+          usuario: newEmpUsuario.trim(),
           password: senhaProvisoria,
           role: newEmpRole,
-          specialty: newEmpSpecialty,
-          cargo: newEmpCargo.trim() || newEmpSpecialty.trim(),
+          specialty: '',
+          cargo: newEmpCargo.trim(),
           tipoEscala: newEmpTipoEscala,
           folgasDomingoNoMes: newEmpFolgasDomingoNoMes,
           cargaHorariaSemanal: newEmpCargaHoraria,
@@ -206,7 +209,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
         if (typeof success === 'string') { setErrorMessage(success); success = false; }
         else if (success !== false) {
           setToastMessage('Colaborador adicionado com sucesso!');
-          setCreatedCredentials({ name: newEmpName, email: generatedEmail, password: senhaProvisoria });
+          setCreatedCredentials({ name: newEmpName, login: newEmpUsuario.trim().toLowerCase() || newEmpEmail.trim().toLowerCase(), password: senhaProvisoria });
         }
       }
 
@@ -219,35 +222,31 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
     }
   };
 
+  // Estado inicial do formulário (criar) ou valores da conta (editar): um lugar só, para nenhum campo ficar para trás
+  const preencherFormulario = (emp?: Employee) => {
+    setEditingEmployeeId(emp?.id ?? null);
+    setNewEmpName(emp?.name ?? '');
+    setNewEmpEmail(emp?.email ?? '');
+    setNewEmpUsuario(emp?.usuario ?? '');
+    setCredenciaisOriginais({ email: emp?.email ?? '', usuario: emp?.usuario ?? '' });
+    setNewEmpSenhaAtual('');
+    setNewEmpCargo(emp ? emp.cargo || emp.specialty || '' : '');
+    setNewEmpTipoEscala(emp?.tipoEscala || '6x1');
+    setNewEmpFolgasDomingoNoMes(emp?.folgasDomingoNoMes ?? 2);
+    setNewEmpCargaHoraria(emp?.cargaHorariaSemanal ?? 40);
+    setNewEmpHabilidades(emp?.habilidades || []);
+    setNewEmpRole(emp?.role ?? 'collaborator');
+    setNewEmpDiasTrabalho((emp?.diasTrabalho || '1,2,3,4,5,6').split(','));
+  };
+
   const cancelEdit = () => {
-    setEditingEmployeeId(null);
-    setNewEmpName('');
-    setNewEmpEmail('');
-    setEmailEditado(false);
-    setNewEmpSpecialty('');
-    setNewEmpCargo('');
-    setNewEmpTipoEscala('6x1');
-    setNewEmpFolgasDomingoNoMes(2);
-    setNewEmpCargaHoraria(40);
-    setNewEmpHabilidades([]);
-    setNewEmpRole('collaborator');
-    setNewEmpDiasTrabalho(['1','2','3','4','5','6']);
+    setErrorMessage(null);
+    preencherFormulario();
     setShowEmployeeForm(false);
   };
 
   const openCreateEmployeeForm = () => {
-    setEditingEmployeeId(null);
-    setNewEmpName('');
-    setNewEmpEmail('');
-    setEmailEditado(false);
-    setNewEmpSpecialty('');
-    setNewEmpCargo('');
-    setNewEmpTipoEscala('6x1');
-    setNewEmpFolgasDomingoNoMes(2);
-    setNewEmpCargaHoraria(40);
-    setNewEmpHabilidades([]);
-    setNewEmpRole('collaborator');
-    setNewEmpDiasTrabalho(['1','2','3','4','5','6']);
+    preencherFormulario();
     setCreatedCredentials(null);
     setShowEmployeeForm(true);
   };
@@ -298,8 +297,6 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
 
   const handleBulkShiftChange = (value: string) => {
     setBulkShiftSelection(value);
-    if (value === 'folga') setScheduleDays([]);
-    else if (value && scheduleDays.length === 0) setScheduleDays(['1', '2', '3', '4', '5', '6']);
   };
   const nomeDoTurnoEmLote = () => turnos.find((t) => `${t.inicio}-${t.fim}` === bulkShiftSelection)?.nome ?? bulkShiftSelection;
 
@@ -394,6 +391,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
       setErrorMessage('Escolha pelo menos um dia de trabalho.');
       return;
     }
+    if (isSavingSchedule) return;
+    setIsSavingSchedule(true);
 
     try {
       const success = await onEditEmployee(selectedEmpForSchedule.id, {
@@ -407,6 +406,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Erro ao salvar escala.');
+    } finally {
+      setIsSavingSchedule(false);
     }
   };
 
@@ -419,11 +420,11 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
 
   // Uma função de fechar por modal (X, clique fora e Esc): não fecha durante o envio e pergunta se algo mudou.
   // "Cancelar edição" descarta de propósito, sem perguntar
-  const formAlterado = useAlterado(showEmployeeForm, [newEmpName, newEmpEmail, newEmpSpecialty, newEmpCargo, newEmpTipoEscala, newEmpFolgasDomingoNoMes, newEmpCargaHoraria, newEmpHabilidades, newEmpRole, newEmpDiasTrabalho]);
+  const formAlterado = useAlterado(showEmployeeForm, [newEmpName, newEmpEmail, newEmpUsuario, newEmpCargo, newEmpTipoEscala, newEmpFolgasDomingoNoMes, newEmpCargaHoraria, newEmpHabilidades, newEmpRole, newEmpDiasTrabalho]);
   const fecharForm = () => { if (!isSubmitting && confirmarSaida(formAlterado)) cancelEdit(); };
   const escalaAberta = showScheduleModal && !!selectedEmpForSchedule;
   const escalaAlterada = useAlterado(escalaAberta, [scheduleDays, bulkSelectedEmployeeIds, bulkShiftSelection, bulkTargetDate]);
-  const fecharEscala = () => { if (!isApplyingBulkShift && confirmarSaida(escalaAlterada)) closeScheduleModal(); };
+  const fecharEscala = () => { if (!isApplyingBulkShift && !isSavingSchedule && confirmarSaida(escalaAlterada)) closeScheduleModal(); };
   useModal(showEmployeeForm, fecharForm);
   useModal(!!createdCredentials, () => setCreatedCredentials(null));
   useModal(escalaAberta, fecharEscala);
@@ -484,7 +485,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                         {emp.role === 'admin' ? 'Admin' : emp.role === 'supervisor' ? 'Supervisor' : emp.role === 'receptionist' ? 'Recepção' : 'Colaborador'}
                       </span>
                     </div>
-                    <p className="text-xs text-on-surface-variant truncate">{emp.email}</p>
+                    <p className="text-xs text-on-surface-variant truncate">{[emp.usuario, emp.email].filter(Boolean).join(' · ')}</p>
                     <p className="text-[11px] uppercase tracking-widest text-primary mt-1">{emp.specialty}</p>
                     <p className="text-[11px] text-on-surface-variant mt-1">{emp.tipoEscala || '6x1'} • {emp.cargaHorariaSemanal ?? 40}h/sem</p>
                     <p className="text-[11px] text-on-surface-variant">Domingos de folga/mês: {emp.folgasDomingoNoMes ?? 2}</p>
@@ -505,38 +506,30 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                   >
                     <span className="material-symbols-outlined text-[20px]">lock_reset</span>
                   </button>}
-                  <button
-                    onClick={() => onViewEmployee?.(emp)}
+                  {onViewEmployee && <button
+                    onClick={() => onViewEmployee(emp)}
                     className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full"
                     title="Perfil (RH)"
                   >
                     <span className="material-symbols-outlined text-[20px]">badge</span>
-                  </button>
-                  <button
+                  </button>}
+                  {(podeGerenciarConta(emp) || emp.id === currentUser?.id) && <button
                     onClick={() => {
-                      setEditingEmployeeId(emp.id);
-                      setNewEmpName(emp.name);
-                      setNewEmpEmail(emp.email);
-                      setNewEmpSpecialty(emp.specialty);
-                      setNewEmpCargo(emp.cargo || '');
-                      setNewEmpTipoEscala(emp.tipoEscala || '6x1');
-                      setNewEmpFolgasDomingoNoMes(emp.folgasDomingoNoMes ?? 2);
-                      setNewEmpCargaHoraria(emp.cargaHorariaSemanal ?? 40);
-                      setNewEmpHabilidades(emp.habilidades || []);
-                      setNewEmpRole(emp.role === 'supervisor' ? 'supervisor' : 'collaborator');
-                      setNewEmpDiasTrabalho((emp.diasTrabalho || '1,2,3,4,5,6').split(','));
+                      preencherFormulario(emp);
                       setShowEmployeeForm(true);
                     }}
                     className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full"
+                    title="Editar"
                   >
                     <span className="material-symbols-outlined text-[20px]">edit</span>
-                  </button>
-                  <button
+                  </button>}
+                  {podeGerenciarConta(emp) && emp.id !== currentUser?.id && <button
                     onClick={() => setEmployeeToDelete(emp.id)}
                     className="p-2 text-on-surface-variant hover:bg-error-container/20 hover:text-error rounded-full"
+                    title="Excluir"
                   >
                     <span className="material-symbols-outlined text-[20px]">delete</span>
-                  </button>
+                  </button>}
                 </div>
               </div>
             ))}
@@ -615,32 +608,35 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
               <h3 className="text-lg font-headline text-primary">{editingEmployeeId ? 'Editar Colaborador' : 'Criar Usuário'}</h3>
               <button type="button" onClick={fecharForm} disabled={isSubmitting} aria-label="Fechar" className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant disabled:opacity-40"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
             </div>
-            <form onSubmit={handleAddEmployee} className="space-y-3 max-h-[78vh] overflow-y-auto pr-1 custom-scrollbar">
+            {/* Envio barrado pelo navegador (campo inválido): o erro da tentativa anterior sai, para não parecer o atual */}
+            <form onSubmit={handleAddEmployee} onInvalidCapture={() => setErrorMessage(null)} className="space-y-3 max-h-[78vh] overflow-y-auto pr-1 custom-scrollbar">
               <input required type="text" value={newEmpName} onChange={e => setNewEmpName(e.target.value)} placeholder="Nome" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
               <div>
-                <input
-                  type="email"
-                  value={editingEmployeeId || emailEditado ? newEmpEmail : liveGeneratedEmail}
-                  onChange={e => { setEmailEditado(true); setNewEmpEmail(e.target.value); }}
-                  placeholder="E-mail"
-                  className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm"
-                />
-                {!editingEmployeeId && (
-                  <p className="mt-1 text-[11px] text-on-surface-variant">
-                    Sugerido a partir do nome completo; pode ser alterado.
-                  </p>
-                )}
+                <label htmlFor="emp-usuario" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Usuário de acesso</label>
+                <input id="emp-usuario" required={exigeUsuario} type="text" value={newEmpUsuario} onChange={e => setNewEmpUsuario(e.target.value.toLowerCase().replace(/\s/g, ''))} placeholder="Usuário de acesso (ex.: joao.silva)" autoComplete="off" autoCapitalize="none" spellCheck={false} pattern={USUARIO_REGEX.source} title={MENSAGEM_USUARIO_INVALIDO} maxLength={40} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+                <p className="mt-1 text-[11px] text-on-surface-variant">{editingEmployeeId && exigeUsuario ? 'Sem e-mail, o usuário de acesso é obrigatório: é com ele que a pessoa entra.' : 'É com ele (e a senha) que a pessoa entra no sistema.'}</p>
               </div>
-              <input required type="text" value={newEmpSpecialty} onChange={e => setNewEmpSpecialty(e.target.value)} placeholder="Especialidade" maxLength={100} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
-              {/* Cargo é só o rótulo usado nas regras de serviço ("Somente cargos: ..."); vazio = a especialidade */}
-              <input type="text" value={newEmpCargo} onChange={e => setNewEmpCargo(e.target.value)} placeholder="Cargo (rótulo; vazio = especialidade)" aria-label="Cargo" maxLength={60} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              <label htmlFor="emp-email" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant -mb-2">E-mail (opcional)</label>
+              <input id="emp-email" type="email" value={newEmpEmail} onChange={e => setNewEmpEmail(e.target.value)} placeholder="E-mail (opcional)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              {pedeSenhaAtual && (
+                <div>
+                  <input required type="password" value={newEmpSenhaAtual} onChange={e => setNewEmpSenhaAtual(e.target.value)} placeholder="Sua senha atual" aria-label="Sua senha atual" autoComplete="current-password" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+                  <p className="mt-1 text-[11px] text-on-surface-variant">Para trocar o seu próprio usuário ou e-mail, confirme a sua senha. Você continua conectado aqui; as sessões em outros aparelhos serão encerradas.</p>
+                </div>
+              )}
+              {/* Cargo: regras de serviço ("Somente cargos: ...") e, quando a especialidade era o próprio cargo, o rótulo da lista e do totem */}
+              <label htmlFor="emp-cargo" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant -mb-2">Cargo</label>
+              <input id="emp-cargo" required type="text" value={newEmpCargo} onChange={e => setNewEmpCargo(e.target.value)} placeholder="Cargo (ex.: Massagista)" maxLength={60} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
               {/* A função de acesso define o que a pessoa pode fazer no sistema */}
               <label className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant -mb-2">Função de acesso</label>
-              <select aria-label="Função de acesso" value={newEmpRole} onChange={e => setNewEmpRole(e.target.value as Role)} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm">
+              {/* A própria função não muda aqui (a API recusa): evita se rebaixar sem querer */}
+              <select aria-label="Função de acesso" value={newEmpRole} onChange={e => setNewEmpRole(e.target.value as Role)} disabled={editandoPropriaConta} title={editandoPropriaConta ? 'A sua própria função de acesso só pode ser mudada por um administrador.' : undefined} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm disabled:opacity-60">
                 <option value="collaborator">Colaborador</option>
                 <option value="receptionist">Recepção</option>
                 {/* Só administradores criam ou promovem supervisores (a API recusa os demais) */}
                 {(podeGerenciarSupervisores || newEmpRole === 'supervisor') && <option value="supervisor">Supervisor</option>}
+                {/* Admin promove outro admin (a API só aceita de admin); na conta admin a opção precisa existir para o select não mostrar "Colaborador" */}
+                {(podeGerenciarSupervisores || newEmpRole === 'admin') && <option value="admin">Administrador</option>}
               </select>
               <select value={newEmpTipoEscala || '6x1'} onChange={e => setNewEmpTipoEscala(e.target.value as Employee['tipoEscala'])} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm">
                 <option value="6x1">6x1 (6 dias trab, 1 folga)</option>
@@ -687,7 +683,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                 </div>
               </div>
               <button disabled={isSubmitting} type="submit" className="w-full bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim disabled:opacity-60">
-                {isSubmitting ? 'Salvando...' : (editingEmployeeId ? 'Salvar Alterações' : 'Cadastrar')}
+                {editingEmployeeId ? (isSubmitting ? 'Salvando...' : 'Salvar Alterações') : (isSubmitting ? 'Cadastrando...' : 'Cadastrar')}
               </button>
               {editingEmployeeId && (
                 <button type="button" onClick={cancelEdit} disabled={isSubmitting} className="w-full py-2 rounded-xl text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:bg-surface-container">
@@ -712,8 +708,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                 <p className="text-sm font-bold text-on-surface">{createdCredentials.name}</p>
               </div>
               <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
-                <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">E-mail</p>
-                <p className="text-sm font-bold text-on-surface break-all">{createdCredentials.email}</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">{createdCredentials.login.includes('@') ? 'E-mail de acesso' : 'Usuário de acesso'}</p>
+                <p className="text-sm font-bold text-on-surface break-all">{createdCredentials.login}</p>
               </div>
               <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Senha provisória (anote agora: não será exibida de novo)</p>
@@ -764,7 +760,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
             const resultado = await onEditEmployee(alvo.id, { password: senhaProvisoria });
             if (typeof resultado === 'string') { setErrorMessage(resultado); return; }
             if (resultado === false) return;
-            setCreatedCredentials({ name: alvo.name, email: alvo.email, password: senhaProvisoria, redefinida: true });
+            setCreatedCredentials({ name: alvo.name, login: alvo.usuario || alvo.email, password: senhaProvisoria, redefinida: true });
           } catch (error) {
             const detalhe = error instanceof Error ? error.message : 'Não foi possível redefinir a senha.';
             // Erro respondido pela API = nada mudou; sem resposta (rede) não dá para saber se o servidor aplicou
@@ -915,10 +911,10 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
               {/* O horário de cada dia (turno) é definido na aba Escala; aqui ficam só os dias de trabalho */}
               <p className="text-xs text-on-surface-variant">O horário de cada dia (turno) é definido na aba Escala.</p>
 
-              <button type="button" onClick={handleSaveSchedule} className="w-full bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim transition-colors">
-                Salvar Escala
+              <button type="button" onClick={handleSaveSchedule} disabled={isSavingSchedule || isApplyingBulkShift} className="w-full bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim transition-colors disabled:opacity-60">
+                {isSavingSchedule ? 'Salvando...' : 'Salvar Escala'}
               </button>
-              <button type="button" onClick={closeScheduleModal} className="w-full py-2 rounded-xl text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:bg-surface-container">
+              <button type="button" onClick={fecharEscala} disabled={isSavingSchedule || isApplyingBulkShift} className="w-full py-2 rounded-xl text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:bg-surface-container disabled:opacity-40">
                 Cancelar
               </button>
             </div>

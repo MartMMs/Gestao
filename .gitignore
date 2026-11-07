@@ -31,6 +31,7 @@ google-chrome-stable_current_x86_64.rpm*
 # Configuracoes locais de editor e launchers
 .cursor/
 .vscode/
+.claude/
 Gestao-*.desktop
 
 # Dados locais gerados em tempo de execucao

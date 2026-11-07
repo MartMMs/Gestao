@@ -4,6 +4,7 @@ import { formatPhone, formatCpf } from '../../../utils/formatters';
 import { cpfValido, telefoneValido } from '@shared/validadores';
 import { perguntasDoSegmento } from '@shared/segmento';
 import { textoConsentimento } from '@shared/consentimento';
+import { LinksDocumentosLegais } from '../../../components/DocumentosLegais';
 import type { DadosClienteTotem } from '../services/autoatendimentoService';
 
 interface StepIdentificationProps {
@@ -422,6 +423,8 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
         <p id="consentimento-detalhe" className="mt-2 pl-8 text-[11px] text-on-surface-variant">
           {termo.detalhe}
         </p>
+        {/* Fora da descrição do checkbox (o leitor de tela não lê o link como parte dela). Os Termos de Uso são da equipe */}
+        <p className="mt-1 pl-8 text-[11px] text-on-surface-variant"><LinksDocumentosLegais documentos={['privacidade']} /></p>
         {erros.consentimento && <p role="alert" className="mt-2 pl-8 text-[11px] font-bold text-error">{erros.consentimento}</p>}
       </div>
 

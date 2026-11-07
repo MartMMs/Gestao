@@ -2,21 +2,40 @@ import React, { useId, useRef } from 'react';
 import { motion } from 'motion/react';
 import { MENSAGEM_SAIDA, useModal } from '../hooks/useModal';
 
-interface ModalFormularioProps {
+interface ModalFormularioBase {
   title: string;
   onClose: () => void;
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   children: React.ReactNode;
-  submitLabel: string;
   submitDisabled?: boolean;
   isSubmitting?: boolean;
   submittingLabel?: string;
-  showSubmitButton?: boolean;
   infoBanner?: React.ReactNode;
   alertBanner?: React.ReactNode;
   // Com alterações não salvas, fechar (X ou clique fora) pede confirmação
   hasUnsavedChanges?: boolean;
 }
+
+// Formulário exige envio e rótulo do botão; só o modal de leitura (showSubmitButton={false}) dispensa os dois
+type ModalFormularioProps = ModalFormularioBase & (
+  | { showSubmitButton?: boolean; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitLabel: string }
+  | { showSubmitButton: false; onSubmit?: never; submitLabel?: never }
+);
+
+const FOCAVEIS = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// Tab e Shift+Tab giram dentro do modal: o foco não vai para a tela de trás (no totem, um Enter ali tiraria o cliente do fluxo)
+const prenderFoco = (event: React.KeyboardEvent<HTMLElement>) => {
+  if (event.key !== 'Tab') return;
+  // Só o que está visível (seção recolhida ou input hidden não recebe foco: o Tab pararia nele)
+  const focaveis = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(FOCAVEIS)).filter((el) => el.getClientRects().length > 0);
+  if (focaveis.length === 0) return;
+  event.preventDefault();
+  const atual = focaveis.indexOf(document.activeElement as HTMLElement);
+  const proximo = event.shiftKey
+    ? (atual <= 0 ? focaveis.length - 1 : atual - 1)
+    : (atual === -1 || atual === focaveis.length - 1 ? 0 : atual + 1);
+  focaveis[proximo].focus();
+};
 
 export function ModalFormulario({
   title,
@@ -59,6 +78,7 @@ export function ModalFormulario({
         role="dialog"
         aria-modal="true"
         aria-labelledby={tituloId}
+        onKeyDown={prenderFoco}
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         className="bg-surface-container-lowest p-8 rounded-3xl shadow-xl max-w-lg w-full border border-outline-variant/20 max-h-[90vh] overflow-y-auto"
@@ -71,7 +91,7 @@ export function ModalFormulario({
         </div>
         {infoBanner}
         {alertBanner}
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form onSubmit={onSubmit ?? ((event) => event.preventDefault())} className="space-y-4">
           {children}
           {showSubmitButton && (
             <button

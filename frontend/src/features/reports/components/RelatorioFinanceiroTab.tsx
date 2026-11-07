@@ -36,6 +36,8 @@ const ACAO_ROTULO: Record<string, string> = {
   'servico.excluido': 'Serviço excluído',
   'totem.cobranca': 'Cobrança do totem',
   'empresa.comissao': 'Comissão da empresa',
+  'empresa.anamnese': 'Exigência de anamnese',
+  'cliente.anamnese': 'Ficha de anamnese',
   'agendamento.reaberto': 'Atendimento reaberto',
   'agendamento.valores': 'Valor do atendimento alterado',
   'agendamento.excluido': 'Atendimento excluído',
@@ -44,7 +46,7 @@ const ACAO_ROTULO: Record<string, string> = {
 
 const CAMPO_ROTULO: Record<string, string> = {
   preco: 'preço', comissaoPercentual: 'comissão (%)', nome: 'nome', duracao: 'duração (min)', ativo: 'ativo',
-  exigirPagamento: 'cobrança online', percentualSinal: 'sinal (%)', usarComissao: 'usar comissão', existe: 'existe', status: 'situação', valorTotal: 'valor', valorComissao: 'comissão',
+  exigirPagamento: 'cobrança online', percentualSinal: 'sinal (%)', usarComissao: 'usar comissão', exigirAnamnese: 'exigir ficha de anamnese', fichaAnamnese: 'ficha preenchida', existe: 'existe', status: 'situação', valorTotal: 'valor', valorComissao: 'comissão',
 };
 
 const valorLegivel = (campo: string, v: unknown) => {
@@ -141,7 +143,7 @@ export function RelatorioFinanceiroTab() {
   const [periodo, setPeriodo] = useState(() => periodoRapido('mes'));
   const [aberto, setAberto] = useState<string | null>(null);
   const alternar = (id: string) => setAberto((atual) => (atual === id ? null : id));
-  const { data, isLoading, error } = useRelatorioFinanceiro(token, periodo.de, periodo.ate);
+  const { data, isLoading, isFetching, error } = useRelatorioFinanceiro(token, periodo.de, periodo.ate);
   const maiorFaturamento = useMemo(() => Math.max(1, ...(data?.profissionais.map((p) => p.faturamento) ?? [])), [data]);
 
   const cartoes = data ? [
@@ -194,7 +196,18 @@ export function RelatorioFinanceiroTab() {
           {isApiError(error) ? error.message : 'Não foi possível carregar o relatório.'}
         </p>
       )}
-      {isLoading && <p className="text-sm text-on-surface-variant">Carregando relatório...</p>}
+      {/* Primeira carga: spinner; recarga em segundo plano (agenda mudou): aviso discreto, os números atuais ficam na tela */}
+      {isLoading ? (
+        <div role="status" className="flex items-center gap-2 py-10 justify-center text-sm text-on-surface-variant">
+          <span className="material-symbols-outlined animate-spin text-primary" aria-hidden="true">progress_activity</span>
+          Carregando relatório...
+        </div>
+      ) : isFetching && (
+        <p role="status" className="flex items-center gap-1 text-xs text-on-surface-variant">
+          <span className="material-symbols-outlined animate-spin text-[14px]" aria-hidden="true">progress_activity</span>
+          Atualizando...
+        </p>
+      )}
 
       {data && (
         <>

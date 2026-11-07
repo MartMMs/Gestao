@@ -95,6 +95,8 @@ type ScaleReplicatePayload = {
 
 export interface SupervisorViewProps {
   employees: Employee[];
+  // Todas as contas ativas (supervisão e recepção inclusas): só a aba Equipe usa; "employees" é quem atende
+  todasAsContas: Employee[];
   appointments: Appointment[];
   services: Service[];
   clients: Client[];
@@ -123,7 +125,7 @@ export interface SupervisorViewProps {
   onReplicateScaleDays?: (payload: ScaleReplicatePayload) => Promise<boolean | void> | void;
 }
 
-export function SupervisorView({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onReassign, onAddEmployee, onDeleteEmployee, onEditEmployee, onAddService, onEditService, onDeleteService, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onAlterarStatus, onEditClient, onDeleteClient, onAddBloqueio, onDeleteBloqueio, turnoSwapRequests = [], onUpdateTurnoSwapRequestStatus, onOpenUpcomingAppointments, onSaveScaleOverride, onSwapScaleDays, onReplicateScaleDays }: SupervisorViewProps) {
+export function SupervisorView({ employees, todasAsContas, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onReassign, onAddEmployee, onDeleteEmployee, onEditEmployee, onAddService, onEditService, onDeleteService, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onAlterarStatus, onEditClient, onDeleteClient, onAddBloqueio, onDeleteBloqueio, turnoSwapRequests = [], onUpdateTurnoSwapRequestStatus, onOpenUpcomingAppointments, onSaveScaleOverride, onSwapScaleDays, onReplicateScaleDays }: SupervisorViewProps) {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'escala' | 'planejamento' | 'equipe' | 'servicos' | 'clientes' | 'autoatendimento' | 'relatorios'>(() => {
     if (typeof window === 'undefined') return 'dashboard';
     const saved = window.sessionStorage.getItem('supervisor-active-tab');
@@ -140,14 +142,12 @@ export function SupervisorView({ employees, appointments, services, clients, sca
   });
 
 
-  // Estado para controlar o Modal de Exclusão
-  const [employeeToDelete, setEmployeeToDelete] = useState<string | null>(null);
-  const [reallocateToId, setReallocateToId] = useState<string>('');
   // Estado para controlar o Modal de Detalhes do Colaborador
   const [viewingEmployee, setViewingEmployee] = useState<Employee | null>(null);
   const [viewingEmployeeTab, setViewingEmployeeTab] = useState<'dashboard' | 'jornada' | 'ocorrencias'>('dashboard');
   // Estado para controlar o Modal de Exclusão de Serviço
   const [serviceToDelete, setServiceToDelete] = useState<string | null>(null);
+  const [isDeletingService, setIsDeletingService] = useState(false);
 
   // Estado para controlar o filtro do histórico no modal
   const [historyFilter, setHistoryFilter] = useState<'all' | '7days' | 'month'>('all');
@@ -372,8 +372,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
     return { viewingEmployeeRevenue: revenue, viewingEmployeeNoShows: noShows, viewingEmployeeSemBaixa: semBaixa };
   }, [viewingEmployee, appointments, services]);
 
-  useModal(!!employeeToDelete, () => { setEmployeeToDelete(null); setReallocateToId(''); });
-  useModal(!!serviceToDelete, () => setServiceToDelete(null));
+  useModal(!!serviceToDelete, () => { if (!isDeletingService) setServiceToDelete(null); });
   useModal(!!viewingEmployee, () => setViewingEmployee(null));
 
   return (
@@ -470,7 +469,7 @@ export function SupervisorView({ employees, appointments, services, clients, sca
 
       {activeTab === 'equipe' && (
         <SupervisorEquipeTab
-          employees={employees}
+          employees={todasAsContas}
           onAddEmployee={onAddEmployee}
           onDeleteEmployee={onDeleteEmployee}
           onEditEmployee={onEditEmployee}
@@ -543,7 +542,6 @@ export function SupervisorView({ employees, appointments, services, clients, sca
 
       {activeTab === 'clientes' && (
         <SupervisorClientesTab
-          clients={clients}
           appointments={appointments}
           services={services}
           onEditClient={onEditClient}
@@ -557,63 +555,6 @@ export function SupervisorView({ employees, appointments, services, clients, sca
       )}
 
       {activeTab === 'relatorios' && <RelatorioFinanceiroTab />}
-
-        {/* Modal de Confirmação de Exclusão */}
-        {employeeToDelete && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div 
-              role="dialog" aria-modal="true" aria-label="Excluir colaborador"
-              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-              className="bg-surface-container-lowest p-8 rounded-3xl shadow-xl max-w-md w-full border border-outline-variant/20"
-            >
-              <div className="text-center mb-6">
-                <div className="w-16 h-16 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="material-symbols-outlined text-3xl text-error">warning</span>
-                </div>
-                <h2 className="text-2xl font-headline text-error mb-2">Excluir Profissional?</h2>
-                <p className="text-on-surface-variant text-sm mb-4">
-                  O que deseja fazer com os agendamentos pendentes vinculados a este profissional?
-                </p>
-                <select 
-                  value={reallocateToId} 
-                  onChange={(e) => setReallocateToId(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant/30 text-on-surface rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-primary outline-none transition-all cursor-pointer"
-                >
-                  <option value="">Excluir todos os agendamentos dele</option>
-                  {employees.filter(e => e.id !== employeeToDelete).map(e => (
-                    <option key={e.id} value={e.id}>Realocar para: {e.name}</option>
-                  ))}
-                </select>
-              </div>
-              
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => { setEmployeeToDelete(null); setReallocateToId(''); }}
-                  className="flex-1 py-3 rounded-xl font-bold text-sm uppercase tracking-wider text-on-surface-variant hover:bg-surface-container transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  onClick={async () => {
-                    try {
-                      const resposta = await onDeleteEmployee(employeeToDelete, reallocateToId || undefined) as { mensagem?: string } | undefined;
-                      setToastMessage(resposta?.mensagem || 'Colaborador removido.');
-                    } catch (error) {
-                      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível remover o colaborador.');
-                    } finally {
-                      setEmployeeToDelete(null);
-                      setReallocateToId('');
-                    }
-                  }}
-                  className="flex-1 flex items-center justify-center gap-2 bg-error text-white py-3 rounded-xl font-bold text-sm uppercase tracking-wider hover:bg-error/90 transition-colors shadow-sm"
-                >
-                  <span className="material-symbols-outlined text-[18px]">delete</span>
-                  Excluir
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
 
         {/* Modal de Confirmação de Exclusão de Serviço */}
         {serviceToDelete && (
@@ -634,21 +575,24 @@ export function SupervisorView({ employees, appointments, services, clients, sca
               </div>
               
               <div className="flex gap-3">
-                <button onClick={() => setServiceToDelete(null)} className="flex-1 py-3 rounded-xl font-bold text-sm uppercase tracking-wider text-on-surface-variant hover:bg-surface-container transition-colors">
+                <button disabled={isDeletingService} onClick={() => setServiceToDelete(null)} className="flex-1 py-3 rounded-xl font-bold text-sm uppercase tracking-wider text-on-surface-variant hover:bg-surface-container transition-colors disabled:opacity-50">
                   Cancelar
                 </button>
-                <button onClick={async () => {
+                <button disabled={isDeletingService} onClick={async () => {
+                    if (isDeletingService) return;
+                    setIsDeletingService(true);
                     try {
                       await onDeleteService(serviceToDelete);
                       setToastMessage('Serviço excluído com sucesso!');
                     } catch (error) {
                       setErrorMessage(error instanceof Error ? error.message : 'Não foi possível excluir o serviço.');
                     } finally {
+                      setIsDeletingService(false);
                       setServiceToDelete(null);
                     }
-                  }} className="flex-1 flex items-center justify-center gap-2 bg-error text-white py-3 rounded-xl font-bold text-sm uppercase tracking-wider hover:bg-error/90 transition-colors shadow-sm">
+                  }} className="flex-1 flex items-center justify-center gap-2 bg-error text-white py-3 rounded-xl font-bold text-sm uppercase tracking-wider hover:bg-error/90 transition-colors shadow-sm disabled:opacity-50">
                   <span className="material-symbols-outlined text-[18px]">delete</span>
-                  Excluir
+                  {isDeletingService ? 'Excluindo...' : 'Excluir'}
                 </button>
               </div>
             </motion.div>

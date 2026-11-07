@@ -109,12 +109,15 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
     };
   }, []);
 
-  // Reserva pendente (etapas 3 e 4): libera o horário ao fechar/recarregar a aba
+  // Reserva pendente (etapas 3 e 4): libera o horário ao fechar/recarregar a aba ou desmontar o componente
   const temReservaPendente = Boolean(reservation) && (currentStep === 3 || currentStep === 4);
+  const reservaPendenteRef = useRef<{ token: string } | null>(null);
+  reservaPendenteRef.current = reservation && temReservaPendente ? { token: reservation.sessionToken } : null;
+
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (reservation && temReservaPendente) {
-        cancelarReservaAutoatendimento(reservation.sessionToken);
+      if (reservaPendenteRef.current) {
+        cancelarReservaAutoatendimento(reservaPendenteRef.current.token);
       }
     };
     // pagehide cobre o "voltar" do navegador e o Safari do celular, onde beforeunload nem sempre dispara
@@ -123,8 +126,12 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handleBeforeUnload);
+      limparRascunhoIdentificacao();
+      if (reservaPendenteRef.current) {
+        cancelarReservaAutoatendimento(reservaPendenteRef.current.token);
+      }
     };
-  }, [reservation, temReservaPendente]);
+  }, []);
 
   // Alterna itens no carrinho de produtos / serviços
   const handleToggleService = (service: Service) => {
@@ -215,8 +222,7 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
   };
 
   const handleStepBackFromId = () => {
-    // Totem público: ao sair da etapa de dados, nada do que foi digitado (inclusive saúde) fica para o próximo
-    limparRascunhoIdentificacao();
+    // Mantém o rascunho em memória durante a troca de horário (é limpo ao concluir, reiniciar, inatividade ou sair)
     setClientData(null);
     if (reservation) {
       cancelarReservaAutoatendimento(reservation.sessionToken);
@@ -240,7 +246,8 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
       clearTimeout(timer);
       timer = setTimeout(() => reiniciarRef.current(), limiteMs);
     };
-    const eventos = ['pointerdown', 'keydown', 'touchstart'] as const;
+    // wheel: quem lê a Política de Privacidade rolando com o mouse está ativo
+    const eventos = ['pointerdown', 'keydown', 'touchstart', 'wheel'] as const;
     eventos.forEach((e) => window.addEventListener(e, registrarAtividade));
     return () => {
       clearTimeout(timer);

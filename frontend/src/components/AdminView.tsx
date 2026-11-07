@@ -59,12 +59,15 @@ const getEligibilitySummary = (service: Service): string => {
 
 interface AdminViewProps {
   employees: Employee[];
+  // Todas as contas ativas (supervisão e recepção inclusas): só a aba Equipe usa; "employees" é quem atende
+  todasAsContas: Employee[];
   appointments: Appointment[];
   services: Service[];
   clients: Client[];
   onAddEmployee: (employee: Omit<Employee, 'id' | 'rating' | 'completedServices'> & { password: string }) => Promise<boolean | string | void> | void;
   onDeleteEmployee: (id: string, reallocateToId?: string) => Promise<unknown> | void;
   onEditEmployee: (id: string, employee: EmployeeUpdate) => Promise<boolean | string | void> | void;
+  onSaveScaleOverride?: (payload: { colaboradorId: string; data: string; tipo: 'trabalho' | 'folga' | 'fds'; turno?: string; descricao?: string }) => Promise<boolean | string | void> | void;
   onAddService: (service: ServicePayload) => Promise<boolean | string | void>;
   onEditService: (id: string, service: ServicePayload) => Promise<boolean | string | void>;
   onDeleteService: (id: string) => Promise<unknown> | void;
@@ -73,14 +76,25 @@ interface AdminViewProps {
   token?: string | null;
 }
 
+const SERVICE_ICONS = ['design_services', 'event_available', 'content_cut', 'medical_services', 'fitness_center', 'spa', 'storefront', 'brush', 'dry_cleaning'];
+
+const normalizeServiceSearch = (value: string): string =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
 export function AdminView({
   employees,
+  todasAsContas,
   appointments,
   services,
   clients,
   onAddEmployee,
   onDeleteEmployee,
   onEditEmployee,
+  onSaveScaleOverride,
   onAddService,
   onEditService,
   onDeleteService,
@@ -97,7 +111,7 @@ export function AdminView({
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePrice, setNewServicePrice] = useState('');
   const [newServiceDuration, setNewServiceDuration] = useState('60');
-  const [newServiceIcon, setNewServiceIcon] = useState('storefront');
+  const [newServiceIcon, setNewServiceIcon] = useState(SERVICE_ICONS[0]);
   const [newServiceDescription, setNewServiceDescription] = useState('');
   const [serviceEligibilityMode, setServiceEligibilityMode] = useState<ServiceEligibilityMode>('livre');
   const [newServiceCategoria, setNewServiceCategoria] = useState('');
@@ -114,12 +128,21 @@ export function AdminView({
   const [erroPainel, setErroPainel] = useState<string | null>(null);
 
   const showToast = (msg: string | null) => {
+    // Sucesso e erro ocupam o mesmo canto da tela: um tira o outro
+    if (msg) setErroPainel(null);
     setToastMessage(msg);
+  };
+  const mostrarErro = (msg: string | null) => {
+    if (msg) setToastMessage(null);
+    setErroPainel(msg);
   };
 
   const filteredServices = services.filter((s) => {
-    const q = serviceSearchTerm.toLowerCase();
-    return s.nome.toLowerCase().includes(q) || (s.categoria && s.categoria.toLowerCase().includes(q));
+    const q = normalizeServiceSearch(serviceSearchTerm);
+    if (!q) return true;
+    return [s.nome, s.categoria, s.descricao, s.icone]
+      .filter(Boolean)
+      .some((val) => normalizeServiceSearch(String(val)).includes(q));
   });
 
   const availableCargos = Array.from(new Set(employees.map((e) => e.cargo || e.specialty).filter(Boolean)));
@@ -148,10 +171,9 @@ export function AdminView({
       ? await onEditService(editingServiceId, payload)
       : await onAddService(payload);
     if (typeof resultado === 'string' || resultado === false) {
-      setErroPainel(typeof resultado === 'string' ? resultado : 'Não foi possível salvar o serviço.');
+      mostrarErro(typeof resultado === 'string' ? resultado : 'Não foi possível salvar o serviço.');
       return;
     }
-    setErroPainel(null);
     showToast(editingServiceId ? 'Serviço atualizado com sucesso!' : 'Novo serviço adicionado ao cardápio com sucesso!');
     cancelServiceEdit();
   };
@@ -161,7 +183,7 @@ export function AdminView({
     setNewServiceName('');
     setNewServicePrice('');
     setNewServiceDuration('60');
-    setNewServiceIcon('storefront');
+    setNewServiceIcon(SERVICE_ICONS[0]);
     setNewServiceDescription('');
     setServiceEligibilityMode('livre');
     setNewServiceCategoria('');
@@ -177,7 +199,7 @@ export function AdminView({
     setNewServiceName(service.nome);
     setNewServicePrice(String(service.preco));
     setNewServiceDuration(String(service.duracao));
-    setNewServiceIcon(service.icone || 'storefront');
+    setNewServiceIcon(service.icone || SERVICE_ICONS[0]);
     setNewServiceDescription(service.descricao || '');
     setServiceEligibilityMode(service.modoElegibilidade || 'livre');
     setNewServiceCategoria(service.categoria || '');
@@ -204,15 +226,16 @@ export function AdminView({
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="fixed top-20 right-8 z-50 bg-primary text-on-primary px-5 py-3 rounded-2xl shadow-xl font-bold text-xs flex items-center gap-2"
+          className="fixed top-20 right-8 z-100 bg-primary text-on-primary px-5 py-3 rounded-2xl shadow-xl font-bold text-xs flex items-center gap-2"
         >
           <span className="material-symbols-outlined text-lg">check_circle</span>
           {toastMessage}
         </motion.div>
       )}
 
+      {/* No celular embaixo: em cima cobria o X e os primeiros campos do formulário aberto */}
       {erroPainel && (
-        <div role="alert" className="fixed top-20 right-8 z-50 max-w-sm px-5 py-4 rounded-2xl shadow-xl text-xs font-bold bg-error text-on-error">
+        <div role="alert" className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:bottom-auto sm:top-20 sm:right-8 z-100 sm:max-w-sm px-5 py-4 rounded-2xl shadow-xl text-xs font-bold bg-error text-on-error">
           {erroPainel}
           <button type="button" className="mt-3 block underline" onClick={() => setErroPainel(null)}>Fechar</button>
         </div>
@@ -354,7 +377,7 @@ export function AdminView({
           onEditServiceCard={onEditServiceCard}
           onDeleteServiceCard={onDeleteService}
           confirmarExclusao
-          serviceIcons={['storefront', 'content_cut', 'medical_services', 'spa', 'fitness_center', 'brush', 'dry_cleaning']}
+          serviceIcons={SERVICE_ICONS}
           newServiceIcon={newServiceIcon}
           setNewServiceIcon={setNewServiceIcon}
           newServiceName={newServiceName}
@@ -390,14 +413,14 @@ export function AdminView({
 
       {activeTab === 'equipe' && (
         <SupervisorEquipeTab
-          employees={employees}
+          employees={todasAsContas}
           onAddEmployee={onAddEmployee}
           onDeleteEmployee={onDeleteEmployee}
           onEditEmployee={onEditEmployee}
-          onSaveScaleOverride={() => {}}
+          onSaveScaleOverride={onSaveScaleOverride}
           setToastMessage={showToast}
-          setErrorMessage={(msg) => { if (msg) showToast(msg); }}
-          onViewEmployee={() => {}}
+          // Erro ia para o toast de sucesso (ícone de ok), escondido atrás do formulário aberto: "Cadastrar" parecia não fazer nada
+          setErrorMessage={mostrarErro}
         />
       )}
 
@@ -411,7 +434,6 @@ export function AdminView({
 
       {activeTab === 'clientes' && (
         <SupervisorClientesTab
-          clients={clients}
           appointments={appointments}
           services={services}
           onEditClient={onEditClient}

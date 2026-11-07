@@ -36,6 +36,34 @@ test.describe('API — persistência ponta a ponta', () => {
     }
   });
 
+  test('supervisor criado pelo admin com usuário de acesso e sem e-mail: entra pelo usuário', async ({ request }) => {
+    const admin = await authHeaders(request, CONTAS.admin);
+    const usuario = `sup.${sufixo()}`;
+    const senha = `Provisoria!${sufixo()}9`;
+    // Sem usuário e sem e-mail não há como entrar: recusado
+    const semLogin = await request.post(`${apiBase()}/colaboradores`, { headers: admin, data: { nome: `Sem Login ${sufixo()}`, senha, papel: 'supervisor' } });
+    expect(semLogin.status()).toBe(400);
+    // Dois sem e-mail: o vazio vira null (o índice único não colide em '')
+    const criados: string[] = [];
+    try {
+      for (const u of [usuario, `${usuario}.b`]) {
+        const res = await request.post(`${apiBase()}/colaboradores`, { headers: admin, data: { nome: `Supervisor ${u}`, usuario: u, email: '', senha, papel: 'supervisor' } });
+        expect(res.status(), await res.text()).toBe(201);
+        criados.push((await res.json()).id);
+      }
+      const equipe = (await (await request.get(`${apiBase()}/colaboradores`, { headers: admin })).json()) as Array<{ id: string; papel: string; email: string | null }>;
+      expect(equipe.find((c) => c.id === criados[0])).toMatchObject({ papel: 'supervisor', email: null });
+      const login = await postLogin(request, { data: { email: usuario, senha }, headers: { 'X-Auth-Mode': 'token' } });
+      expect(login.ok(), await login.text()).toBeTruthy();
+      // Usuário repetido (mesmo com maiúsculas) é recusado com 409
+      const repetido = await request.post(`${apiBase()}/colaboradores`, { headers: admin, data: { nome: `Repetido ${sufixo()}`, usuario: usuario.toUpperCase(), senha } });
+      if (repetido.status() === 201) criados.push((await repetido.json()).id);
+      expect(repetido.status()).toBe(409);
+    } finally {
+      for (const id of criados) await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: admin });
+    }
+  });
+
   test('cliente, folga e agendamento gravam e voltam na leitura', async ({ request }) => {
     const admin = await authHeaders(request, CONTAS.admin);
     const equipe = (await (await request.get(`${apiBase()}/colaboradores`, { headers: admin })).json()) as Array<{ id: string; email?: string }>;

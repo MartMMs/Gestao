@@ -18,7 +18,7 @@ import {
   useCancelAppointment, useReassignAppointment, useEditAppointment, useDeleteAppointment,
   useEmployees, useAddEmployee, useDeleteEmployee, useEditEmployee,
   useServices, useAddService, useEditService, useDeleteService,
-  useClients, useEditClient, useDeleteClient,
+  useClients, useEditClient, useDeleteClient, invalidarConfigEmpresa,
   useAddBloqueio, useDeleteBloqueio,
   useScaleOverrides,
   useTurnoSwapRequests, useAddTurnoSwapRequest, useUpdateTurnoSwapRequestStatus,
@@ -156,7 +156,7 @@ const normalizeServicePayload = (service: ServicePayload): { data?: Omit<Service
 
 
 export default function App() {
-  const { currentUser, token, loginError, handleLogin, handleLogout } = useAuth();
+  const { currentUser, token, loginError, handleLogin, handleLogout, concluirTrocaDeSenha } = useAuth();
   const queryClient = useQueryClient();
   const { data: companyConfig } = useCompanyConfig(token);
   const [activeRoleView, setActiveRoleView] = useState<Role | 'tv' | 'autoatendimento'>(() => currentUser?.role ?? 'collaborator');
@@ -297,6 +297,11 @@ export default function App() {
     let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
     // Evita tempestade de refetch: agrupa os avisos e recarrega só as listas que o servidor disse que mudaram.
     const pendentes = new Set<string>();
+    // Config da empresa mudou (ficha obrigatória, comissão...): recarrega só a config e os relatórios (usam a comissão)
+    // Servidor derrubou o socket (credencial da própria conta trocada): reconecta com o cookie atual. Se a sessão
+    // desta aba também foi revogada, a reconexão é recusada e o próximo pedido à API leva ao login
+    socket.on('disconnect', (motivo) => { if (motivo === 'io server disconnect') socket.connect(); });
+    socket.on('empresa:config_atualizada', () => { void invalidarConfigEmpresa(queryClient); });
     socket.on('db_updated', (payload?: { escopos?: unknown[] }) => {
       // Sem escopo (ou só escopos desconhecidos) = recarrega tudo: na dúvida, nunca deixa a tela desatualizada
       const conhecidos = Array.isArray(payload?.escopos) ? payload.escopos.filter(ehEscopoMudanca) : [];
@@ -335,7 +340,7 @@ export default function App() {
   // Os alertas só dependem da equipe e da escala: não recalcula a cada agendamento novo (como "staff" faria)
   const teamMembers = useMemo(() => employees.filter((e) => isTeamMember(e)), [employees]);
   const cltRealtimeAlerts = useMemo(() => {
-    if (currentUser?.role !== 'supervisor') return [];
+    if (currentUser?.role !== 'supervisor' && currentUser?.role !== 'admin') return [];
 
     const monthRef = getLocalTodayString().slice(0, 7);
     const [yearRaw, monthRaw] = monthRef.split('-').map(Number);
@@ -428,8 +433,11 @@ export default function App() {
     return deleteEmployee({ id, reallocateToId });
   };
 
-  const handleEditEmployee = (id: string, employee: EmployeeUpdate) => {
-    return editEmployee({ id, ...employee });
+  const handleEditEmployee = async (id: string, employee: EmployeeUpdate) => {
+    const resposta = await editEmployee({ id, ...employee });
+    // Trocou o próprio usuário/e-mail: a API mandou uma sessão nova (cookie já gravado); esta aba passa a usá-la
+    if (resposta?.sessao) concluirTrocaDeSenha(resposta.sessao);
+    return resposta;
   };
 
   const handleAddService = async (service: ServicePayload): Promise<boolean | string> => {
@@ -613,12 +621,14 @@ export default function App() {
         {activeRoleView === 'admin' && (currentUser.role === 'admin' || currentUser.role === 'supervisor') ? (
           <AdminViewLazy
             employees={staff}
+            todasAsContas={employees}
             appointments={appointments}
             services={services || []}
             clients={clients || []}
             onAddEmployee={addEmployee}
             onDeleteEmployee={handleDeleteEmployee}
             onEditEmployee={handleEditEmployee}
+            onSaveScaleOverride={handleSaveScaleOverride}
             onAddService={handleAddService}
             onEditService={handleEditService}
             onDeleteService={deleteService}
@@ -629,6 +639,7 @@ export default function App() {
         ) : (activeRoleView === 'supervisor' && (currentUser.role === 'supervisor' || currentUser.role === 'admin')) ? (
           <SupervisorViewLazy 
             employees={staff}
+            todasAsContas={employees}
             appointments={appointments}
             services={services || []}
             clients={clients || []}

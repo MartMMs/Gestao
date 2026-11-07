@@ -1,4 +1,3 @@
-import { normalizarTexto } from '@shared/validadores';
 
 export const formatPhone = (value: string) => {
   // Valores mascarados pela API ("(11) *****-**21") são exibidos como vieram
@@ -41,17 +40,4 @@ export const gerarSenhaProvisoria = () => {
   const alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
   const bytes = crypto.getRandomValues(new Uint8Array(12));
   return Array.from(bytes, (b) => alfabeto[b % alfabeto.length]).join('');
-};
-
-// E-mail de acesso gerado a partir do nome; homônimos recebem sufixo numérico (ana.silva2@...)
-export const gerarEmailUnico = (nomeCompleto: string, emailsExistentes: string[], dominio = 'equipe.local') => {
-  const partes = normalizarTexto(nomeCompleto)
-    .replace(/[^a-z\s]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
-  const base = partes.length > 1 ? `${partes[0]}.${partes[partes.length - 1]}` : partes[0] || 'colaborador';
-  const usados = new Set(emailsExistentes.map((e) => e.toLowerCase()));
-  let email = `${base}@${dominio}`;
-  for (let n = 2; usados.has(email); n += 1) email = `${base}${n}@${dominio}`;
-  return email;
 };

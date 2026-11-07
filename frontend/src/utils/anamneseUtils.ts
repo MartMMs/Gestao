@@ -1,6 +1,16 @@
 import { AnamneseData, initialAnamnese } from '../components/AnamneseForm';
+import type { Client } from '../types';
 
-import { MARCADOR_ANAMNESE, fichaPreenchida } from '@shared/anamnese';
+import {
+  CAMPOS_LISTA_ANAMNESE,
+  CAMPOS_TEXTO_ANAMNESE,
+  MARCADOR_ANAMNESE,
+  aparaObservacao,
+  fichaPreenchida,
+  linhasDoTotem,
+  separarFicha,
+  valorPreenchido,
+} from '@shared/anamnese';
 
 export interface ParsedAnamnese {
   note: string;
@@ -30,44 +40,63 @@ const FIELD_LABELS: Record<string, string> = {
   aromaterapia: 'Aromaterapia',
 };
 
+const normalizarAnamneseData = (dados: Record<string, unknown>): AnamneseData => {
+  const resultado: AnamneseData = { ...initialAnamnese, caracteristicas: [], medicamentos: [] };
+  for (const campo of CAMPOS_TEXTO_ANAMNESE) {
+    const v = dados[campo];
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      resultado[campo] = String(v);
+    }
+  }
+  for (const campo of CAMPOS_LISTA_ANAMNESE) {
+    const v = dados[campo];
+    if (Array.isArray(v)) {
+      resultado[campo] = v.filter((item): item is string => typeof item === 'string' && item.trim() !== '');
+    }
+  }
+  return resultado;
+};
+
+// Há ficha, mas a API não mandou o conteúdo (LGPD: só a supervisão e o profissional do atendimento veem)
+export const fichaOculta = (cliente: Pick<Client, 'temAnamnese' | 'acessoSaude'>) => cliente.temAnamnese === true && cliente.acessoSaude !== true;
+
 // Mesma regra da API (shared/anamnese.ts)
 export const hasAnamnese = (data: AnamneseData) => fichaPreenchida(data);
 
-export function parseClientObservation(obs?: string): ParsedAnamnese {
-  const raw = (obs || '').trim();
-  if (!raw) {
-    return { note: '', anamSummary: [], anamJson: '', anamData: initialAnamnese };
+export function parseClientObservation(obs?: string | null): ParsedAnamnese {
+  // Só o fim é aparado: tirar o espaço do começo de "  [Anamnese ..." a faria virar linha do totem ao regravar
+  const raw = (obs || '').trimEnd();
+  if (!raw.trim()) {
+    return { note: '', anamSummary: [], anamJson: '', anamData: { ...initialAnamnese, caracteristicas: [], medicamentos: [] } };
   }
 
-  const idx = raw.indexOf(MARCADOR_ANAMNESE);
-  if (idx < 0) {
-    return { note: raw, anamSummary: [], anamJson: '', anamData: initialAnamnese };
+  // Ficha do totem: texto livre numa linha própria (fica na nota, que é regravada intacta); entra no resumo.
+  // Mesmas regras da API (linhasDoTotem e separarFicha): o que a API conta como ficha, a tela mostra, e vice-versa
+  const totem = linhasDoTotem(raw);
+  const ficha = separarFicha(raw);
+  // Sem ficha válida: a observação inteira é nota, intacta. Regravar põe a ficha nova no fim e ela vale (a última)
+  if (!ficha?.dados || !fichaPreenchida(ficha.dados)) {
+    return { note: raw, anamSummary: totem, anamJson: '', anamData: { ...initialAnamnese, caracteristicas: [], medicamentos: [] } };
   }
 
-  const note = raw.slice(0, idx).trim();
-  const jsonPart = raw.slice(idx + MARCADOR_ANAMNESE.length).trim();
+  const anamData = normalizarAnamneseData(ficha.dados);
+  const summary = Object.entries(ficha.dados)
+    // Mesma regra da API por campo (0 e false contam como preenchidos lá; com || a tela os escondia)
+    .filter(([k, v]) => k in FIELD_LABELS && valorPreenchido(v))
+    .map(([k, v]) => `${FIELD_LABELS[k] || k}: ${Array.isArray(v) ? v.join(', ') : String(v)}`);
 
-  try {
-    const parsed = JSON.parse(jsonPart) as Record<string, unknown>;
-    const summary = Object.entries(parsed)
-      .filter(([, v]) => {
-        if (Array.isArray(v)) return v.length > 0;
-        return String(v || '').trim().length > 0;
-      })
-      .map(([k, v]) => `${FIELD_LABELS[k] || k}: ${Array.isArray(v) ? v.join(', ') : String(v)}`);
-
-    return {
-      note,
-      anamSummary: summary,
-      anamJson: jsonPart,
-      anamData: { ...initialAnamnese, ...parsed } as AnamneseData,
-    };
-  } catch {
-    return { note: raw, anamSummary: [], anamJson: '', anamData: initialAnamnese };
-  }
+  return {
+    note: ficha.nota,
+    anamSummary: [...summary, ...totem],
+    anamJson: ficha.json,
+    anamData,
+  };
 }
 
 export function formatAnamneseStorage(note: string, data: AnamneseData): string {
-  if (!hasAnamnese(data)) return note.trim();
-  return `${note.trim()}\n${MARCADOR_ANAMNESE}${JSON.stringify(data)}`.trim();
+  const nota = aparaObservacao(note);
+  if (!hasAnamnese(data)) return nota;
+  // A ficha vai sempre por último: é a que separarFicha lê (vale o último marcador válido)
+  const ficha = `${MARCADOR_ANAMNESE}${JSON.stringify(data)}`;
+  return nota ? `${nota}\n${ficha}` : ficha;
 }

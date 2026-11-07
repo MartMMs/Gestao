@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../../AuthContext';
 import { motion } from 'motion/react';
 import { ConfiguracaoEmpresa } from '../../../types';
@@ -126,9 +126,22 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Config que o formulário mostrou por último e config nova vinda de outro aparelho enquanto havia edição aqui:
+  // trocar o formulário calado apagava o que a pessoa estava digitando
+  const baseRef = useRef<Partial<ConfiguracaoEmpresa> | null>(null);
+  const formRef = useRef(form);
+  formRef.current = form;
+  const [configDeFora, setConfigDeFora] = useState<ConfiguracaoEmpresa | null>(null);
+
   useEffect(() => {
-    if (config) {
+    if (!config) return;
+    const editado = baseRef.current !== null && JSON.stringify(formRef.current) !== JSON.stringify(baseRef.current);
+    baseRef.current = config;
+    if (editado && JSON.stringify(formRef.current) !== JSON.stringify(config)) {
+      setConfigDeFora(config);
+    } else {
       setForm(config);
+      setConfigDeFora(null);
     }
   }, [config]);
 
@@ -151,6 +164,10 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
     setSaveError(null);
     try {
       await updateMutation.mutateAsync(form);
+      // O que acabou de ser salvo vira a base: a config recarregada entra sem aviso. Não null: salvar sem mudança
+      // não recarrega nada, e a próxima config de fora apagaria o que fosse digitado depois
+      baseRef.current = form;
+      setConfigDeFora(null);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3500);
     } catch (err) {
@@ -441,6 +458,14 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
             </span>
           </label>
 
+          {configDeFora && (
+            <p role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-on-surface">
+              A configuração foi alterada em outra tela ou aparelho. Salvar agora substitui a alteração de lá.{' '}
+              <button type="button" className="font-bold underline" onClick={() => { setForm(configDeFora); setConfigDeFora(null); }}>
+                Descartar o que mudei aqui e carregar a versão nova
+              </button>
+            </p>
+          )}
           {saveError && (
             <p role="alert" className="rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{saveError}</p>
           )}

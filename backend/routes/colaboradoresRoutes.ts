@@ -3,8 +3,10 @@ import { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../db';
 import { redisService } from '../services/redisService';
-import { avisoTentativasSenha, chaveConferenciaSenha, getUsuario, senhaAtualConfere, usuarioEhAdmin, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken, PAPEIS_VALIDOS, type Papel } from '../auth';
+import { assinarToken, avisoTentativasSenha, chaveConferenciaSenha, getUsuario, revogarToken, tokenCsrfDaSessao, senhaAtualConfere, usuarioEhAdmin, usuarioEhSupervisor, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken, PAPEIS_VALIDOS, type Papel } from '../auth';
 import { HttpError, responderErro } from '../lib/http';
+import { gravarCookieSessao, tokenDaRequisicao } from '../lib/cookies';
+import { config } from '../env';
 import type { Eventos } from '../lib/eventos';
 import { transacaoComTravas, travarAgenda } from '../lib/transacao';
 import { prepararBloqueio } from '../lib/privacidade';
@@ -12,10 +14,9 @@ import { INVALIDAR_SESSOES, PAPEIS_ATENDIMENTO, validarSenha } from '../lib/usua
 import { validarDisponibilidadeProfissional } from '../services/agendaService';
 import { partesNoFuso } from '../../shared/agenda';
 import { ESCOPOS } from '../../shared/escopos';
-import { normalizarNome } from '../../shared/validadores';
+import { EMAIL_REGEX, MENSAGEM_USUARIO_INVALIDO, USUARIO_REGEX, normalizarNome } from '../../shared/validadores';
 
 const PAPEIS_PRIVILEGIADOS: Papel[] = ['admin', 'supervisor'];
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Supervisor só gerencia colaboradores e recepção; papéis privilegiados ficam com o admin
 const podeAtribuirPapel = (req: Request, papel: Papel) => usuarioEhAdmin(req) || !PAPEIS_PRIVILEGIADOS.includes(papel);
@@ -23,14 +24,40 @@ const podeAtribuirPapel = (req: Request, papel: Papel) => usuarioEhAdmin(req) ||
 const podeGerenciarConta = (req: Request, alvo: { id: string; papel: string }) =>
   usuarioEhAdmin(req) || !PAPEIS_PRIVILEGIADOS.includes(alvo.papel as Papel) || alvo.id === getUsuario(req)?.id;
 
-const normalizarEmail = (email: unknown) => (typeof email === 'string' ? email.trim().toLowerCase() : '');
+// E-mail é opcional: vazio vira null (o índice único aceita vários null, mas não vários '')
+const normalizarEmail = (email: unknown) => (typeof email === 'string' && email.trim() ? email.trim().toLowerCase() : null);
+const normalizarUsuario = (usuario: unknown) => (typeof usuario === 'string' && usuario.trim() ? usuario.trim().toLowerCase() : null);
+// Mesma mensagem na checagem e no conflito do índice único (corrida entre dois cadastros)
+const USUARIO_EM_USO = 'Este usuário de acesso já está em uso.';
+const EMAIL_EM_USO = 'Este e-mail já está em uso por outro colaborador. Altere o e-mail para continuar.';
+const SEM_LOGIN = 'Informe o usuário de acesso (ou um e-mail): sem nenhum dos dois a pessoa não consegue entrar.';
 
-const garantirEmailLivre = async (email: string, ignorarId?: string) => {
+const garantirUsuarioLivre = async (usuario: string | null, ignorarId?: string) => {
+  if (usuario === null) return;
+  if (!USUARIO_REGEX.test(usuario)) throw new HttpError(400, MENSAGEM_USUARIO_INVALIDO);
+  const existente = await prisma.colaborador.findFirst({
+    where: { usuario, ...(ignorarId ? { id: { not: ignorarId } } : {}) },
+    select: { id: true },
+  });
+  if (existente) throw new HttpError(409, USUARIO_EM_USO);
+};
+
+// Dois cadastros simultâneos passam pela checagem e o índice único barra o segundo: vira o mesmo 409 da checagem
+const traduzirConflito = (error: unknown): unknown => {
+  if ((error as { code?: string })?.code !== 'P2002') return error;
+  const campos = String((error as { meta?: { target?: unknown } }).meta?.target ?? '');
+  if (campos.includes('usuario')) return new HttpError(409, USUARIO_EM_USO);
+  if (campos.includes('email')) return new HttpError(409, EMAIL_EM_USO);
+  return error;
+};
+
+const garantirEmailLivre = async (email: string | null, ignorarId?: string) => {
+  if (email === null) return;
   if (!EMAIL_REGEX.test(email)) throw new HttpError(400, 'Informe um e-mail válido.');
   const emUso = await prisma.colaborador.findFirst({
     where: { email: { equals: email, mode: 'insensitive' }, ...(ignorarId ? { id: { not: ignorarId } } : {}) },
   });
-  if (emUso) throw new HttpError(409, 'Este e-mail já está em uso por outro colaborador. Altere o e-mail para continuar.');
+  if (emUso) throw new HttpError(409, EMAIL_EM_USO);
 };
 
 // Dois profissionais ativos com o mesmo nome confundem agenda, escala e comissões
@@ -101,10 +128,14 @@ export function createColaboradoresRouter(eventos: Eventos) {
     try {
       // Colaboradores desativados (removidos com histórico) não aparecem na equipe
       const equipe = await prisma.colaborador.findMany({ where: { ativo: true }, include: { bloqueios: true }, orderBy: { nome: 'asc' } });
-      if (usuarioGerenciaAgenda(req)) return res.json(equipe);
-      // Para colegas: sem e-mail/carga horária e com motivo dos afastamentos mascarado
+      // Usuário de acesso (login) e "senha provisória pendente" só para quem gerencia contas: para os demais seriam a
+      // lista de alvos de quem tenta adivinhar senhas. A própria conta sempre vê os seus
+      if (usuarioEhSupervisor(req)) return res.json(equipe);
       const usuarioId = getUsuario(req)?.id;
-      res.json(equipe.map(({ email, cargaHorariaSemanal, ...colega }) => ({
+      const semCredenciais = equipe.map(({ usuario, trocarSenha, ...colega }) => (colega.id === usuarioId ? { ...colega, usuario, trocarSenha } : colega));
+      if (usuarioGerenciaAgenda(req)) return res.json(semCredenciais);
+      // Para colegas: também sem e-mail/carga horária e com motivo dos afastamentos mascarado
+      res.json(semCredenciais.map(({ email, cargaHorariaSemanal, ...colega }) => ({
         ...colega,
         ...(colega.id === usuarioId ? { email, cargaHorariaSemanal } : {}),
         bloqueios: colega.bloqueios.map((b) => prepararBloqueio(b, req)),
@@ -118,6 +149,7 @@ export function createColaboradoresRouter(eventos: Eventos) {
     try {
       const nome = typeof req.body.nome === 'string' ? req.body.nome.trim() : '';
       const email = normalizarEmail(req.body.email);
+      const usuario = normalizarUsuario(req.body.usuario);
       const papel: Papel = PAPEIS_VALIDOS.includes(req.body.papel) ? req.body.papel : 'collaborator';
 
       if (nome.length < 3) return res.status(400).json({ erro: 'Informe o nome completo do colaborador.' });
@@ -126,11 +158,14 @@ export function createColaboradoresRouter(eventos: Eventos) {
       if (!podeAtribuirPapel(req, papel)) {
         return res.status(403).json({ erro: 'Apenas administradores podem criar supervisores ou administradores.' });
       }
+      if (!usuario && !email) return res.status(400).json({ erro: SEM_LOGIN });
+      await garantirUsuarioLivre(usuario);
       await garantirEmailLivre(email);
       await garantirNomeLivre(nome);
 
       const camposEscala = lerCamposEscala(req.body);
-      const especialidade = (camposEscala.especialidade as string | undefined) || '';
+      // A tela não pede mais especialidade: sem ela, vale o cargo (a especialidade é o rótulo da lista e do totem)
+      const especialidade = (camposEscala.especialidade as string | undefined) || (camposEscala.cargo as string | undefined) || '';
       const novoColaborador = await prisma.colaborador.create({
         data: {
           tipoEscala: '6x1',
@@ -142,6 +177,7 @@ export function createColaboradoresRouter(eventos: Eventos) {
           especialidade,
           nome,
           email,
+          usuario,
           papel,
           senha: await bcrypt.hash(req.body.senha, 10),
           // Senha provisória vista pela supervisão: a pessoa escolhe a dela no primeiro acesso
@@ -152,7 +188,7 @@ export function createColaboradoresRouter(eventos: Eventos) {
       notificar();
       res.status(201).json(novoColaborador);
     } catch (error) {
-      responderErro(res, error, 'Erro ao criar colaborador');
+      responderErro(res, traduzirConflito(error), 'Erro ao criar colaborador');
     }
   });
 
@@ -166,6 +202,12 @@ export function createColaboradoresRouter(eventos: Eventos) {
       }
 
       const dados: Record<string, unknown> = lerCamposEscala(req.body);
+      // A tela só mostra o cargo: a especialidade (rótulo da lista e do totem) acompanha quando era o próprio cargo ou
+      // a conta não tinha cargo (contas antigas, cujo formulário mostra a especialidade como cargo). Especialidade
+      // diferente, gravada de propósito, fica
+      if (dados.cargo !== undefined && dados.especialidade === undefined && (!alvo.cargo || alvo.especialidade === alvo.cargo)) {
+        dados.especialidade = dados.cargo;
+      }
       if (req.body.nome !== undefined) {
         const nome = typeof req.body.nome === 'string' ? req.body.nome.trim() : '';
         if (nome.length < 3) return res.status(400).json({ erro: 'Informe o nome completo do colaborador.' });
@@ -177,15 +219,29 @@ export function createColaboradoresRouter(eventos: Eventos) {
         await garantirEmailLivre(email, id);
         dados.email = email;
       }
-      const emailMudou = dados.email !== undefined && dados.email !== alvo.email;
+      if (req.body.usuario !== undefined) {
+        const usuario = normalizarUsuario(req.body.usuario);
+        await garantirUsuarioLivre(usuario, id);
+        dados.usuario = usuario;
+      }
+      const usuarioFinal = dados.usuario !== undefined ? dados.usuario : alvo.usuario;
+      const emailFinal = dados.email !== undefined ? dados.email : alvo.email;
+      if (!usuarioFinal && !emailFinal) return res.status(400).json({ erro: SEM_LOGIN });
+      // Usuário e e-mail são credenciais de login: mudar qualquer um derruba as sessões e, na própria conta, pede a senha
+      // E-mail antigo gravado com maiúsculas e reenviado igual não é troca (o e-mail é comparado sem caixa)
+      const credencialMudou = (dados.email !== undefined && dados.email !== (alvo.email?.toLowerCase() ?? null))
+        || (dados.usuario !== undefined && dados.usuario !== alvo.usuario);
+      const propriaConta = alvo.id === getUsuario(req)?.id;
       if (req.body.papel !== undefined && req.body.papel !== alvo.papel) {
         if (!PAPEIS_VALIDOS.includes(req.body.papel)) return res.status(400).json({ erro: 'Papel inválido.' });
+        // Rebaixar a si mesmo por engano não tem volta sem outra pessoa (e o último admin sumiria assim)
+        if (propriaConta) return res.status(400).json({ erro: 'A sua própria função de acesso não muda por aqui. Peça a um administrador.' });
         if (!podeAtribuirPapel(req, req.body.papel)) {
           return res.status(403).json({ erro: 'Apenas administradores podem promover a supervisor ou administrador.' });
         }
         dados.papel = req.body.papel;
       }
-      const propriaConta = alvo.id === getUsuario(req)?.id;
+      const rebaixaAdmin = alvo.papel === 'admin' && dados.papel !== undefined && dados.papel !== 'admin';
       if (req.body.senha) {
         // A própria senha tem um caminho só (com auditoria e sessão nova): POST /api/minha-senha
         if (propriaConta) return res.status(400).json({ erro: 'A sua própria senha não muda pelo cadastro da equipe. Peça a outro supervisor ou administrador para redefini-la.' });
@@ -195,28 +251,49 @@ export function createColaboradoresRouter(eventos: Eventos) {
         // Redefinida por outra pessoa: vira provisória e precisa ser trocada pela dona no próximo acesso
         dados.trocarSenha = true;
       }
-      if (dados.senha || emailMudou) {
+      if (dados.senha || credencialMudou) {
         // Na própria conta, trocar o e-mail exige a senha atual: um token vazado não basta para tomar a conta
         if (propriaConta) {
           const senhaAtual = typeof req.body.senhaAtual === 'string' ? req.body.senhaAtual : '';
           const conta = await prisma.colaborador.findUnique({ where: { id }, omit: { senha: false } });
           const conferencia = await senhaAtualConfere(id, senhaAtual, conta?.senha);
           if (!conferencia.confere) {
-            return res.status(403).json({ erro: `Para trocar o seu próprio e-mail, informe a senha atual correta.${avisoTentativasSenha(conferencia.restantes)}` });
+            return res.status(403).json({ erro: `Para trocar o seu próprio e-mail ou usuário de acesso, informe a senha atual correta.${avisoTentativasSenha(conferencia.restantes)}` });
           }
         }
         // Credenciais novas derrubam as sessões abertas com as antigas (inclusive um token vazado)
         Object.assign(dados, INVALIDAR_SESSOES);
       }
 
-      const colaboradorAtualizado = await prisma.colaborador.update({ where: { id }, data: dados });
+      const colaboradorAtualizado = rebaixaAdmin
+        // Trava única para rebaixar admin: dois admins rebaixando um ao outro ao mesmo tempo não zeram os admins
+        ? await prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('colaborador:ultimo-admin'))`;
+          // Sem nenhum admin ativo, ninguém mais cria supervisores nem mexe na configuração da empresa
+          if (!(await tx.colaborador.count({ where: { papel: 'admin', ativo: true, id: { not: id } } }))) {
+            throw new HttpError(400, 'Esta é a única conta de administrador ativa. Promova outra pessoa a administrador antes de mudar esta.');
+          }
+          return tx.colaborador.update({ where: { id }, data: dados, omit: { versaoToken: false } });
+        })
+        : await prisma.colaborador.update({ where: { id }, data: dados, omit: { versaoToken: false } });
       if (dados.versaoToken) eventos.encerrarSessoesDoUsuario(id);
+      const { versaoToken, ...colaboradorPublico } = colaboradorAtualizado;
+      // Própria conta com credencial nova: a sessão desta aba é trocada por uma nova (como em /minha-senha), em vez de
+      // cair como "sessão expirada"; a antiga e as das outras abas/aparelhos deixam de valer
+      if (propriaConta && dados.versaoToken) {
+        const { token: tokenAntigo } = tokenDaRequisicao(req);
+        if (tokenAntigo) await revogarToken(tokenAntigo);
+        const token = assinarToken({ id, papel: colaboradorAtualizado.papel as Papel }, versaoToken, config.jwtExpiraEmSegundos);
+        gravarCookieSessao(res, token);
+        notificar();
+        return res.json({ ...colaboradorPublico, sessao: { expiraEm: Date.now() + config.jwtExpiraEmSegundos * 1000, csrf: tokenCsrfDaSessao(token) } });
+      }
       // Senha provisória nova: os chutes contra a antiga não podem bloquear a pessoa de criar a dela
       if (dados.senha) await redisService.deleteKey(chaveConferenciaSenha(id));
       notificar();
-      res.json(colaboradorAtualizado);
+      res.json(colaboradorPublico);
     } catch (error) {
-      responderErro(res, error, 'Erro ao atualizar colaborador');
+      responderErro(res, traduzirConflito(error), 'Erro ao atualizar colaborador');
     }
   });
 
@@ -276,7 +353,7 @@ export function createColaboradoresRouter(eventos: Eventos) {
 
         const temHistorico = (await tx.agendamento.count({ where: { colaboradorId: id } })) > 0;
         if (temHistorico) {
-          await tx.colaborador.update({ where: { id }, data: { ativo: false } });
+          await tx.colaborador.update({ where: { id }, data: { ativo: false, ...INVALIDAR_SESSOES } });
           return { desativado: true, transferidos, cancelados, canceladosLista };
         }
 

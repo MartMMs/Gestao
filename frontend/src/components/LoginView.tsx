@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import type { OpcoesLogin } from '../AuthContext';
+import { LinksDocumentosLegais } from './DocumentosLegais';
+import { EMAIL_REGEX, USUARIO_REGEX } from '@shared/validadores';
 
 // Importando a imagem local novamente
 import bgImage from '../assets/login-fundo.jpg';
 
 interface LoginViewProps {
-  onLogin: (email: string, pass: string, opcoes?: OpcoesLogin) => Promise<void>;
+  onLogin: (login: string, pass: string, opcoes?: OpcoesLogin) => Promise<void>;
   onOpenTVPanel: () => void;
   onOpenAutoatendimento?: () => void;
   error: string | null;
@@ -14,6 +16,12 @@ interface LoginViewProps {
   companySlogan?: string;
   companyIcon?: string;
 }
+
+const loginValido = (valor: string) => {
+  const v = valor.trim();
+  // A API recebe em minúsculas: maiúscula digitada vale
+  return v.includes('@') ? EMAIL_REGEX.test(v) : USUARIO_REGEX.test(v.toLowerCase());
+};
 
 export function LoginView({
   onLogin,
@@ -24,22 +32,22 @@ export function LoginView({
   companySlogan,
   companyIcon,
 }: LoginViewProps) {
-  const [email, setEmail] = useState('');
+  const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [verificandoRobo, setVerificandoRobo] = useState(false);
   // Campo-isca: invisível para pessoas, preenchido por robôs que completam todo campo do formulário
   const [site, setSite] = useState('');
-  const [emailError, setEmailError] = useState(false);
+  const [loginInvalido, setLoginInvalido] = useState(false);
 
-  // Validação em tempo real do formato de e-mail
-  const validateEmail = (val: string) => {
-    setEmail(val);
+  // Validação em tempo real: com "@" é e-mail; sem, usuário de acesso (mesmas regras da API)
+  const validarLogin = (val: string) => {
+    setLogin(val);
     // Remove o erro enquanto o usuário digita para melhorar a UX
-    if (emailError) {
-      const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
+    if (loginInvalido) {
+      const isValid = loginValido(val);
       if (isValid) {
-        setEmailError(false);
+        setLoginInvalido(false);
       }
     }
   };
@@ -48,14 +56,14 @@ export function LoginView({
     e.preventDefault();
     
     // Valida no momento do envio
-    const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    const isValid = loginValido(login);
     if (!isValid) {
-      setEmailError(true);
+      setLoginInvalido(true);
       return;
     }
 
     setIsLoading(true);
-    await onLogin(email, password, { site, aoVerificarRobo: setVerificandoRobo });
+    await onLogin(login, password, { site, aoVerificarRobo: setVerificandoRobo });
     // Senha recusada não fica no campo (quem tenta de novo digita do zero; em tela compartilhada, ninguém a reaproveita)
     setPassword('');
     setIsLoading(false); // Desliga o spinner assim que a tentativa terminar (falhando ou não)
@@ -134,18 +142,21 @@ export function LoginView({
             )}
             
             <div>
-              <label htmlFor="email" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">E-mail</label>
+              <label htmlFor="login" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Usuário ou e-mail</label>
               <input 
-                id="email"
+                id="login"
                 required 
-                type="email" 
-                value={email} 
-                onChange={e => validateEmail(e.target.value)} 
-                onBlur={() => { if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) setEmailError(true) }}
-                className={`w-full bg-surface-container border ${emailError ? 'border-error focus:ring-error' : 'border-outline-variant focus:ring-primary'} rounded-xl p-4 focus:ring-1 focus:outline-none text-sm transition-all placeholder:text-on-surface-variant text-on-surface`} 
-                placeholder="seu@email.com" 
+                type="text" 
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                value={login} 
+                onChange={e => validarLogin(e.target.value)} 
+                onBlur={() => { if(login && !loginValido(login)) setLoginInvalido(true) }}
+                className={`w-full bg-surface-container border ${loginInvalido ? 'border-error focus:ring-error' : 'border-outline-variant focus:ring-primary'} rounded-xl p-4 focus:ring-1 focus:outline-none text-sm transition-all placeholder:text-on-surface-variant text-on-surface`} 
+                placeholder="seu.usuario ou seu@email.com" 
               />
-              {emailError && <span className="text-error text-[11px] mt-1 ml-1 font-medium tracking-wide">Formato de e-mail inválido</span>}
+              {loginInvalido && <span className="text-error text-[11px] mt-1 ml-1 font-medium tracking-wide">Usuário ou e-mail inválido</span>}
             </div>
 
             <div>
@@ -168,7 +179,7 @@ export function LoginView({
 
             <button 
               type="submit" 
-              disabled={isLoading || emailError}
+              disabled={isLoading || loginInvalido}
               className="w-full bg-primary text-on-primary py-4 rounded-xl font-bold text-sm uppercase tracking-[0.2em] shadow-lg hover:bg-primary/90 hover:shadow-xl hover:-translate-y-0.5 transition-all active:scale-[0.98] mt-4 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {isLoading ? (
@@ -183,6 +194,9 @@ export function LoginView({
             </button>
           </form>
 
+          <p className="mt-6 text-center text-[11px] text-on-surface-variant">
+            <LinksDocumentosLegais className="justify-center" />
+          </p>
         </motion.div>
       </div>
     </div>

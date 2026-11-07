@@ -23,6 +23,9 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
 
 ## Mudancas depois da 1.1.0-beta.1 (ainda sem versao)
 
+- **Usuario de acesso (login sem e-mail):** colaboradores e gestores podem entrar com identificador curto (`joao.silva`) alem do e-mail opcional, com unicidade case-insensitive no banco e mesma cota de tentativas de login.
+- **Ficha de anamnese e operacao de balcao (LGPD):** ficha estruturada com exigencia opcional por empresa (`exigirAnamnese`). A recepcao ve o telefone completo (para confirmar presenca/ligar) e pode preencher ou atualizar a ficha no balcao sem visualizar nem apagar o historico clinico anterior; o colaborador ve telefone e CPF mascarados e acessa a ficha dos clientes da sua agenda (proximos 7 dias ou concluidos nos ultimos 30 dias).
+- **Documentos legais integrados:** Termos de Uso e Politica de Privacidade acessiveis na tela de login, no rodape do portal e no totem de autoatendimento.
 - **Sessao em cookie HttpOnly com protecao CSRF:** o token nao fica mais no navegador ao alcance do JavaScript;
   escritas exigem `X-Requested-With`; logout e inatividade revogam a sessao no servidor.
 - **Agenda:** visoes Dia, Semana e Mes; arrastar o card remarca profissional e horario (com a versao do registro);
@@ -30,13 +33,14 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
 - **Marcacoes simultaneas:** agenda, totem, escala, trocas de turno, desligamento e clientes gravam com travas por
   chave (profissional, agendamento, nome, CPF, cliente, sala, escala). Dois pedidos para o mesmo horario: um grava,
   o outro recebe 409. Espera longa por trava vira 503 com "tente de novo".
-- **Auditoria e numeros:** historico de alteracoes (preco, comissao, cobranca do totem) para o administrador;
+- **Auditoria e numeros:** historico de alteracoes (preco, comissao, cobranca do totem, exigencia e preenchimento de anamnese) para o administrador;
   dashboard e relatorio usam o mesmo calculo; falta conta o agendado vencido sem baixa.
 - **Privacidade:** comissao escondida de quem nao e supervisor; ficha de cliente excluida nao recebe atendimento
   nem dados; consentimento versionado no totem; senha provisoria.
 
 > **Antes de subir esta versao:** faca backup do banco e rode `cd backend && npx prisma migrate deploy`
-> (5 migrations novas: auditoria, comissao proporcional, troca de senha obrigatoria, consentimento do totem e sua versao).
+> (migrations de auditoria, comissao proporcional, troca de senha obrigatoria, consentimento do totem e usuario de acesso).
+> Veja os detalhes completos em [docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md](docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md).
 
 ## Guias detalhados
 
@@ -67,7 +71,7 @@ O projeto esta separado em frontend e backend dedicados.
 npm install
 cp .env.example .env                 # preencha DATABASE_URL e JWT_SECRET (openssl rand -hex 32)
 npm --prefix backend run prisma:deploy
-npm --prefix backend run criar-usuario -- --email voce@empresa.com --nome "Seu Nome" --papel admin
+npm --prefix backend run criar-usuario -- --usuario seu.usuario --nome "Seu Nome" --papel admin   # ou --email voce@empresa.com
 ```
 
 O ultimo comando cria o primeiro administrador e pede a senha no terminal (sem eco e fora do historico
@@ -205,6 +209,7 @@ Atalhos locais (`Gestao-*.desktop`, tasks do VS Code) podem ser criados por cada
 
 ## Documentacao relacionada
 
+- `docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md` - documentacao detalhada da atualizacao de usuario de acesso, ficha de anamnese, LGPD operacional e seguranca
 - `docs/RELEASE_NOTES_1.1.0-beta.1.md` - notas da versao atual
 - `docs/BACKLOG_ATIVO.md` - pendencias em aberto
 - `docs/arquivo/` - planos e checklists de fases anteriores (historico; nao refletem a estrutura atual)

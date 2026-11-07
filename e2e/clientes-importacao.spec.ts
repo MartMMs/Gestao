@@ -174,7 +174,7 @@ test.describe('Clientes — cadastro e importação', () => {
       await loginPelaTela(page, CONTAS.supervisor);
       await page.getByRole('button', { name: 'Clientes', exact: true }).click();
       await page.getByLabel('Buscar cliente').fill(nome);
-      await page.getByRole('row', { name: new RegExp(nome) }).getByTitle('Resumo da ficha').click();
+      await page.getByRole('row', { name: new RegExp(nome) }).getByTitle('Ver ficha de anamnese').click();
       await page.getByRole('button', { name: 'Alterar Ficha' }).click();
       const ficha = page.getByRole('dialog', { name: 'Ficha de anamnese' });
       const alergia = ficha.locator('label:has-text("Tem alguma alergia?") + input');

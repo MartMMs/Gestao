@@ -1,6 +1,7 @@
 // Regras de conta compartilhadas entre a API e os scripts de linha de comando (sem dependência do servidor)
 
 export type Papel = 'admin' | 'supervisor' | 'collaborator' | 'receptionist';
+
 export const PAPEIS_VALIDOS: Papel[] = ['admin', 'supervisor', 'collaborator', 'receptionist'];
 
 // Papéis que atendem clientes: só eles recebem agendamentos (e, por eles, acesso à anamnese)

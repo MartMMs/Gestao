@@ -37,6 +37,8 @@ export interface Employee {
   id: string;
   name: string;
   email: string;
+  // Login sem e-mail; contas antigas podem não ter
+  usuario?: string;
   role: Role;
   specialty: string;
   cargo?: string;
@@ -54,7 +56,8 @@ export interface Employee {
 }
 
 // Alteração de um profissional; `password` redefine a senha de acesso
-export type EmployeeUpdate = Partial<Employee> & { password?: string };
+// senhaAtual: exigida pela API ao trocar usuário ou e-mail da própria conta
+export type EmployeeUpdate = Partial<Employee> & { password?: string; senhaAtual?: string };
 
 export interface Appointment {
   id: string;
@@ -111,6 +114,8 @@ export interface Client {
   email?: string | null;
   // Calculado pela API: há ficha de anamnese (vem até para quem não pode ver o conteúdo)
   temAnamnese?: boolean;
+  // Calculado pela API: quem está logado vê e grava a ficha de saúde deste cliente
+  acessoSaude?: boolean;
   observacao?: string;
   alergias?: string[];
   preferencias?: string[];

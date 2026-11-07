@@ -38,6 +38,8 @@ export const responderErro = (res: Response, error: unknown, mensagemPadrao: str
   if (tipo === 'entity.too.large') return res.status(413).json({ erro: 'Dados enviados excedem o tamanho permitido.' });
   const codigo = (error as { code?: string })?.code;
   if (codigo === 'P2025') return res.status(404).json({ erro: 'Registro não encontrado.' });
+  // Índice único: outro pedido igual gravou entre a checagem e o insert (a rota dá a mensagem específica quando sabe)
+  if (codigo === 'P2002') return res.status(409).json({ erro: 'Já existe um registro com estes dados.' });
   // Espera longa por uma trava (P2028: a transação passou do tempo) ou impasse que esgotou as novas tentativas
   if (codigo === 'P2028' || conflitoDeTransacao(error)) {
     return res.status(503).json({ erro: 'Outra operação está alterando estes dados agora. Tente salvar de novo em instantes.' });

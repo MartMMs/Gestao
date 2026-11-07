@@ -12,6 +12,9 @@ model Colaborador {
   id            String        @id @default(uuid())
   nome          String
   email         String?       @unique
+  // Login sem depender de e-mail: minúsculo, único; contas antigas sem usuário entram pelo e-mail.
+  // Formato garantido também por CHECK no banco (migration 20261106130000_usuario_formato)
+  usuario       String?       @unique
   senha         String?
   especialidade String
   cargo         String?

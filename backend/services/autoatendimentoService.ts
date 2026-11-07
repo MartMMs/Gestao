@@ -28,7 +28,7 @@ import {
 // Regras de negócio do totem (reserva, confirmação e configuração), separadas das rotas HTTP
 
 import { PAPEIS_ATENDIMENTO } from '../lib/usuarios';
-import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, travarNomeCliente } from '../lib/clientes';
+import { NOME_CLIENTE_REMOVIDO, travarNomeCliente } from '../lib/clientes';
 import { comissaoProporcional, valorDosServicos } from '../lib/valores';
 import { ORIGEM_TOTEM } from '../lib/privacidade';
 
@@ -251,9 +251,10 @@ export const criarAgendamentoTotem = async (
   const servicos = await prisma.servico.findMany({ where: { id: { in: sessao.servicoIds }, ativo: true } });
   if (servicos.length !== sessao.servicoIds.length) throw new HttpError(409, 'Um dos serviços escolhidos saiu do catálogo. Escolha os serviços novamente.');
   const inicio = instanteNoFuso(sessao.data, sessao.horario);
-  // A declaração do cliente fica numa linha só: é a linha inteira que a regra de forja (shared/anamnese.ts) protege
+  // A declaração do cliente fica numa linha só: é a linha inteira que a regra de forja (shared/anamnese.ts) protege.
+  // O \s do JS não cobre o NEL (U+0085), que a regra de linha do shared conta como quebra
   const observacao = cliente.observacoesSaude
-    ? `[Anamnese Autoatendimento ${sessao.data}]: ${cliente.observacoesSaude.replace(/\s+/g, ' ').trim()}`
+    ? `[Anamnese Autoatendimento ${sessao.data}]: ${cliente.observacoesSaude.replace(/[\s\u0085]+/g, ' ').trim()}`
     : null;
 
   return transacaoComTravas(async (tx) => {
@@ -298,13 +299,6 @@ export const criarAgendamentoTotem = async (
       for (let tentativa = 1; ocupados.has(normalizarNome(nomeCadastro)); tentativa += 1) {
         nomeCadastro = tentativa === 1 ? sufixoBase : `${sufixoBase} ${tentativa}`;
       }
-      // Só o totem gera nomes com sufixo, e sob a trava do nome-base: aqui o nome escolhido ainda está livre, salvo
-      // alguém digitar o mesmo sufixo na recepção neste instante
-      if (await clienteComMesmoNome(tx, nomeCadastro)) throw new HttpError(409, 'Não foi possível concluir a reserva agora. Tente confirmar de novo.');
-    } else {
-      // Mesma quantidade de leituras nos dois caminhos: o tempo de resposta não diz se nome e telefone já são cliente.
-      // Sem trava (só a leitura): travar o nome aqui, depois de cliente:id, inverteria a ordem da exclusão
-      await tx.cliente.findMany({ where: { removidoEm: null }, select: { id: true, nome: true } });
     }
     const dbCliente = existente
       ?? await tx.cliente.create({ data: { nome: nomeCadastro, telefone: cliente.telefone, cpf: cliente.cpf, observacao } });

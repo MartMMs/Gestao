@@ -6,7 +6,15 @@ import { HttpError, responderErro, type Notificar } from '../lib/http';
 import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, mensagemNomeDuplicado, travarNomeCliente } from '../lib/clientes';
 import { transacaoComTravas, travarChave } from '../lib/transacao';
 import { clientesComAcessoSaude, prepararCliente } from '../lib/privacidade';
-import { CODIGO_ANAMNESE_OBRIGATORIA, MENSAGEM_ANAMNESE_OBRIGATORIA, MENSAGEM_FICHA_TOTEM_RESERVADA, forjaFichaDoTotem, temFichaAnamnese } from '../../shared/anamnese';
+import { registrarAuditoria } from '../lib/auditoria';
+import {
+  CODIGO_ANAMNESE_OBRIGATORIA,
+  MENSAGEM_ANAMNESE_OBRIGATORIA,
+  MENSAGEM_FICHA_TOTEM_RESERVADA,
+  atualizarSomenteFichaJson,
+  forjaFichaDoTotem,
+  temFichaAnamnese,
+} from '../../shared/anamnese';
 import { getEmpresaConfig } from '../services/configService';
 import { MAX_LINHAS_IMPORTACAO, MENSAGEM_EMAIL_INVALIDO, emailValido, erroNomeCliente, lerCliente, limparTexto, validarImportacao, type DadosCliente } from '../../shared/clientes';
 import { LIMITE_OBSERVACAO, MENSAGEM_CPF_INVALIDO, MENSAGEM_TELEFONE_INVALIDO, apenasDigitos, cpfValido, normalizarNome, normalizarTelefone, telefoneValido, valorMascarado } from '../../shared/validadores';
@@ -32,11 +40,13 @@ export function createClientesRouter(notificar: Notificar) {
         },
         orderBy: { nome: 'asc' },
       });
-      // temAnamnese: só se há ficha, sem o conteúdo (quem não vê saúde, como a recepção, também precisa do aviso)
-      const comAviso = <T extends { observacao: string | null }>(c: T, original: { observacao: string | null }) => ({ ...c, temAnamnese: temFichaAnamnese(original.observacao) });
-      if (usuarioEhSupervisor(req)) return res.json(clientes.map((c) => comAviso(c, c)));
+      // temAnamnese: só se há ficha, sem o conteúdo (quem não vê saúde, como a recepção, também precisa do aviso).
+      // acessoSaude: quem pede vê e grava a ficha deste cliente (a tela não oferece edição que a API recusaria)
+      const comAviso = <T extends { observacao: string | null }>(c: T, original: { observacao: string | null }, acessoSaude: boolean) =>
+        ({ ...c, temAnamnese: temFichaAnamnese(original.observacao), acessoSaude });
+      if (usuarioEhSupervisor(req)) return res.json(clientes.map((c) => comAviso(c, c, true)));
       const meus = await clientesComAcessoSaude(req);
-      res.json(clientes.map((c) => comAviso(prepararCliente(c, req, meus.has(c.id)), c)));
+      res.json(clientes.map((c) => comAviso(prepararCliente(c, req, meus.has(c.id)), c, meus.has(c.id))));
     } catch (error) {
       responderErro(res, error, 'Erro ao buscar clientes');
     }
@@ -105,28 +115,57 @@ export function createClientesRouter(notificar: Notificar) {
 
       const { nome, telefone, cpf, email, observacao } = req.body ?? {};
       const dados: Prisma.ClienteUpdateInput = {};
+      const supervisor = usuarioEhSupervisor(req);
+      const gerencia = usuarioGerenciaAgenda(req);
+      const acessoSaude = supervisor ? new Set<string>([id]) : await clientesComAcessoSaude(req);
+      const veSaude = supervisor || acessoSaude.has(id);
 
+      // Colaborador sem acesso de saúde ao cliente não pode atualizar nem consultar este endpoint
+      if (!gerencia && !veSaude) {
+        return res.status(403).json({ erro: 'Você só pode registrar anamnese de clientes que atende.' });
+      }
+
+      let gravouAnamneseRecepcao = false;
       if (observacao !== undefined) {
         if (observacao !== null && typeof observacao !== 'string') return res.status(400).json({ erro: 'Observação inválida.' });
-        if (!usuarioEhSupervisor(req) && !(await clientesComAcessoSaude(req)).has(id)) {
-          return res.status(403).json({ erro: 'Você só pode registrar anamnese de clientes que atende.' });
-        }
-        dados.observacao = observacao ? observacao.slice(0, LIMITE_OBSERVACAO) : null;
-        if (forjaFichaDoTotem(dados.observacao, cliente.observacao)) return res.status(400).json({ erro: MENSAGEM_FICHA_TOTEM_RESERVADA });
-        // Com a ficha obrigatória, editar não pode tirar a ficha de quem já tem (seria furar a regra pelo cadastro)
-        if (temFichaAnamnese(cliente.observacao) && !temFichaAnamnese(dados.observacao) && (await getEmpresaConfig()).exigirAnamnese) {
-          return res.status(400).json({ erro: 'A empresa exige ficha de anamnese: a ficha deste cliente não pode ser apagada.', code: CODIGO_ANAMNESE_OBRIGATORIA });
+        if (veSaude) {
+          dados.observacao = observacao ? observacao.slice(0, LIMITE_OBSERVACAO) : null;
+          if (forjaFichaDoTotem(dados.observacao, cliente.observacao)) return res.status(400).json({ erro: MENSAGEM_FICHA_TOTEM_RESERVADA });
+          // Com a ficha obrigatória, editar não pode tirar a ficha de quem já tem (seria furar a regra pelo cadastro)
+          if (temFichaAnamnese(cliente.observacao) && !temFichaAnamnese(dados.observacao) && (await getEmpresaConfig()).exigirAnamnese) {
+            return res.status(400).json({ erro: 'A empresa exige ficha de anamnese: a ficha deste cliente não pode ser apagada.', code: CODIGO_ANAMNESE_OBRIGATORIA });
+          }
+        } else if (gerencia) {
+          // Recepção no balcão: pode preencher ou atualizar o bloco __ANAMNESE_JSON__ sem ver nem apagar a nota médica/totem
+          if (observacao) {
+            if (observacao.length > LIMITE_OBSERVACAO) return res.status(400).json({ erro: 'A ficha de anamnese ficou grande demais. Resuma as observações.' });
+            if (forjaFichaDoTotem(observacao, cliente.observacao)) return res.status(400).json({ erro: MENSAGEM_FICHA_TOTEM_RESERVADA });
+            const combinada = atualizarSomenteFichaJson(cliente.observacao, observacao);
+            if (!combinada) return res.status(400).json({ erro: 'Preencha ao menos um campo da ficha de anamnese.' });
+            if (combinada.length > LIMITE_OBSERVACAO) return res.status(400).json({ erro: 'A ficha de anamnese ficou grande demais. Resuma as observações.' });
+            dados.observacao = combinada;
+            gravouAnamneseRecepcao = true;
+          } else if (telefone === undefined && nome === undefined) {
+            return res.status(400).json({ erro: 'Preencha ao menos um campo da ficha de anamnese.' });
+          }
         }
       }
 
-      // Dados cadastrais: apenas supervisores. Valores mascarados nunca sobrescrevem o dado real.
-      // Nome nunca é mascarado: qualquer valor enviado conta como alteração de cadastro
-      const alteraCadastro = nome !== undefined || [telefone, cpf].some((v) => v !== undefined && !valorMascarado(v))
-        || (email !== undefined && email !== null);
-      if (alteraCadastro && !usuarioEhSupervisor(req)) {
-        return res.status(403).json({ erro: 'Apenas supervisores podem alterar nome, telefone, CPF ou e-mail do cliente.' });
+      // Dados cadastrais: nome, CPF e e-mail apenas supervisores; telefone também pode ser atualizado pela recepção.
+      // Valores mascarados ou nome idêntico ao já gravado não contam como alteração restrita.
+      const mudaNome = nome !== undefined && normalizarNome(limparTexto(String(nome))) !== normalizarNome(cliente.nome);
+      const mudaCpf = cpf !== undefined && !valorMascarado(cpf);
+      const mudaEmail = email !== undefined && email !== null && String(email).trim() !== '';
+      const mudaTelefone = telefone !== undefined && !valorMascarado(telefone)
+        && (normalizarTelefone(telefone) || null) !== (cliente.telefone || null);
+
+      if ((mudaNome || mudaCpf || mudaEmail || (!gerencia && nome !== undefined)) && !supervisor) {
+        return res.status(403).json({ erro: 'Apenas supervisores podem alterar nome, CPF ou e-mail do cliente.' });
       }
-      if (nome !== undefined) {
+      if (mudaTelefone && !gerencia) {
+        return res.status(403).json({ erro: 'Apenas a recepção ou supervisores podem alterar o telefone do cliente.' });
+      }
+      if (supervisor && nome !== undefined) {
         const nomeLimpo = limparTexto(nome);
         if (nomeLimpo.length < 2) return res.status(400).json({ erro: 'O nome do cliente não pode ficar vazio.' });
         // Mesma regra do cadastro (sem HTML, fórmula ou números) quando o nome muda; o atual pode ter o sufixo do totem
@@ -134,15 +173,15 @@ export function createClientesRouter(notificar: Notificar) {
         if (erroNome) return res.status(400).json({ erro: erroNome });
         dados.nome = nomeLimpo.slice(0, 120);
       }
-      if (telefone !== undefined && !valorMascarado(telefone)) {
+      if (gerencia && telefone !== undefined && !valorMascarado(telefone)) {
         if (telefone && !telefoneValido(telefone)) return res.status(400).json({ erro: MENSAGEM_TELEFONE_INVALIDO });
         dados.telefone = normalizarTelefone(telefone) || null;
       }
-      if (cpf !== undefined && !valorMascarado(cpf)) {
+      if (supervisor && cpf !== undefined && !valorMascarado(cpf)) {
         if (cpf && !cpfValido(cpf)) return res.status(400).json({ erro: MENSAGEM_CPF_INVALIDO });
         dados.cpf = apenasDigitos(cpf) || null;
       }
-      if (email !== undefined && email !== null) {
+      if (supervisor && email !== undefined && email !== null) {
         const limpo = limparTexto(email).toLowerCase();
         if (limpo && !emailValido(limpo)) return res.status(400).json({ erro: MENSAGEM_EMAIL_INVALIDO });
         dados.email = limpo || null;
@@ -153,16 +192,33 @@ export function createClientesRouter(notificar: Notificar) {
         // receber nome, telefone, CPF ou anamnese
         if (dados.nome) await travarNomeCliente(tx, dados.nome as string);
         await travarChave(tx, `cliente:${id}`);
-        const atual = await tx.cliente.findUnique({ where: { id }, select: { removidoEm: true } });
+        const atual = await tx.cliente.findUnique({ where: { id }, select: { removidoEm: true, observacao: true, codigo: true } });
         if (!atual || atual.removidoEm) throw new HttpError(404, 'Cliente não encontrado.');
         if (dados.nome) {
           const homonimo = await clienteComMesmoNome(tx, dados.nome as string, id);
           if (homonimo) throw new HttpError(409, mensagemNomeDuplicado(homonimo, 'carteira'));
         }
-        return tx.cliente.update({ where: { id }, data: dados });
+        if (gravouAnamneseRecepcao) {
+          const recalculada = atualizarSomenteFichaJson(atual.observacao, observacao);
+          if (!recalculada || recalculada.length > LIMITE_OBSERVACAO) {
+            throw new HttpError(400, 'A ficha de anamnese ficou grande demais. Resuma as observações.');
+          }
+          dados.observacao = recalculada;
+        }
+        const gravado = await tx.cliente.update({ where: { id }, data: dados });
+        if (gravouAnamneseRecepcao) {
+          await registrarAuditoria(req, {
+            acao: 'cliente.anamnese',
+            alvo: `Cliente #${atual.codigo}`,
+            tx,
+            antes: { fichaAnamnese: temFichaAnamnese(atual.observacao) },
+            depois: { fichaAnamnese: true },
+          });
+        }
+        return gravado;
       });
       notificar();
-      res.json(prepararCliente(atualizado, req, true));
+      res.json(prepararCliente(atualizado, req, veSaude));
     } catch (error) {
       responderErro(res, error, 'Erro ao atualizar cliente');
     }

@@ -206,6 +206,43 @@ const formatarDataHora = (instante: Date) => {
   return `${data.slice(8, 10)}/${data.slice(5, 7)} ${horario}`;
 };
 
+export const verificarCLTInterjornadaEmMemoria = (
+  agendamentosOrdenados: Array<{ data: Date; servicos: ServicoComDuracao[] }>,
+  inicio: Date,
+  duracaoMin: number,
+): string | null => {
+  const fim = new Date(inicio.getTime() + duracaoMin * 60_000);
+  const diaInicio = partesNoFuso(inicio).data;
+  const diaFim = partesNoFuso(fim).data;
+  const horasEntre = (a: Date, b: Date) => (b.getTime() - a.getTime()) / 3_600_000;
+
+  let anterior: { data: Date; servicos: ServicoComDuracao[] } | undefined;
+  let posterior: { data: Date; servicos: ServicoComDuracao[] } | undefined;
+  for (const ag of agendamentosOrdenados) {
+    if (ag.data.getTime() < inicio.getTime()) {
+      anterior = ag;
+    } else if (!posterior && ag.data.getTime() >= fim.getTime()) {
+      posterior = ag;
+    }
+  }
+
+  if (anterior) {
+    const fimAnterior = new Date(anterior.data.getTime() + duracaoTotal(anterior.servicos) * 60_000);
+    const descanso = horasEntre(fimAnterior, inicio);
+    if (partesNoFuso(fimAnterior).data !== diaInicio && descanso > 0 && descanso < DESCANSO_INTERJORNADA_HORAS) {
+      return `Violação CLT (interjornada): o descanso entre o último atendimento (${formatarDataHora(fimAnterior)}) e este (${formatarDataHora(inicio)}) seria de apenas ${descanso.toFixed(1)}h. O mínimo legal é ${DESCANSO_INTERJORNADA_HORAS}h.`;
+    }
+  }
+
+  if (posterior) {
+    const descanso = horasEntre(fim, posterior.data);
+    if (partesNoFuso(posterior.data).data !== diaFim && descanso > 0 && descanso < DESCANSO_INTERJORNADA_HORAS) {
+      return `Violação CLT (interjornada): o descanso entre este atendimento e o próximo (${formatarDataHora(posterior.data)}) seria de apenas ${descanso.toFixed(1)}h. O mínimo legal é ${DESCANSO_INTERJORNADA_HORAS}h.`;
+    }
+  }
+  return null;
+};
+
 /**
  * Interjornada (CLT art. 66): 11h de descanso entre o fim de uma jornada e o início da seguinte.
  * Só se aplica entre dias diferentes; vários atendimentos no mesmo dia fazem parte da mesma jornada.
@@ -223,34 +260,22 @@ export const verificarCLTInterjornada = async (
     ...(ignorarAgendamentoId ? { id: { not: ignorarAgendamentoId } } : {}),
   };
   const fim = new Date(inicio.getTime() + duracaoMin * 60_000);
-  const diaInicio = partesNoFuso(inicio).data;
-  const diaFim = partesNoFuso(fim).data;
-  const horasEntre = (a: Date, b: Date) => (b.getTime() - a.getTime()) / 3_600_000;
 
-  const anterior = await db.agendamento.findFirst({
-    where: { ...filtroBase, data: { lt: inicio } },
-    include: { servicos: true },
-    orderBy: { data: 'desc' },
-  });
-  if (anterior) {
-    const fimAnterior = new Date(anterior.data.getTime() + duracaoTotal(anterior.servicos) * 60_000);
-    const descanso = horasEntre(fimAnterior, inicio);
-    if (partesNoFuso(fimAnterior).data !== diaInicio && descanso > 0 && descanso < DESCANSO_INTERJORNADA_HORAS) {
-      return `Violação CLT (interjornada): o descanso entre o último atendimento (${formatarDataHora(fimAnterior)}) e este (${formatarDataHora(inicio)}) seria de apenas ${descanso.toFixed(1)}h. O mínimo legal é ${DESCANSO_INTERJORNADA_HORAS}h.`;
-    }
-  }
+  const [anterior, posterior] = await Promise.all([
+    db.agendamento.findFirst({
+      where: { ...filtroBase, data: { lt: inicio } },
+      include: { servicos: true },
+      orderBy: { data: 'desc' },
+    }),
+    db.agendamento.findFirst({
+      where: { ...filtroBase, data: { gte: fim } },
+      include: { servicos: true },
+      orderBy: { data: 'asc' },
+    }),
+  ]);
 
-  const posterior = await db.agendamento.findFirst({
-    where: { ...filtroBase, data: { gte: fim } },
-    orderBy: { data: 'asc' },
-  });
-  if (posterior) {
-    const descanso = horasEntre(fim, posterior.data);
-    if (partesNoFuso(posterior.data).data !== diaFim && descanso > 0 && descanso < DESCANSO_INTERJORNADA_HORAS) {
-      return `Violação CLT (interjornada): o descanso entre este atendimento e o próximo (${formatarDataHora(posterior.data)}) seria de apenas ${descanso.toFixed(1)}h. O mínimo legal é ${DESCANSO_INTERJORNADA_HORAS}h.`;
-    }
-  }
-  return null;
+  const candidatos = [anterior, posterior].filter((ag): ag is NonNullable<typeof ag> => Boolean(ag));
+  return verificarCLTInterjornadaEmMemoria(candidatos, inicio, duracaoMin);
 };
 
 /**

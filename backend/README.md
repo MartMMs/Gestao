@@ -47,7 +47,7 @@ backend/
 - Middleware verifica token e permissao de supervisor em rotas administrativas.
 - Operacoes criticas notificam o frontend via evento db_updated.
 - Existe redacao de dados sensiveis (CPF, telefone, e-mail, senha, token) em logs.
-- Usuarios que nao sao supervisores recebem CPF/telefone mascarados; a anamnese so aparece para o profissional do atendimento.
+- Usuarios que nao sao supervisores recebem CPF mascarado; o colaborador tambem recebe telefone mascarado e ve a ficha de saude apenas dos clientes com atendimento na sua agenda (proximos 7 dias ou concluidos nos ultimos 30 dias, exceto reservas do totem sem check-in); a recepcao recebe o telefone completo para contato/confirmacao e pode preencher ou atualizar o bloco estruturado da ficha no balcao sem acessar o historico clinico anterior.
 - Tarefa periodica (5 min): cancela reservas do totem sem pagamento no prazo e marca agendamentos antigos nao concluidos como no_show (LIMPEZA_AGENDAMENTOS_DIAS).
 
 ## Persistencia de dados (Prisma)
@@ -139,7 +139,7 @@ Autoatendimento (/api/autoatendimento, publico com limite de requisicoes):
 ## Scripts (pasta backend)
 
 - npm run dev
-- npm run criar-usuario -- --email x@y.com --nome "Nome" --papel admin [--gerar-senha] [--sobrescrever]
+- npm run criar-usuario -- --usuario nome.sobrenome [--email x@y.com] --nome "Nome" --papel admin [--gerar-senha] [--sobrescrever] (pelo menos um de --usuario/--email)
 - npm run seed (dados de demonstracao; exige SEED_PASSWORD para os profissionais; admin e supervisor recebem senhas aleatorias mostradas no fim)
 - npm run seed:ci (usuarios de teste; exige E2E_PASSWORD)
 - npm run prisma:generate

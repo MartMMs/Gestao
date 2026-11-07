@@ -72,6 +72,35 @@ interface Props {
   salvando?: boolean;
 }
 
+function YesNoField({
+  label,
+  value,
+  onToggle,
+}: {
+  label: string;
+  value: string;
+  onToggle: (option: 'Sim' | 'Não') => void;
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-bold text-on-surface-variant uppercase mb-2">{label}</label>
+      <div className="flex gap-3">
+        {(['Sim', 'Não'] as const).map((option) => (
+          <label key={option} className="flex items-center gap-2 cursor-pointer text-sm text-on-surface-variant">
+            <input
+              type="checkbox"
+              checked={value === option}
+              onChange={() => onToggle(option)}
+              className="rounded border-outline-variant/40 text-primary focus:ring-primary cursor-pointer w-4 h-4 transition-all"
+            />
+            <span>{option}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AnamneseForm({ data, onChange, onClose, onCancel, salvando = false }: Props) {
   const alterado = useAlterado(true, data);
   const fechar = () => {
@@ -90,35 +119,6 @@ export function AnamneseForm({ data, onChange, onClose, onCancel, salvando = fal
   const toggleYesNoField = (field: keyof AnamneseData, option: 'Sim' | 'Não') => {
     const currentValue = String(data[field] || '');
     updateField(field, (currentValue === option ? '' : option) as AnamneseData[keyof AnamneseData]);
-  };
-
-  const YesNoField = ({
-    label,
-    field,
-  }: {
-    label: string;
-    field: keyof AnamneseData;
-  }) => {
-    const currentValue = String(data[field] || '');
-
-    return (
-      <div>
-        <label className="block text-xs font-bold text-on-surface-variant uppercase mb-2">{label}</label>
-        <div className="flex gap-3">
-          {(['Sim', 'Não'] as const).map((option) => (
-            <label key={option} className="flex items-center gap-2 cursor-pointer text-sm text-on-surface-variant">
-              <input
-                type="checkbox"
-                checked={currentValue === option}
-                onChange={() => toggleYesNoField(field, option)}
-                className="rounded border-outline-variant/40 text-primary focus:ring-primary cursor-pointer w-4 h-4 transition-all"
-              />
-              <span>{option}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-    );
   };
 
   const toggleArrayItem = (field: 'caracteristicas' | 'medicamentos', item: string) => {
@@ -193,8 +193,8 @@ export function AnamneseForm({ data, onChange, onClose, onCancel, salvando = fal
               <label className="block text-xs font-bold text-on-surface-variant uppercase mb-2">Realizou alguma cirurgia recentemente?</label>
               <input type="text" value={data.cirurgia} onChange={e => updateField('cirurgia', e.target.value)} placeholder="Se sim, há quanto tempo e em qual lugar?" className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none" />
             </div>
-            <YesNoField label="Está grávida?" field="gravida" />
-            <YesNoField label="Faz uso de Marcapasso?" field="marcapasso" />
+            <YesNoField label="Está grávida?" value={String(data.gravida || '')} onToggle={(opt) => toggleYesNoField('gravida', opt)} />
+            <YesNoField label="Faz uso de Marcapasso?" value={String(data.marcapasso || '')} onToggle={(opt) => toggleYesNoField('marcapasso', opt)} />
             </>)}
           </div>
 
@@ -247,7 +247,7 @@ export function AnamneseForm({ data, onChange, onClose, onCancel, salvando = fal
               <label className="block text-xs font-bold text-on-surface-variant uppercase mb-2">{detalhada ? 'Toma algum medicamento além dos citados?' : 'Faz uso de algum medicamento? Qual?'}</label>
               <input type="text" value={data.outrosMedicamentos} onChange={e => updateField('outrosMedicamentos', e.target.value)} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none" />
             </div>
-            {detalhada && <YesNoField label="Faz uso de lentes de contato?" field="lentesContato" />}
+            {detalhada && <YesNoField label="Faz uso de lentes de contato?" value={String(data.lentesContato || '')} onToggle={(opt) => toggleYesNoField('lentesContato', opt)} />}
             <div>
               <label className="block text-xs font-bold text-on-surface-variant uppercase mb-2">Tem alguma alergia?</label>
               <input type="text" value={data.alergia} onChange={e => updateField('alergia', e.target.value)} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none" />

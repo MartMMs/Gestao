@@ -10,7 +10,15 @@ import { atendimentoSobrepostoDoCliente, validarDisponibilidadeProfissional } fr
 import { buscarServicosPorNome } from '../services/servicoService';
 import { erroNomeCliente, limparTexto } from '../../shared/clientes';
 import { getEmpresaConfig } from '../services/configService';
-import { CODIGO_ANAMNESE_OBRIGATORIA, MARCADOR_ANAMNESE, MENSAGEM_ANAMNESE_OBRIGATORIA, MENSAGEM_FICHA_TOTEM_RESERVADA, forjaFichaDoTotem, temFichaAnamnese } from '../../shared/anamnese';
+import {
+  CODIGO_ANAMNESE_OBRIGATORIA,
+  MENSAGEM_ANAMNESE_OBRIGATORIA,
+  MENSAGEM_FICHA_TOTEM_RESERVADA,
+  aparaObservacao,
+  atualizarSomenteFichaJson,
+  forjaFichaDoTotem,
+  temFichaAnamnese,
+} from '../../shared/anamnese';
 import { comissaoDosServicos, mesmosServicos, recalcularValores, valorDosServicos } from '../lib/valores';
 import { lerDesde } from '../lib/periodo';
 import { registrarAuditoria } from '../lib/auditoria';
@@ -131,7 +139,7 @@ const resolverCliente = async (
   tx: Prisma.TransactionClient,
   req: Request,
   dados: DadosCliente,
-  { clienteAtualId, acessoSaude }: { clienteAtualId?: string; acessoSaude: Set<string> },
+  { clienteAtualId, acessoSaude, exigirAnamnese = false }: { clienteAtualId?: string; acessoSaude: Set<string>; exigirAnamnese?: boolean },
 ) => {
   const supervisor = usuarioEhSupervisor(req);
   const nome = limparTexto(dados.clientName);
@@ -150,7 +158,7 @@ const resolverCliente = async (
     if (forjaFichaDoTotem(observacao, atual)) throw new HttpError(400, MENSAGEM_FICHA_TOTEM_RESERVADA);
   };
 
-  // Telefone/CPF só são validados quando serão gravados (cliente novo ou edição por supervisor)
+  // Telefone/CPF só são validados quando serão gravados (cliente novo ou edição por quem tem permissão)
   const validarContato = () => {
     if (telefone && !telefoneValido(telefone)) throw new HttpError(400, MENSAGEM_TELEFONE_INVALIDO);
     if (cpf && !cpfValido(cpf)) throw new HttpError(400, MENSAGEM_CPF_INVALIDO);
@@ -227,13 +235,36 @@ const resolverCliente = async (
   }
 
   recusarFichaForjada(cliente.observacao);
+  const podeEditarSaude = podeVerSaude(req, cliente.id, acessoSaude);
+  const validarNaoApagarFichaObrigatoria = (novaObs: string | null | undefined) => {
+    if (exigirAnamnese && temFichaAnamnese(cliente!.observacao) && !temFichaAnamnese(novaObs)) {
+      throw new HttpError(400, 'A empresa exige ficha de anamnese: a ficha deste cliente não pode ser apagada.', CODIGO_ANAMNESE_OBRIGATORIA);
+    }
+  };
+
   const atualizacao: Prisma.ClienteUpdateInput = {};
   if (!editandoCadastro) {
-    // Cliente escolhido na busca ou achado por CPF/telefone: o agendamento usa a ficha como está
-    const podeEditarSaudeFicha = podeVerSaude(req, cliente.id, acessoSaude);
-    return podeEditarSaudeFicha && !cliente.removidoEm && observacao !== undefined && observacao !== cliente.observacao
-      ? tx.cliente.update({ where: { id: cliente.id }, data: { observacao } })
-      : cliente;
+    // Cliente escolhido na busca ou achado por CPF/telefone
+    if (podeEditarSaude && !cliente.removidoEm && observacao !== undefined && observacao !== cliente.observacao) {
+      validarNaoApagarFichaObrigatoria(observacao);
+      return tx.cliente.update({ where: { id: cliente.id }, data: { observacao } });
+    }
+    // Recepção pode atualizar a ficha JSON no balcão ao marcar sem ver nem perder a nota anterior
+    if (!podeEditarSaude && gerenciaAgenda(req) && !cliente.removidoEm && observacao) {
+      const combinada = atualizarSomenteFichaJson(cliente.observacao, observacao);
+      if (combinada && combinada.length > LIMITE_OBSERVACAO) {
+        throw new HttpError(400, 'A ficha de anamnese ficou grande demais. Resuma as observações.');
+      }
+      if (combinada && combinada !== cliente.observacao) {
+        const atualizado = await tx.cliente.update({ where: { id: cliente.id }, data: { observacao: combinada } });
+        await registrarAuditoria(req, {
+          acao: 'cliente.anamnese', alvo: `Cliente #${cliente.codigo}`, tx,
+          antes: { fichaAnamnese: temFichaAnamnese(cliente.observacao) }, depois: { fichaAnamnese: true },
+        });
+        return atualizado;
+      }
+    }
+    return cliente;
   }
   // Edição do cliente do atendimento: alterações sem permissão viram erro explícito, nunca são descartadas em silêncio
   if (nome.length >= 2 && normalizarNome(nome) !== normalizarNome(cliente.nome)) {
@@ -249,14 +280,34 @@ const resolverCliente = async (
     }
     atualizacao.nome = nome.slice(0, 120);
   }
-  if (!supervisor && ((telefone && telefone !== cliente.telefone) || (cpf && cpf !== cliente.cpf))) {
-    throw new HttpError(403, 'Apenas supervisores podem alterar telefone ou CPF de um cliente já cadastrado.');
+  if (!gerenciaAgenda(req) && telefone && telefone !== cliente.telefone) {
+    throw new HttpError(403, 'Apenas a recepção ou supervisores podem alterar o telefone de um cliente já cadastrado.');
+  }
+  if (!supervisor && cpf && cpf !== cliente.cpf) {
+    throw new HttpError(403, 'Apenas supervisores podem alterar o CPF de um cliente já cadastrado.');
+  }
+  if (gerenciaAgenda(req) && telefone && telefone !== cliente.telefone) {
+    if (!telefoneValido(telefone)) throw new HttpError(400, MENSAGEM_TELEFONE_INVALIDO);
+    atualizacao.telefone = telefone;
   }
   if (supervisor) validarContato();
-  if (supervisor && telefone && telefone !== cliente.telefone) atualizacao.telefone = telefone;
   if (supervisor && cpf && cpf !== cliente.cpf) atualizacao.cpf = cpf;
-  const podeEditarSaude = podeVerSaude(req, cliente.id, acessoSaude);
-  if (podeEditarSaude && observacao !== undefined && observacao !== cliente.observacao) atualizacao.observacao = observacao;
+  if (podeEditarSaude && observacao !== undefined && observacao !== cliente.observacao) {
+    validarNaoApagarFichaObrigatoria(observacao);
+    atualizacao.observacao = observacao;
+  } else if (!podeEditarSaude && gerenciaAgenda(req) && observacao) {
+    const combinada = atualizarSomenteFichaJson(cliente.observacao, observacao);
+    if (combinada && combinada.length > LIMITE_OBSERVACAO) {
+      throw new HttpError(400, 'A ficha de anamnese ficou grande demais. Resuma as observações.');
+    }
+    if (combinada && combinada !== cliente.observacao) {
+      atualizacao.observacao = combinada;
+      await registrarAuditoria(req, {
+        acao: 'cliente.anamnese', alvo: `Cliente #${cliente.codigo}`, tx,
+        antes: { fichaAnamnese: temFichaAnamnese(cliente.observacao) }, depois: { fichaAnamnese: true },
+      });
+    }
+  }
   return Object.keys(atualizacao).length > 0
     ? tx.cliente.update({ where: { id: cliente.id }, data: atualizacao })
     : cliente;
@@ -268,22 +319,40 @@ const resolverCliente = async (
  * já tinha, nunca a substitui (quem não vê a observação não pode apagá-la), e a gravação vai para a auditoria sem o
  * conteúdo. A ficha forjada do totem já foi recusada em resolverCliente.
  */
-const garantirFichaAnamnese = async (tx: Prisma.TransactionClient, req: Request, cliente: Cliente, fichaEnviada: unknown) => {
+const garantirFichaAnamnese = async (
+  tx: Prisma.TransactionClient,
+  req: Request,
+  cliente: Cliente,
+  fichaEnviada: unknown,
+  acessoSaude?: Set<string>,
+) => {
   if (temFichaAnamnese(cliente.observacao)) return cliente;
+  // Tamanho antes de ler: o corpo pode ter até 100 kB e a leitura tenta cada marcador do texto
+  if (typeof fichaEnviada === 'string' && fichaEnviada.length > LIMITE_OBSERVACAO) {
+    throw new HttpError(400, 'A ficha de anamnese ficou grande demais. Resuma as observações.');
+  }
   if (typeof fichaEnviada !== 'string' || !temFichaAnamnese(fichaEnviada)) {
     throw new HttpError(400, MENSAGEM_ANAMNESE_OBRIGATORIA, CODIGO_ANAMNESE_OBRIGATORIA);
   }
-  // Marcador sem ficha válida (JSON vazio ou quebrado) sai; o texto antes dele é a nota de quem tem acesso e fica
-  const anterior = cliente.observacao ?? '';
-  const i = anterior.indexOf(MARCADOR_ANAMNESE);
-  const nota = (i >= 0 ? anterior.slice(0, i) : anterior).trim();
-  const ficha = fichaEnviada.trim();
-  // A tela de quem já via a observação manda a nota junto: não repete
-  const observacao = nota && !ficha.startsWith(nota) ? `${nota}\n${ficha}` : ficha;
+  const veSaude = acessoSaude ? podeVerSaude(req, cliente.id, acessoSaude) : usuarioEhSupervisor(req);
+  let observacao: string;
+  if (veSaude) {
+    const anterior = cliente.observacao ?? '';
+    const nota = aparaObservacao(anterior);
+    const ficha = aparaObservacao(fichaEnviada);
+    observacao = nota && !ficha.startsWith(nota) ? `${nota}\n${ficha}` : ficha;
+  } else {
+    // Quem não vê a observação (recepção) grava apenas o bloco __ANAMNESE_JSON__, sem texto livre e sem oráculo de startsWith
+    const combinada = atualizarSomenteFichaJson(cliente.observacao, fichaEnviada);
+    if (!combinada) throw new HttpError(400, MENSAGEM_ANAMNESE_OBRIGATORIA, CODIGO_ANAMNESE_OBRIGATORIA);
+    observacao = combinada;
+  }
   if (observacao.length > LIMITE_OBSERVACAO) throw new HttpError(400, 'A ficha de anamnese ficou grande demais. Resuma as observações.');
   // Conferida no texto exato que vai ser gravado (a checagem de resolverCliente vê o texto cortado, que espaços no
   // começo deixavam passar)
   if (forjaFichaDoTotem(observacao, cliente.observacao)) throw new HttpError(400, MENSAGEM_FICHA_TOTEM_RESERVADA);
+  // O que vale é o texto gravado: juntar com a observação anterior não pode deixar o cliente sem ficha
+  if (!temFichaAnamnese(observacao)) throw new HttpError(400, MENSAGEM_ANAMNESE_OBRIGATORIA, CODIGO_ANAMNESE_OBRIGATORIA);
   const atualizado = await tx.cliente.update({ where: { id: cliente.id }, data: { observacao } });
   await registrarAuditoria(req, {
     acao: 'cliente.anamnese', alvo: `Cliente #${cliente.codigo}`, tx,
@@ -293,10 +362,12 @@ const garantirFichaAnamnese = async (tx: Prisma.TransactionClient, req: Request,
 };
 
 // Observações do agendamento (podem conter a anamnese): texto aparado e limitado; vazio vira null
-const lerObservacao = (valor: unknown): string | null => {
+const lerObservacao = (valor: unknown, atual: string | null = null): string | null => {
   if (typeof valor !== 'string') return null;
   const texto = valor.trim().slice(0, LIMITE_OBSERVACAO);
-  return texto || null;
+  if (!texto) return null;
+  if (forjaFichaDoTotem(texto, atual)) throw new HttpError(400, MENSAGEM_FICHA_TOTEM_RESERVADA);
+  return texto;
 };
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -364,14 +435,14 @@ export function createAgendamentosRouter(notificar: Notificar) {
         const indisponivel = await validarDisponibilidadeProfissional(tx, colaboradorId, inicio, servicos);
         if (indisponivel) throw new HttpError(indisponivel.status, indisponivel.erro);
 
-        let cliente = await resolverCliente(tx, req, req.body, { acessoSaude });
-        if (exigirAnamnese) cliente = await garantirFichaAnamnese(tx, req, cliente, req.body.clientObservation);
+        let cliente = await resolverCliente(tx, req, req.body, { acessoSaude, exigirAnamnese });
+        if (exigirAnamnese) cliente = await garantirFichaAnamnese(tx, req, cliente, req.body.clientObservation, acessoSaude);
         await conflitoDoCliente(tx, cliente.id, inicio, duracaoTotal(servicos));
         return tx.agendamento.create({
           data: {
             data: inicio,
             reservaOrigem: gerenciaAgenda(req) ? 'interno' : ORIGEM_COLABORADOR,
-            observacoesSaude: lerObservacao(req.body.observation),
+            observacoesSaude: lerObservacao(req.body.observation, null),
             colaborador: { connect: { id: colaboradorId } },
             cliente: { connect: { id: cliente.id } },
             servicos: { connect: servicos.map((s) => ({ id: s.id })) },
@@ -475,7 +546,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
         // Observações ficam sob a regra da ficha de saúde. Sem acesso, o campo chega vazio (mascarado) e é ignorado;
         // texto novo é recusado com erro explícito, nunca descartado em silêncio com "atualizado"
         if (req.body.observation !== undefined) {
-          const observacao = lerObservacao(req.body.observation);
+          const observacao = lerObservacao(req.body.observation, antigo.observacoesSaude);
           if (podeVerSaude(req, antigo.clienteId, acessoSaude)) dados.observacoesSaude = observacao;
           // Qualquer texto é recusado, mesmo igual ao gravado: aceitar o igual deixaria confirmar a observação escondida por chute
           else if (observacao !== null) {
@@ -484,11 +555,11 @@ export function createAgendamentosRouter(notificar: Notificar) {
         }
         // Remarcado pelo próprio profissional: a nova data não renova o acesso à ficha de saúde
         if (!gerenciaAgenda(req) && inicio.getTime() !== antigo.data.getTime()) dados.reservaOrigem = ORIGEM_COLABORADOR;
-        if (req.body.clientName !== undefined || req.body.clientId !== undefined) {
-          const cliente = await resolverCliente(tx, req, req.body, { clienteAtualId: antigo.clienteId, acessoSaude });
+        if (req.body.clientName !== undefined || req.body.clientId !== undefined || req.body.clientObservation !== undefined) {
+          const cliente = await resolverCliente(tx, req, req.body, { clienteAtualId: antigo.clienteId, acessoSaude, exigirAnamnese });
           if (encerrado && cliente.id !== antigo.clienteId) throw new HttpError(409, 'Atendimento já encerrado: não dá para trocar o cliente.');
           // Só na troca de cliente: atendimentos marcados antes da chave ligada continuam remarcáveis
-          if (exigirAnamnese && cliente.id !== antigo.clienteId) await garantirFichaAnamnese(tx, req, cliente, req.body.clientObservation);
+          if (exigirAnamnese && cliente.id !== antigo.clienteId) await garantirFichaAnamnese(tx, req, cliente, req.body.clientObservation, acessoSaude);
           dados.clienteId = cliente.id;
           // Cliente trocado pelo próprio colaborador não libera a ficha de saúde (ver clientesComAcessoSaude)
           if (cliente.id !== antigo.clienteId && !gerenciaAgenda(req)) dados.reservaOrigem = ORIGEM_COLABORADOR;

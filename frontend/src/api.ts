@@ -1,5 +1,5 @@
 import { CODIGO_VERSAO_DESATUALIZADA } from '@shared/statusAgendamento';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { Appointment, Bloqueio, Client, Employee, EmployeeUpdate, Service, ServiceEligibilityMode, TurnoSwapRequest, TurnoSwapStatus, ConfiguracaoEmpresa } from './types';
 import { getApiUrl } from './config/api';
 import { redactSensitiveData } from '@shared/redact';
@@ -185,6 +185,7 @@ interface BackendEmployee {
   name?: string;
   nome?: string;
   email?: string;
+  usuario?: string | null;
   role?: string;
   papel?: string;
   specialty?: string;
@@ -293,6 +294,7 @@ const normalizeEmployee = (employee: BackendEmployee): Employee => {
     id: String(employee.id),
     name,
     email: employee.email || '',
+    usuario: employee.usuario || undefined,
     role: role === 'admin' || role === 'supervisor' || role === 'receptionist' ? role : 'collaborator',
     specialty,
     avatar: employee.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(name)}`,
@@ -596,7 +598,9 @@ export const useAddEmployee = (token: string | null) => {
         body: JSON.stringify({
           nome: data.name,
           email: data.email,
-          especialidade: data.specialty,
+          usuario: data.usuario,
+          // Vazia não vai: sem ela, o backend usa o cargo
+          especialidade: data.specialty || undefined,
           cargo: data.cargo,
           tipoEscala: data.tipoEscala,
           folgasDomingoNoMes: data.folgasDomingoNoMes,
@@ -633,6 +637,7 @@ export const useEditEmployee = (token: string | null) => {
         body: JSON.stringify({
           nome: data.name,
           email: data.email,
+          usuario: data.usuario,
           especialidade: data.specialty,
           cargo: data.cargo,
           tipoEscala: data.tipoEscala,
@@ -642,6 +647,7 @@ export const useEditEmployee = (token: string | null) => {
           papel: data.role,
           diasTrabalho: data.diasTrabalho,
           senha: data.password,
+          senhaAtual: data.senhaAtual,
         }),
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['employees'] })
@@ -830,7 +836,7 @@ export const useDeleteService = (token: string | null) => {
 // =======================
 // CLIENTES E BLOQUEIOS
 // =======================
-export const useClients = (token: string | null) => useQuery({
+export const useClients = (token: string | null) => useQuery<Client[]>({
   queryKey: ['clients'],
   queryFn: () => fetchApi('/clientes', token),
   enabled: !!token,
@@ -895,6 +901,14 @@ export const useCompanyConfig = (token?: string | null) => useQuery<Configuracao
   staleTime: 1000 * 60 * 5,
 });
 
+// Tudo que depende da config da empresa: ela mesma e os relatórios (calculados com a comissão ligada ou não).
+// Usado por quem salva e pelo aviso do socket aos outros aparelhos
+export const invalidarConfigEmpresa = (queryClient: QueryClient) => Promise.all([
+  queryClient.invalidateQueries({ queryKey: ['company-config'] }),
+  queryClient.invalidateQueries({ queryKey: ['appointments', 'relatorio-financeiro'] }),
+  queryClient.invalidateQueries({ queryKey: ['appointments', 'relatorio-atendimentos'] }),
+]);
+
 export const useUpdateCompanyConfig = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -903,8 +917,6 @@ export const useUpdateCompanyConfig = (token: string | null) => {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['company-config'] });
-    },
+    onSuccess: () => { void invalidarConfigEmpresa(queryClient); },
   });
 };
