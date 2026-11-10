@@ -171,7 +171,8 @@ export function PlanningDayPopover({ dias, colaborador, escalaContexto, notaSalv
               Turno
             </label>
             <span className="text-[11px] font-medium text-on-surface-variant">
-              {emLote ? `${formatarHoras(horasSelecao)} na seleção` : `Turno de ${formatarHoras(horasSelecao)}`}
+              {/* Horas de trabalho: o turno menos o intervalo mínimo da CLT, a mesma conta dos alertas */}
+              {`${formatarHoras(horasSelecao)} de trabalho${emLote ? ' na seleção' : ''} (sem o intervalo)`}
             </span>
           </div>
           <TurnoSelect

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { aplicarAjusteEscala, gerarEscalaComRegras, type DiaEscala } from '../../../utils/escalaCalculator';
-import { analisarInterjornadaEscala, horasDoDia } from '../../../utils/cltValidator';
+import { analisarConformidadeCLT, analisarInterjornadaEscala, horasDoDia } from '../../../utils/cltValidator';
 import { analisarMes, categoriaDoTurno, turnoDoDia } from './turnos';
 import { preencher12x36, repetirMesAnterior } from './modelosEscala';
 
@@ -24,9 +24,20 @@ describe('turnos', () => {
     expect(categoriaDoTurno('Diurno')).toBeNull();
   });
 
-  it('horas do dia são as brutas do turno, as mesmas da análise CLT do backend', () => {
-    expect(horasDoDia({ data: '2026-11-10', tipo: 'trabalho', horaInicio: '08:00', horaFim: '18:00' })).toBe(10);
-    expect(horasDoDia({ data: '2026-11-10', tipo: 'trabalho', horaInicio: '22:00', horaFim: '06:00' })).toBe(8);
+  it('horas do dia descontam o intervalo mínimo da CLT (art. 71), na mesma conta do backend', () => {
+    const turno = (horaInicio: string, horaFim: string) => horasDoDia({ data: '2026-11-10', tipo: 'trabalho', horaInicio, horaFim });
+    expect(turno('08:00', '18:00')).toBe(9); // acima de 6h: 1h
+    expect(turno('22:00', '06:00')).toBe(7); // vira a meia-noite
+    expect(turno('08:00', '13:00')).toBe(4.75); // entre 4h e 6h: 15 min
+    expect(turno('08:00', '12:00')).toBe(4); // até 4h: sem intervalo
+  });
+
+  it('5x2 das 08h às 17h fecha 40h na semana e não acusa excesso', () => {
+    const semana = ['2026-12-07', '2026-12-08', '2026-12-09', '2026-12-10', '2026-12-11']
+      .map((data): DiaEscala => ({ data, tipo: 'trabalho', horaInicio: '08:00', horaFim: '17:00' }));
+    const analise = analisarConformidadeCLT(semana);
+    expect(analise.cargaSemanal.cargaTotal).toBe(40);
+    expect(analise.cargaSemanal.conforme).toBe(true);
   });
 
   it('interjornada de 10h58 não passa como 11h', () => {
@@ -100,7 +111,7 @@ describe('analisarMes (calendário e painel lateral usam a mesma conta)', () => 
 
   it('dia sem turno não soma horas, mas é contado à parte', () => {
     const analise = analisarMes([{ data: '2026-12-02', tipo: 'trabalho' }, trabalho('2026-12-03', '08:00', '18:00')], '2026-12-');
-    expect(analise.horasMes).toBe(10);
+    expect(analise.horasMes).toBe(9);
     expect(analise.diasSemTurno).toBe(1);
   });
 });

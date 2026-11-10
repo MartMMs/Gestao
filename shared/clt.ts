@@ -277,11 +277,17 @@ export function analisarSetimoDiaConsecutivo(diasEscala: DiaEscala[]): {
   };
 }
 
-// Horas de um dia de trabalho (turno que vira a meia-noite conta até o fim no dia seguinte)
+// Intervalo mínimo da CLT (art. 71): 1h na jornada acima de 6h, 15 min entre 4h e 6h. O turno guarda só início e fim,
+// então o intervalo não fica registrado; descontar o mínimo legal é o mais que a pessoa pode ter trabalhado.
+export const intervaloMinimoHoras = (horasNoTurno: number) => (horasNoTurno > 6 ? 1 : horasNoTurno > 4 ? 0.25 : 0);
+
+// Horas trabalhadas num dia: o turno (que vira a meia-noite conta até o fim no dia seguinte) menos o intervalo mínimo
 export const horasDoDia = (dia: DiaEscala): number => {
   if (dia.tipo !== 'trabalho' || !dia.horaInicio || !dia.horaFim) return 0;
   const minutos = horarioParaMinutos(dia.horaFim) - horarioParaMinutos(dia.horaInicio);
-  return Number.isNaN(minutos) ? 0 : (minutos < 0 ? minutos + 24 * 60 : minutos) / 60;
+  if (Number.isNaN(minutos)) return 0;
+  const horasNoTurno = (minutos < 0 ? minutos + 24 * 60 : minutos) / 60;
+  return horasNoTurno - intervaloMinimoHoras(horasNoTurno);
 };
 
 /**
