@@ -263,3 +263,28 @@ test.describe('Grade de Escalas: propostas, troca e teclado', () => {
     }
   });
 });
+
+test.describe('Grade de Escalas: Timeline em modo edição', () => {
+  test('clicar num dia pede confirmação: cancelar não grava, confirmar grava', async ({ page, request }) => {
+    const nome = `Escala Timeline ${sufixo()}`;
+    const id = await criarColaborador(request, nome);
+    try {
+      await trabalharNos(request, id, [15]);
+      await abrirGrade(page, nome);
+      await page.getByRole('button', { name: 'view_timeline Timeline' }).click();
+      await page.getByRole('button', { name: /Editar Grade/ }).click();
+      const celula = page.getByTitle(new RegExp(`^${nome} \\| 15/`));
+      await celula.click();
+      const dialogo = page.getByRole('dialog').filter({ hasText: 'Marcar folga?' });
+      await expect(dialogo).toContainText(nome);
+      await dialogo.getByRole('button', { name: 'Cancelar' }).click();
+      expect((await ajustesSalvos(request, id)).find((a) => a.data === data(15))?.tipo).toBe('trabalho');
+
+      await celula.click();
+      await page.getByRole('button', { name: 'Marcar folga', exact: true }).click();
+      await expect.poll(async () => (await ajustesSalvos(request, id)).find((a) => a.data === data(15))?.tipo).toBe('folga');
+    } finally {
+      await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: await authHeaders(request, CONTAS.admin) });
+    }
+  });
+});

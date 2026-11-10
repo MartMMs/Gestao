@@ -20,6 +20,8 @@ import type { SupervisorViewProps } from '../../../components/SupervisorView';
 type Setter<T> = React.Dispatch<React.SetStateAction<T>>;
 type AlertaClt = { id: string; nome: string; conforme: boolean; resumo: string[] };
 type TrocaDias = { fromEmp: string; fromDate: string; toEmp: string; toDate: string };
+// Ação da grade que grava na hora: só roda depois do "sim" no ConfirmDialog
+type AcaoPendente = { titulo: string; descricao: string; confirmLabel: string; executar: () => void };
 type Modelo = { titulo: string; descricao: string; aviso?: string; ajustes: ScaleOverridePayload[] };
 
 const mesVizinho = (mes: string, delta: number) => {
@@ -146,7 +148,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
   const [batchShiftDescricao, setBatchShiftDescricao] = useState<string>('Edição em lote');
   const [isApplyingBatch, setIsApplyingBatch] = useState(false);
   const [selectedRangeDays, setSelectedRangeDays] = useState<DiaEscala[]>([]);
-  const [trocaPendente, setTrocaPendente] = useState<TrocaDias | null>(null);
+  const [acaoPendente, setAcaoPendente] = useState<AcaoPendente | null>(null);
   const [modeloPendente, setModeloPendente] = useState<Modelo | null>(null);
 
   // Escala com os meses vizinhos: as regras da CLT (interjornada, DSR, semana) olham a virada do mês
@@ -253,7 +255,24 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
       setErrorMessage('Esse dia ainda é uma proposta não gravada. Confirme ou descarte a proposta antes de trocar.');
       return;
     }
-    setTrocaPendente(troca);
+    setAcaoPendente({ titulo: 'Trocar os dois dias?', descricao: descricaoTroca(troca), confirmLabel: 'Trocar', executar: () => trocarDias(troca) });
+  };
+
+  const ehProposta = (employeeId: string, data: string) => suggestedPlanningKeys.includes(`${employeeId}:${data}`);
+
+  // Clique na Timeline em modo edição: alterna trabalho/folga, depois de confirmar
+  const pedirAlternarDia = (employeeId: string, data: string, atual?: DiaEscala) => {
+    if (data < todayStr) {
+      setToastMessage('Esse dia já passou: a escala dele não pode ser alterada.');
+      return;
+    }
+    const vira = atual?.tipo === 'trabalho' ? 'folga' : 'trabalho';
+    setAcaoPendente({
+      titulo: vira === 'folga' ? 'Marcar folga?' : 'Marcar dia de trabalho?',
+      descricao: `${nomeDe(employeeId)}, ${dataBR(data)}: passa a ser ${vira}. A mudança é gravada na hora.`,
+      confirmLabel: vira === 'folga' ? 'Marcar folga' : 'Marcar trabalho',
+      executar: () => handleQuickToggleTimelineDay(employeeId, data, atual),
+    });
   };
 
   const descricaoTroca = (t: TrocaDias) => (t.fromEmp === t.toEmp
@@ -307,6 +326,69 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
       } catch (error) {
         desfazer();
         setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da troca de dias com o servidor.');
+      }
+    })();
+  };
+
+  // Alça de replicar da Timeline: copia um dia para os seguintes; pede confirmação e não mexe em dia passado
+  const pedirReplicar = (empId: string, fromDay: number, toDay: number) => {
+    const fromDate = `${selectedScaleMonth}-${String(fromDay).padStart(2, '0')}`;
+    if (ehProposta(empId, fromDate)) {
+      setErrorMessage('Esse dia ainda é uma proposta não gravada. Confirme ou descarte a proposta antes de replicá-lo.');
+      return;
+    }
+    const start = Math.min(fromDay, toDay);
+    const end = Math.max(fromDay, toDay);
+    const targetDates = Array.from({ length: end - start + 1 }, (_, idx) => `${selectedScaleMonth}-${String(start + idx).padStart(2, '0')}`)
+      .filter((date) => date !== fromDate && date >= todayStr);
+    const sourceDia = buildScaleForEmployee(empId).find((d) => d.data === fromDate);
+    if (!sourceDia || targetDates.length === 0) {
+      setToastMessage('Não há dias futuros para replicar.');
+      return;
+    }
+    const origem = { tipo: sourceDia.tipo, turno: sourceDia.tipo === 'trabalho' ? turnoDoDia(sourceDia) : undefined, descricao: sourceDia.descricao };
+    setAcaoPendente({
+      titulo: 'Replicar este dia?',
+      descricao: `${nomeDe(empId)}: o dia ${dataBR(fromDate)} (${origem.tipo === 'trabalho' ? `trabalho${origem.turno ? ` ${origem.turno}` : ''}` : origem.tipo}) será copiado para ${targetDates.length} dia(s), de ${dataBR(targetDates[0])} a ${dataBR(targetDates[targetDates.length - 1])}, substituindo o que houver neles. A mudança é gravada na hora.`,
+      confirmLabel: 'Replicar',
+      executar: () => replicarDia(empId, fromDate, targetDates, origem),
+    });
+  };
+
+  const replicarDia = (empId: string, fromDate: string, targetDates: string[], origem: Omit<ScaleOverridePayload, 'colaboradorId' | 'data'>) => {
+    let prevSnapshot: Record<string, ScaleOverridePayload> = {};
+    setPlanningOverrides((prev) => {
+      prevSnapshot = prev;
+      const next = { ...prev };
+      targetDates.forEach((targetDate) => {
+        next[`${empId}:${targetDate}`] = { colaboradorId: empId, data: targetDate, ...origem };
+      });
+      return next;
+    });
+
+    void (async () => {
+      const revertReplication = () => {
+        setPlanningOverrides((prev) => {
+          const next = { ...prev };
+          targetDates.forEach((targetDate) => {
+            const key = `${empId}:${targetDate}`;
+            if (prevSnapshot[key]) next[key] = prevSnapshot[key];
+            else delete next[key];
+          });
+          return next;
+        });
+      };
+      try {
+        const success = await onReplicateScaleDays?.({ colaboradorId: empId, data: fromDate, targetDates, source: origem });
+        if (success === false) {
+          revertReplication();
+          setErrorMessage('Não foi possível sincronizar a replicação da escala com o servidor.');
+          return;
+        }
+        setToastMessage(`Replicação gravada em ${targetDates.length} dia(s).`);
+      } catch (error) {
+        revertReplication();
+        setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da replicação com o servidor.');
       }
     })();
   };
@@ -837,7 +919,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     isEditable={isPlanningEditMode}
                     suggestedKeys={suggestedPlanningKeys}
                     overrides={planningOverridesList.filter((override) => override.data.startsWith(`${selectedScaleMonth}-`))}
-                    onQuickToggleDay={handleQuickToggleTimelineDay}
+                    onQuickToggleDay={pedirAlternarDia}
                     onQuickSetDay={handleQuickSetTimelineDay}
                     onClick={(empleoyeeId, day) => {
                       const escala = buildScaleForEmployee(empleoyeeId);
@@ -851,73 +933,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                       abrirDias(empleoyeeId, [selectedDay]);
                     }}
                     onShiftDrop={(fromEmp, fromDay, toEmp, toDay) => pedirTroca({ fromEmp, fromDate: fromDay, toEmp, toDate: toDay })}
-                    onReplicate={(empId, fromDay, toDay, tipo) => {
-                      const fromDate = `${selectedScaleMonth}-${String(fromDay).padStart(2, '0')}`;
-                      const start = Math.min(fromDay, toDay);
-                      const end = Math.max(fromDay, toDay);
-                      const targetDates = Array.from({ length: end - start + 1 }, (_, idx) => start + idx)
-                        .map((dayNum) => `${selectedScaleMonth}-${String(dayNum).padStart(2, '0')}`)
-                        .filter((date) => date !== fromDate);
-
-                      if (targetDates.length === 0) return;
-
-                      const sourceDia = buildScaleForEmployee(empId).find((d) => d.data === fromDate);
-                      if (!sourceDia) return;
-
-                      let prevSnapshot: Record<string, ScaleOverridePayload> = {};
-                      setPlanningOverrides((prev) => {
-                        prevSnapshot = prev;
-                        const next = { ...prev };
-                        targetDates.forEach((targetDate) => {
-                          next[`${empId}:${targetDate}`] = {
-                            colaboradorId: empId,
-                            data: targetDate,
-                            tipo: sourceDia.tipo,
-                            turno: sourceDia.tipo === 'trabalho' ? sourceDia.turno : undefined,
-                            descricao: sourceDia.descricao,
-                          };
-                        });
-                        return next;
-                      });
-
-                      void (async () => {
-                        const revertReplication = () => {
-                          setPlanningOverrides((prev) => {
-                            const next = { ...prev };
-                            targetDates.forEach((targetDate) => {
-                              const key = `${empId}:${targetDate}`;
-                              if (prevSnapshot[key]) next[key] = prevSnapshot[key];
-                              else delete next[key];
-                            });
-                            return next;
-                          });
-                        };
-                        try {
-                          if (onReplicateScaleDays) {
-                            const success = await onReplicateScaleDays({
-                              colaboradorId: empId,
-                              data: fromDate,
-                              targetDates,
-                              source: {
-                                tipo: sourceDia.tipo,
-                                turno: sourceDia.tipo === 'trabalho' ? sourceDia.turno : undefined,
-                                descricao: sourceDia.descricao,
-                              },
-                            });
-                            if (success === false) {
-                              revertReplication();
-                              setErrorMessage('Não foi possível sincronizar a replicação da escala com o servidor.');
-                              return;
-                            }
-                          }
-
-                          setToastMessage(`Replicação aplicada em ${targetDates.length} dia(s).`);
-                        } catch (error) {
-                          revertReplication();
-                          setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da replicação com o servidor.');
-                        }
-                      })();
-                    }}
+                    onReplicate={(empId, fromDay, toDay) => pedirReplicar(empId, fromDay, toDay)}
                     minStaffRequired={Math.max(1, planningCoverageTarget)}
                   />
                 )}
@@ -947,14 +963,14 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
           )}
 
           <ConfirmDialog
-            open={trocaPendente !== null}
+            open={acaoPendente !== null}
             tone="primary"
-            icon="swap_horiz"
-            title="Trocar os dois dias?"
-            description={trocaPendente ? descricaoTroca(trocaPendente) : ''}
-            confirmLabel="Trocar"
-            onConfirm={() => { if (trocaPendente) trocarDias(trocaPendente); setTrocaPendente(null); }}
-            onClose={() => setTrocaPendente(null)}
+            icon="edit_calendar"
+            title={acaoPendente?.titulo || ''}
+            description={acaoPendente?.descricao}
+            confirmLabel={acaoPendente?.confirmLabel}
+            onConfirm={() => { acaoPendente?.executar(); setAcaoPendente(null); }}
+            onClose={() => setAcaoPendente(null)}
           />
 
           <ConfirmDialog
