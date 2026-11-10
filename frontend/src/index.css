@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* dark: segue o tema escolhido no app (classe .dark no <html>), não o tema do sistema operacional */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   /* Base & Surface */
   --color-background: #F5F5F4;

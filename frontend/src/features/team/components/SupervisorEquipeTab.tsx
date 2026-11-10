@@ -610,41 +610,54 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
             </div>
             {/* Envio barrado pelo navegador (campo inválido): o erro da tentativa anterior sai, para não parecer o atual */}
             <form onSubmit={handleAddEmployee} onInvalidCapture={() => setErrorMessage(null)} className="space-y-3 max-h-[78vh] overflow-y-auto pr-1 custom-scrollbar">
-              <input required type="text" value={newEmpName} onChange={e => setNewEmpName(e.target.value)} placeholder="Nome" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              <div>
+                <label htmlFor="emp-nome" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Nome</label>
+                <input id="emp-nome" required type="text" value={newEmpName} onChange={e => setNewEmpName(e.target.value)} placeholder="Nome" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              </div>
               <div>
                 <label htmlFor="emp-usuario" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Usuário de acesso</label>
                 <input id="emp-usuario" required={exigeUsuario} type="text" value={newEmpUsuario} onChange={e => setNewEmpUsuario(e.target.value.toLowerCase().replace(/\s/g, ''))} placeholder="Usuário de acesso (ex.: joao.silva)" autoComplete="off" autoCapitalize="none" spellCheck={false} pattern={USUARIO_REGEX.source} title={MENSAGEM_USUARIO_INVALIDO} maxLength={40} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
                 <p className="mt-1 text-[11px] text-on-surface-variant">{editingEmployeeId && exigeUsuario ? 'Sem e-mail, o usuário de acesso é obrigatório: é com ele que a pessoa entra.' : 'É com ele (e a senha) que a pessoa entra no sistema.'}</p>
               </div>
-              <label htmlFor="emp-email" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant -mb-2">E-mail (opcional)</label>
-              <input id="emp-email" type="email" value={newEmpEmail} onChange={e => setNewEmpEmail(e.target.value)} placeholder="E-mail (opcional)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              <div>
+                <label htmlFor="emp-email" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">E-mail (opcional)</label>
+                <input id="emp-email" type="email" value={newEmpEmail} onChange={e => setNewEmpEmail(e.target.value)} placeholder="E-mail (opcional)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              </div>
               {pedeSenhaAtual && (
                 <div>
-                  <input required type="password" value={newEmpSenhaAtual} onChange={e => setNewEmpSenhaAtual(e.target.value)} placeholder="Sua senha atual" aria-label="Sua senha atual" autoComplete="current-password" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+                  <label htmlFor="emp-senha-atual" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Sua senha atual</label>
+                  <input id="emp-senha-atual" required type="password" value={newEmpSenhaAtual} onChange={e => setNewEmpSenhaAtual(e.target.value)} placeholder="Sua senha atual" autoComplete="current-password" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
                   <p className="mt-1 text-[11px] text-on-surface-variant">Para trocar o seu próprio usuário ou e-mail, confirme a sua senha. Você continua conectado aqui; as sessões em outros aparelhos serão encerradas.</p>
                 </div>
               )}
               {/* Cargo: regras de serviço ("Somente cargos: ...") e, quando a especialidade era o próprio cargo, o rótulo da lista e do totem */}
-              <label htmlFor="emp-cargo" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant -mb-2">Cargo</label>
-              <input id="emp-cargo" required type="text" value={newEmpCargo} onChange={e => setNewEmpCargo(e.target.value)} placeholder="Cargo (ex.: Massagista)" maxLength={60} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              <div>
+                <label htmlFor="emp-cargo" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Cargo</label>
+                <input id="emp-cargo" required type="text" value={newEmpCargo} onChange={e => setNewEmpCargo(e.target.value)} placeholder="Cargo (ex.: Massagista)" maxLength={60} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
+              </div>
               {/* A função de acesso define o que a pessoa pode fazer no sistema */}
-              <label className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant -mb-2">Função de acesso</label>
-              {/* A própria função não muda aqui (a API recusa): evita se rebaixar sem querer */}
-              <select aria-label="Função de acesso" value={newEmpRole} onChange={e => setNewEmpRole(e.target.value as Role)} disabled={editandoPropriaConta} title={editandoPropriaConta ? 'A sua própria função de acesso só pode ser mudada por um administrador.' : undefined} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm disabled:opacity-60">
-                <option value="collaborator">Colaborador</option>
-                <option value="receptionist">Recepção</option>
-                {/* Só administradores criam ou promovem supervisores (a API recusa os demais) */}
-                {(podeGerenciarSupervisores || newEmpRole === 'supervisor') && <option value="supervisor">Supervisor</option>}
-                {/* Admin promove outro admin (a API só aceita de admin); na conta admin a opção precisa existir para o select não mostrar "Colaborador" */}
-                {(podeGerenciarSupervisores || newEmpRole === 'admin') && <option value="admin">Administrador</option>}
-              </select>
-              <select value={newEmpTipoEscala || '6x1'} onChange={e => setNewEmpTipoEscala(e.target.value as Employee['tipoEscala'])} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm">
-                <option value="6x1">6x1 (6 dias trab, 1 folga)</option>
-                <option value="5x1">5x1 (5 dias trab, 1 folga)</option>
-                <option value="5x2">5x2 (5 dias trab, 2 folgas)</option>
-                <option value="12x36">12x36 (12h trab, 36h folga)</option>
-                <option value="rotativo">Rotativo (3 turnos)</option>
-              </select>
+              <div>
+                <label htmlFor="emp-role" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Função de acesso</label>
+                {/* A própria função não muda aqui (a API recusa): evita se rebaixar sem querer */}
+                <select id="emp-role" value={newEmpRole} onChange={e => setNewEmpRole(e.target.value as Role)} disabled={editandoPropriaConta} title={editandoPropriaConta ? 'A sua própria função de acesso só pode ser mudada por um administrador.' : undefined} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm disabled:opacity-60">
+                  <option value="collaborator">Colaborador</option>
+                  <option value="receptionist">Recepção</option>
+                  {/* Só administradores criam ou promovem supervisores (a API recusa os demais) */}
+                  {(podeGerenciarSupervisores || newEmpRole === 'supervisor') && <option value="supervisor">Supervisor</option>}
+                  {/* Admin promove outro admin (a API só aceita de admin); na conta admin a opção precisa existir para o select não mostrar "Colaborador" */}
+                  {(podeGerenciarSupervisores || newEmpRole === 'admin') && <option value="admin">Administrador</option>}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="emp-tipo-escala" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Tipo de escala</label>
+                <select id="emp-tipo-escala" value={newEmpTipoEscala || '6x1'} onChange={e => setNewEmpTipoEscala(e.target.value as Employee['tipoEscala'])} className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm">
+                  <option value="6x1">6x1 (6 dias trab, 1 folga)</option>
+                  <option value="5x1">5x1 (5 dias trab, 1 folga)</option>
+                  <option value="5x2">5x2 (5 dias trab, 2 folgas)</option>
+                  <option value="12x36">12x36 (12h trab, 36h folga)</option>
+                  <option value="rotativo">Rotativo (3 turnos)</option>
+                </select>
+              </div>
               <input type="number" min={0} max={5} value={newEmpFolgasDomingoNoMes} onChange={e => setNewEmpFolgasDomingoNoMes(e.target.value === '' ? '' : Number(e.target.value))} placeholder="Folgas de domingo por mês (Ex: 2)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
               <input type="number" min={1} max={44} value={newEmpCargaHoraria} onChange={e => setNewEmpCargaHoraria(e.target.value === '' ? '' : Number(e.target.value))} placeholder="Carga horária semanal (Ex: 40)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
               <div>

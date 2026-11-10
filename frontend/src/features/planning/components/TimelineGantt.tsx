@@ -1,9 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { horaInicialDoTurno } from '../../../utils/escalaCalculator';
 import { Employee, Appointment } from '../../../types';
 import { useAuth } from '../../../AuthContext';
 import { useTurnos } from '../../../api';
 import { gerarEscalaComRegras, DiaEscala } from '../../../utils/escalaCalculator';
+import { LegendaTurnos } from './CalendarioEscala';
+import { categoriaDoDia, turnoDoDia, visualDoDia, type CategoriaDia } from '../utils/turnos';
+
+const HACHURA = 'text-on-surface-variant bg-surface-variant/40 shadow-inner bg-[repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(0,0,0,0.03)_5px,rgba(0,0,0,0.03)_10px)] dark:bg-[repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(255,255,255,0.03)_5px,rgba(255,255,255,0.03)_10px)] hover:opacity-80';
+// Fundos cheios nas mesmas cores da legenda do calendário
+const FUNDO_GANTT: Record<CategoriaDia, string> = {
+  comercial: 'bg-emerald-600 text-white shadow-sm hover:bg-emerald-700',
+  manha: 'bg-sky-600 text-white shadow-sm hover:bg-sky-700',
+  tarde: 'bg-amber-700 text-white shadow-sm hover:bg-amber-800',
+  noite: 'bg-violet-700 text-white shadow-sm hover:bg-violet-800',
+  folga: HACHURA,
+  fds: HACHURA,
+  feriado: 'bg-rose-500/20 text-rose-800 dark:text-rose-200 hover:opacity-80',
+};
 
 interface TimelineGanttProps {
   employees: Employee[];
@@ -216,40 +229,19 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
     return map;
   }, [daysInMonth, escalasByEmployee]);
 
-  const getBackgroundColor = (tipo: DiaEscala['tipo'], isWeekend: boolean, turno?: string) => {
+  // Cor e rótulo pela mesma regra do calendário (utils/turnos): uma classificação só para a grade inteira
+  const getBackgroundColor = (dia: DiaEscala | undefined, isWeekend: boolean) => {
     const weekendClass = isWeekend ? 'ring-1 ring-inset ring-outline-variant/25' : '';
-    if (tipo === 'folga' || tipo === 'fds') return `bg-surface-variant/40 shadow-inner bg-[repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(0,0,0,0.03)_5px,rgba(0,0,0,0.03)_10px)] dark:bg-[repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(255,255,255,0.03)_5px,rgba(255,255,255,0.03)_10px)] hover:opacity-80 ${weekendClass}`;
-    if (tipo === 'trabalho') {
-      if (!turno) return `bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 ${weekendClass}`;
-      const startHour = horaInicialDoTurno(turno) ?? -1;
-      if (startHour >= 5 && startHour < 12) {
-        if (turno.includes('18:00') || turno.includes('19:00') || turno.includes('17:00')) return `bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 ${weekendClass}`;
-        return `bg-blue-600 text-white shadow-sm hover:bg-blue-700 ${weekendClass}`;
-      }
-      if (startHour >= 12 && startHour < 18) return `bg-indigo-600 text-white shadow-sm hover:bg-indigo-700 ${weekendClass}`;
-      return `bg-purple-700 text-white shadow-sm hover:bg-purple-800 ${weekendClass}`;
-    }
-    return `bg-surface-container-low/50 ${weekendClass}`;
+    const categoria = categoriaDoDia(dia);
+    return `${categoria ? FUNDO_GANTT[categoria] : 'bg-surface-container-high text-on-surface'} ${weekendClass}`;
   };
 
   const getCellIconAndLabel = (dia?: DiaEscala) => {
     if (!dia) return null;
-    const isHoliday = Boolean(dia.feriadoNome || dia.descricao?.toLowerCase().includes('feriado'));
-    if (isHoliday) return { label: 'FER', icon: 'celebration' };
-    if (dia.tipo === 'folga') return { label: 'FOLGA', icon: 'event_busy' };
-    if (dia.tipo === 'fds') return { label: 'FDS', icon: 'weekend' };
-    if (dia.turno) {
-      const startHour = horaInicialDoTurno(dia.turno) ?? -1;
-      let icon = 'work';
-      if (startHour >= 12 && startHour < 18) icon = 'partly_cloudy_day';
-      else if (startHour >= 18 || startHour < 5) icon = 'dark_mode';
-      else if (startHour >= 5 && startHour < 12) {
-        if (dia.turno.includes('18:00') || dia.turno.includes('19:00') || dia.turno.includes('17:00')) icon = 'routine';
-        else icon = 'light_mode';
-      }
-      return { label: dia.turno.split('-')[0], icon };
-    }
-    return { label: 'TRAB', icon: 'work' };
+    const visual = visualDoDia(dia);
+    if (dia.tipo !== 'trabalho') return { label: dia.feriadoNome ? 'FER' : dia.tipo === 'fds' ? 'FDS' : 'FOLGA', icon: visual.icone };
+    const turno = turnoDoDia(dia);
+    return { label: turno ? turno.split('-')[0] : 's/ turno', icon: visual.icone };
   };
 
   const openMonthPicker = () => {
@@ -563,13 +555,13 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
                             }}
                             className={`relative w-12 h-12 flex flex-col items-center justify-center rounded-lg transition-all cursor-pointer border ${
                               borderClass
-                            } ${isSuggested ? 'border-dashed opacity-90' : ''} hover:border-primary/50 ${isDragTarget ? 'ring-2 ring-primary/80 shadow-md' : ''} ${getBackgroundColor(dia?.tipo || 'trabalho', meta.isWeekend, dia?.turno)}`}
+                            } ${isSuggested ? 'border-dashed opacity-90' : ''} hover:border-primary/50 ${isDragTarget ? 'ring-2 ring-primary/80 shadow-md' : ''} ${getBackgroundColor(dia, meta.isWeekend)}`}
                             title={`${emp.name} | ${dia?.data?.split('-').reverse().join('/') || ''} | ${dia?.tipo?.toUpperCase() || 'TRABALHO'}${dia?.tipo === 'trabalho' && dia?.turno ? ` (${dia.turno})` : ''}${dia?.descricao ? ` - ${dia.descricao}` : ''}${hasCltAlert ? ' | ALERTA CLT' : ''}${isSuggested ? ' | Sugestão automática' : ''}`}
                           >
                             {(() => {
                               const cellData = getCellIconAndLabel(dia);
                               return (
-                                <div className={`flex flex-col items-center gap-0.5 ${dia?.tipo === 'trabalho' ? 'text-white' : 'text-on-surface-variant opacity-70'}`}>
+                                <div className={`flex flex-col items-center gap-0.5 ${dia?.tipo === 'trabalho' || dia?.feriadoNome ? '' : 'opacity-70'}`}>
                                   {cellData && cellData.icon && <span className="material-symbols-outlined text-[14px] leading-none">{cellData.icon}</span>}
                                   <span className="text-[10px] font-black leading-none">{cellData?.label}</span>
                                 </div>
@@ -608,26 +600,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
 
       {/* Legenda */}
       <div className="p-4 bg-surface-container-low border-t border-outline-variant/10 flex flex-wrap gap-4 items-center justify-center">
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-blue-600 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[11px]">light_mode</span></span>
-          <span className="text-[11px] text-on-surface-variant font-bold uppercase tracking-wider">Manhã</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-indigo-600 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[11px]">partly_cloudy_day</span></span>
-          <span className="text-[11px] text-on-surface-variant font-bold uppercase tracking-wider">Tarde</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-purple-700 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[11px]">dark_mode</span></span>
-          <span className="text-[11px] text-on-surface-variant font-bold uppercase tracking-wider">Noite</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-emerald-600 flex items-center justify-center text-white"><span className="material-symbols-outlined text-[11px]">routine</span></span>
-          <span className="text-[11px] text-on-surface-variant font-bold uppercase tracking-wider">Comercial / Outros</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-surface-variant/60 bg-[repeating-linear-gradient(-45deg,transparent,transparent_2px,rgba(0,0,0,0.1)_2px,rgba(0,0,0,0.1)_4px)] border border-outline-variant/30"></span>
-          <span className="text-[11px] text-on-surface-variant font-bold uppercase tracking-wider">Folga / FDS</span>
-        </div>
+        <LegendaTurnos />
         <div className="flex items-center gap-2">
           <span className="w-4 h-4 rounded bg-orange-100 border border-orange-300 flex items-center justify-center text-[10px] font-black text-orange-800">!</span>
           <span className="text-[11px] text-on-surface-variant font-bold">Cobertura baixa</span>

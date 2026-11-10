@@ -278,7 +278,7 @@ export function analisarSetimoDiaConsecutivo(diasEscala: DiaEscala[]): {
 }
 
 // Horas de um dia de trabalho (turno que vira a meia-noite conta até o fim no dia seguinte)
-const horasDoDia = (dia: DiaEscala): number => {
+export const horasDoDia = (dia: DiaEscala): number => {
   if (dia.tipo !== 'trabalho' || !dia.horaInicio || !dia.horaFim) return 0;
   const minutos = horarioParaMinutos(dia.horaFim) - horarioParaMinutos(dia.horaInicio);
   return Number.isNaN(minutos) ? 0 : (minutos < 0 ? minutos + 24 * 60 : minutos) / 60;

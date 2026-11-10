@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Employee, TurnoSwapRequest, TurnoSwapStatus, EmployeeUpdate } from '../../../types';
 import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
-import { aplicarAjusteEscala, gerarEscalaComRegras, horaInicialDoTurno, separarTurno, type DiaEscala } from '../../../utils/escalaCalculator';
+import { aplicarAjusteEscala, gerarEscalaComRegras, type DiaEscala } from '../../../utils/escalaCalculator';
+import { categoriaDoDia, turnoDoDia } from '../utils/turnos';
 import { analisarConformidadeCLT } from '../../../utils/cltValidator';
 import { isTeamMember } from '../../../utils/formatters';
 import type { ScaleOverridePayload } from '../../../api';
@@ -18,6 +19,19 @@ export type PlanningWorkloadFilter = 'all' | 'ate36' | '37a44' | '45plus';
 const isValidScaleDayType = (value: unknown): value is DiaEscala['tipo'] => (
   value === 'trabalho' || value === 'folga' || value === 'fds'
 );
+
+// Ajuste vindo do servidor no formato da grade (tipo desconhecido é ignorado; turno só em dia de trabalho)
+const normalizarAjuste = (override: ScaleOverridePayload): ScaleOverridePayload | null => {
+  if (!override?.colaboradorId || !override?.data || !isValidScaleDayType(override.tipo)) return null;
+  return {
+    colaboradorId: override.colaboradorId,
+    data: override.data,
+    tipo: override.tipo,
+    turno: override.tipo === 'trabalho' ? override.turno || undefined : undefined,
+    descricao: override.descricao || undefined,
+  };
+};
+const dataBR = (data: string) => data.split('-').reverse().join('/');
 
 type UsePlanejamentoEscalaParams = {
   employees: Employee[];
@@ -50,7 +64,6 @@ export function usePlanejamentoEscala({
     const saved = window.sessionStorage.getItem('supervisor-planning-view-mode');
     return saved === 'timeline' ? 'timeline' : 'calendario';
   });
-  const [selectedPlanningDay, setSelectedPlanningDay] = useState<DiaEscala | null>(null);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [isPlanningEditMode, setIsPlanningEditMode] = useState(false);
   const [employeeSearchTerm, setEmployeeSearchTerm] = useState('');
@@ -72,6 +85,21 @@ export function usePlanejamentoEscala({
   const planningMonthInputRef = useRef<HTMLInputElement | null>(null);
   const [planningOverrides, setPlanningOverrides] = useState<Record<string, ScaleOverridePayload>>({});
   const [suggestedPlanningKeys, setSuggestedPlanningKeys] = useState<string[]>([]);
+  // Recarga do servidor (socket, outra gravação) não pode apagar uma proposta que ainda espera "Confirmar Escala"
+  const suggestedKeysRef = useRef(new Set<string>());
+  // Antes do efeito de mescla abaixo (efeitos rodam na ordem): ele lê a ref já atualizada
+  useEffect(() => {
+    suggestedKeysRef.current = new Set(suggestedPlanningKeys);
+  }, [suggestedPlanningKeys]);
+  // O que está gravado no servidor, por "colaborador:data" (proposta pendente não entra)
+  const ajustesSalvos = useMemo(() => {
+    const mapa = new Map<string, ScaleOverridePayload>();
+    scaleOverrides.forEach((override) => {
+      const ajuste = normalizarAjuste(override);
+      if (ajuste) mapa.set(`${ajuste.colaboradorId}:${ajuste.data}`, ajuste);
+    });
+    return mapa;
+  }, [scaleOverrides]);
   const planningOverridesList = useMemo(
     () => Object.values(planningOverrides) as ScaleOverridePayload[],
     [planningOverrides],
@@ -81,23 +109,12 @@ export function usePlanejamentoEscala({
   useEffect(() => {
     setPlanningOverrides((prev) => {
       const next = { ...prev };
-      scaleOverrides.forEach((override) => {
-        if (!override?.colaboradorId || !override?.data) return;
-
-        const tipo = isValidScaleDayType(override.tipo) ? override.tipo : null;
-        if (!tipo) return;
-
-        next[`${override.colaboradorId}:${override.data}`] = {
-          colaboradorId: override.colaboradorId,
-          data: override.data,
-          tipo,
-          turno: tipo === 'trabalho' ? override.turno : undefined,
-          descricao: override.descricao,
-        };
+      ajustesSalvos.forEach((ajuste, chave) => {
+        if (!suggestedKeysRef.current.has(chave)) next[chave] = ajuste;
       });
       return next;
     });
-  }, [scaleOverrides]);
+  }, [ajustesSalvos]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -138,11 +155,12 @@ export function usePlanejamentoEscala({
   const buildScaleForEmployee = useCallback((employeeId: string, options?: {
     tipoEscala?: Employee['tipoEscala'];
     folgasDomingoNoMes?: number;
+    mes?: string; // AAAA-MM; padrão: o mês aberto na grade
   }) => {
     const employee = employeeById.get(employeeId);
     if (!employee) return [] as DiaEscala[];
 
-    const [yearRaw, monthRaw] = selectedScaleMonth.split('-').map(Number);
+    const [yearRaw, monthRaw] = (options?.mes || selectedScaleMonth).split('-').map(Number);
     const year = yearRaw || new Date().getFullYear();
     const month = monthRaw || new Date().getMonth() + 1;
     const firstDay = `${year}-${String(month).padStart(2, '0')}-01`;
@@ -272,27 +290,8 @@ export function usePlanejamentoEscala({
     setSelectedScaleEmployeeId(planningEmployeeFilter);
   }, [planningEmployeeFilter]);
 
-  // Filtro por período do dia (manhã/tarde/noite/comercial) pela hora de início: vale para qualquer turno cadastrado
-  const classifyShift = useCallback((dia: DiaEscala): Exclude<PlanningShiftFilter, 'all' | 'folga'> | null => {
-    if (dia.tipo !== 'trabalho') return null;
-
-    const turnoRef = dia.turno || ((dia.horaInicio && dia.horaFim) ? `${dia.horaInicio}-${dia.horaFim}` : '');
-    if (!turnoRef.includes('-')) return 'comercial';
-
-    const startHour = horaInicialDoTurno(turnoRef);
-    if (startHour === null) return 'comercial';
-    if (startHour >= 12 && startHour < 18) return 'tarde';
-    if (startHour >= 18 || startHour < 5) return 'noite';
-
-    if (startHour >= 5 && startHour < 12) {
-      if (turnoRef.includes('18:00') || turnoRef.includes('19:00') || turnoRef.includes('17:00')) {
-        return 'comercial';
-      }
-      return 'manha';
-    }
-
-    return 'comercial';
-  }, []);
+  // Filtro por período do dia: a mesma regra do calendário e da linha do tempo
+  const classifyShift = useCallback((dia: DiaEscala) => (dia.tipo === 'trabalho' ? categoriaDoDia(dia) : null), []);
 
   const scaleByEmployee = useMemo(() => {
     const map = new Map<string, DiaEscala[]>();
@@ -434,12 +433,13 @@ export function usePlanejamentoEscala({
   const handleTogglePlanningEditMode = () => {
     if (!isPlanningEditMode) {
       setIsPlanningEditMode(true);
-      setToastMessage('Modo de edição ativado. Arraste para ajustar a escala.');
+      setToastMessage('Modo de troca de dias ativado.');
       return;
     }
 
+    // Cada troca já foi gravada na hora: aqui só sai do modo de edição
     setIsPlanningEditMode(false);
-    setToastMessage('Alterações de grade salvas.');
+    setToastMessage('Modo de edição encerrado.');
   };
 
   const applyManualPlanningOverride = useCallback((payload: ScaleOverridePayload, successMessage: string) => {
@@ -490,7 +490,7 @@ export function usePlanejamentoEscala({
       colaboradorId: employeeId,
       data: day,
       tipo: nextType,
-      turno: nextType === 'trabalho' ? (current?.turno || '08:00-18:00') : undefined,
+      turno: nextType === 'trabalho' ? turnoDoDia(current) : undefined, // sem turno legível, fica sem turno
       descricao: nextType === 'trabalho' ? 'Ajuste manual rápido' : 'Folga manual rápida',
     };
 
@@ -502,8 +502,8 @@ export function usePlanejamentoEscala({
       colaboradorId: employeeId,
       data: day,
       tipo,
-      turno: tipo === 'trabalho' ? (turno || '08:00-18:00') : undefined,
-      descricao: tipo === 'folga' ? 'Folga manual' : `Turno manual (${turno || '08:00-18:00'})`,
+      turno: tipo === 'trabalho' ? turno || undefined : undefined,
+      descricao: tipo === 'folga' ? 'Folga manual' : turno ? `Turno manual (${turno})` : 'Trabalho manual',
     };
 
     applyManualPlanningOverride(payload, 'Turno ajustado manualmente.');
@@ -609,6 +609,32 @@ export function usePlanejamentoEscala({
     setToastMessage(`Sugestão aplicada em ${suggestedKeys.length} dia(s).`);
   }, [buildScaleForEmployee, planningCoverageTarget, planningSundayFrequency, selectedScaleMonth, suggestedPlanningKeys, timelineEmployees]);
 
+  // Modelos (repetir mês, 12x36): entram como proposta, como a sugestão automática; só gravam em "Confirmar Escala"
+  const proporAjustes = useCallback((ajustes: ScaleOverridePayload[]) => {
+    const chaves = ajustes.map((ajuste) => `${ajuste.colaboradorId}:${ajuste.data}`);
+    setPlanningOverrides((prev) => {
+      const next = { ...prev };
+      ajustes.forEach((ajuste, indice) => { next[chaves[indice]] = ajuste; });
+      return next;
+    });
+    setSuggestedPlanningKeys((prev) => [...new Set([...prev, ...chaves])]);
+  }, []);
+
+  // Desfaz a proposta na tela: volta o que está salvo no servidor
+  const handleDiscardSuggestedScale = useCallback(() => {
+    setPlanningOverrides((prev) => {
+      const next = { ...prev };
+      suggestedPlanningKeys.forEach((chave) => {
+        const salvo = ajustesSalvos.get(chave);
+        if (salvo) next[chave] = salvo;
+        else delete next[chave];
+      });
+      return next;
+    });
+    setSuggestedPlanningKeys([]);
+    setToastMessage('Proposta descartada.');
+  }, [ajustesSalvos, setToastMessage, suggestedPlanningKeys]);
+
   const handleConfirmSuggestedScale = useCallback(async () => {
     if (suggestedPlanningKeys.length === 0 || isSavingPlanning) return;
 
@@ -622,6 +648,7 @@ export function usePlanejamentoEscala({
     try {
       let successCount = 0;
       const failedKeys: string[] = [];
+      const motivos: string[] = [];
 
       for (const key of suggestedPlanningKeys) {
         const override = planningOverrides[key];
@@ -629,13 +656,11 @@ export function usePlanejamentoEscala({
 
         try {
           const success = await onSaveScaleOverride(override);
-          if (success === false) {
-            failedKeys.push(key);
-            continue;
-          }
+          if (success === false) throw new Error('o servidor não confirmou a gravação.');
           successCount += 1;
         } catch (error) {
           failedKeys.push(key);
+          motivos.push(`${dataBR(override.data)}: ${error instanceof Error ? error.message : 'falha ao salvar.'}`);
         }
       }
 
@@ -644,12 +669,13 @@ export function usePlanejamentoEscala({
       if (failedKeys.length === 0) {
         setToastMessage(`Escala confirmada (${successCount} ajuste(s) sincronizados).`);
       } else {
-        setToastMessage(`Escala parcialmente confirmada. ${failedKeys.length} ajuste(s) pendente(s).`);
+        // Os dias que falharam continuam como proposta (tracejados na grade) até corrigir ou descartar
+        setErrorMessage(`${successCount} ajuste(s) gravado(s); ${failedKeys.length} não: ${motivos.slice(0, 3).join(' ')}${motivos.length > 3 ? ` (e mais ${motivos.length - 3})` : ''} Corrija e confirme de novo, ou descarte a proposta.`);
       }
     } finally {
       setIsSavingPlanning(false);
     }
-  }, [isSavingPlanning, onSaveScaleOverride, planningOverrides, suggestedPlanningKeys]);
+  }, [isSavingPlanning, onSaveScaleOverride, planningOverrides, setErrorMessage, setToastMessage, suggestedPlanningKeys]);
 
   const cltRealtimeAlerts = useMemo(() => {
     return activeNonAdminEmployees
@@ -764,8 +790,6 @@ export function usePlanejamentoEscala({
     setDismissedCltAlertIds,
     planningViewMode,
     setPlanningViewMode,
-    selectedPlanningDay,
-    setSelectedPlanningDay,
     isPopoverOpen,
     setIsPopoverOpen,
     isPlanningEditMode,
@@ -806,7 +830,6 @@ export function usePlanejamentoEscala({
     suggestedPlanningKeys,
     planningOverridesList,
     selectedScaleEmployee,
-    splitTurno: separarTurno,
     buildScaleForEmployee,
     selectedScaleCalendar,
     selectedScaleMonthLabel,
@@ -823,6 +846,12 @@ export function usePlanejamentoEscala({
     handleQuickSetTimelineDay,
     handleSuggestAutomaticScale,
     handleConfirmSuggestedScale,
+    handleDiscardSuggestedScale,
+    proporAjustes,
+    setSuggestedPlanningKeys,
+    ajustesSalvos,
+    planningScaleType,
+    planningSundayOffs,
     cltRealtimeAlerts,
     pendingTurnoSwapRequests,
     visibleCltToastAlerts,

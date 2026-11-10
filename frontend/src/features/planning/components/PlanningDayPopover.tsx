@@ -1,211 +1,230 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { DiaEscala } from '../../../utils/escalaCalculator';
-import { confirmarSaida, useModal } from '../../../hooks/useModal';
+import React, { useMemo, useState } from 'react';
+import { Employee } from '../../../types';
+import { aplicarAjusteEscala, DiaEscala } from '../../../utils/escalaCalculator';
+import { analisarInterjornadaEscala, horasDoDia } from '../../../utils/cltValidator';
+import { ModalFormulario } from '../../../components/ModalFormulario';
 import { TurnoSelect } from './TurnoSelect';
+import { VISUAL_CATEGORIA, categoriaDoTurno, formatarHoras, turnoDoDia } from '../utils/turnos';
 
-interface PlanningDayPopoverProps {
-  isOpen: boolean;
-  dia: DiaEscala | null;
+/** Só o que o supervisor mudou; undefined = manter o que cada dia já tem */
+export type AlteracaoDias = { tipo?: DiaEscala['tipo']; turno?: string; descricao?: string };
+
+export interface PlanningDayPopoverProps {
+  /** Um dia, ou vários (seleção arrastando ou Shift + clique) */
+  dias: DiaEscala[];
+  colaborador?: Employee | null;
+  /** Escala do colaborador com os meses vizinhos: interjornada e semana na virada do mês */
+  escalaContexto: DiaEscala[];
+  /** Observação gravada do dia (num dia só); o texto que o sistema gera, como "Feriado: ...", não entra no campo */
+  notaSalva?: string;
+  scaleByEmployee?: Map<string, DiaEscala[]>;
   onClose: () => void;
-  onSave: (tipo: DiaEscala['tipo'], turno?: string, descricao?: string) => Promise<void>;
+  /** Rejeita com a mensagem quando não salva: o modal fica aberto com o erro */
+  onSave: (alteracao: AlteracaoDias) => Promise<void>;
 }
 
+const TIPOS: { tipo: DiaEscala['tipo']; rotulo: string; icone: string }[] = [
+  { tipo: 'trabalho', rotulo: 'Trabalho', icone: 'work' },
+  { tipo: 'folga', rotulo: 'Folga', icone: 'event_busy' },
+  { tipo: 'fds', rotulo: 'FDS', icone: 'weekend' },
+];
 
-export function PlanningDayPopover({ isOpen, dia, onClose, onSave }: PlanningDayPopoverProps) {
-  const [selectedType, setSelectedType] = useState<DiaEscala['tipo']>(dia?.tipo || 'trabalho');
-  const [selectedTurno, setSelectedTurno] = useState(dia?.turno || '08:00-18:00');
-  const [descricao, setDescricao] = useState(dia?.descricao || '');
+const dataBR = (data: string) => data.split('-').reverse().slice(0, 2).join('/');
+const dataLonga = (data: string) => new Date(`${data}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
+const inicioDaSemana = (data: string) => {
+  const d = new Date(`${data}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+};
+const unico = <T,>(valores: T[]) => (new Set(valores).size === 1 ? valores[0] : undefined);
+
+export function PlanningDayPopover({ dias, colaborador, escalaContexto, notaSalva, scaleByEmployee, onClose, onSave }: PlanningDayPopoverProps) {
+  const emLote = dias.length > 1;
+  // Valor comum aos dias; em lote com dias diferentes fica vazio ("vários") e só muda se o supervisor escolher
+  const tipoInicial = unico(dias.map((d) => d.tipo));
+  const turnoInicial = unico(dias.map((d) => turnoDoDia(d)));
+  const descricaoInicial = emLote ? '' : notaSalva || '';
+
+  const [tipo, setTipo] = useState(tipoInicial);
+  // "" = sem turno escolhido: o dia fica com o que tem (inclusive sem turno, quando a agenda aceita o horário da casa)
+  const [turno, setTurno] = useState(turnoInicial ?? '');
+  const [descricao, setDescricao] = useState(descricaoInicial);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!isOpen || !dia) return;
-    setSelectedType(dia.tipo);
-    setSelectedTurno(dia.turno || '08:00-18:00');
-    setDescricao(dia.descricao || '');
-    setSaveError(null);
-  }, [dia, isOpen]);
+  const tipoMudou = tipo !== tipoInicial;
+  const turnoMudou = tipo === 'trabalho' && turno !== '' && (turno !== turnoInicial || tipoMudou);
+  const alteracao: AlteracaoDias = {
+    tipo: tipoMudou ? tipo : undefined,
+    turno: turnoMudou ? turno : undefined,
+    descricao: descricao !== descricaoInicial ? descricao.trim() : undefined,
+  };
+  const alterado = Object.values(alteracao).some((v) => v !== undefined);
 
-  const formattedDate = useMemo(() => {
-    if (!dia) return '';
-    const [year, month, day] = dia.data.split('-').map(Number);
-    return new Date(year, (month || 1) - 1, day || 1).toLocaleDateString('pt-BR', {
-      weekday: 'long',
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
+  // A escala como ficaria, para os avisos (mesmas funções da análise CLT do backend)
+  const datas = useMemo(() => new Set(dias.map((d) => d.data)), [dias]);
+  const proposta = useMemo(() => escalaContexto.map((dia) => {
+    if (!datas.has(dia.data)) return dia;
+    const tipoFinal = alteracao.tipo ?? dia.tipo;
+    return aplicarAjusteEscala(dia, { tipo: tipoFinal, turno: tipoFinal === 'trabalho' ? alteracao.turno ?? turnoDoDia(dia) : undefined });
+  }), [alteracao.tipo, alteracao.turno, datas, escalaContexto]);
+
+  const avisosInterjornada = useMemo(() => analisarInterjornadaEscala(proposta).violacoes
+    .filter((v) => datas.has(v.dataTurnoAtual) || datas.has(v.dataTurnoAnterior))
+    .map((v) => `Descanso de ${formatarHoras(v.descansoHoras)} entre ${dataBR(v.dataTurnoAnterior)} (${v.turnoAnterior}) e ${dataBR(v.dataTurnoAtual)} (${v.turnoAtual}). O mínimo é 11h (CLT, art. 66).`),
+  [datas, proposta]);
+
+  // Todas as semanas que a seleção toca, inteiras (inclusive dias do mês vizinho)
+  const avisosSemana = useMemo(() => {
+    const contrato = Number(colaborador?.cargaHorariaSemanal) > 0 ? Number(colaborador?.cargaHorariaSemanal) : 44;
+    const semanas = new Set([...datas].map(inicioDaSemana));
+    const horas = new Map<string, number>();
+    proposta.forEach((dia) => {
+      const semana = inicioDaSemana(dia.data);
+      if (semanas.has(semana)) horas.set(semana, (horas.get(semana) ?? 0) + horasDoDia(dia));
     });
-  }, [dia]);
+    return [...horas].filter(([, total]) => total > contrato)
+      .map(([semana, total]) => `Semana de ${dataBR(semana)}: ${formatarHoras(total)}, ${formatarHoras(total - contrato)} acima do contrato de ${contrato}h.`);
+  }, [colaborador?.cargaHorariaSemanal, datas, proposta]);
 
-  const isToday = useMemo(() => {
-    if (!dia) return false;
-    return dia.data === new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-  }, [dia]);
+  const horasSelecao = proposta.filter((d) => datas.has(d.data)).reduce((soma, d) => soma + horasDoDia(d), 0);
 
-  const handleSave = async () => {
+  // Cobertura no dia, só faz sentido em dia único de trabalho
+  const cobertura = useMemo(() => {
+    if (emLote || tipo !== 'trabalho' || !scaleByEmployee) return null;
+    const categoria = categoriaDoTurno(turno);
+    let mesmoTurno = 0;
+    let noDia = 0;
+    scaleByEmployee.forEach((diasEmp, empId) => {
+      if (empId === colaborador?.id) return;
+      const dia = diasEmp.find((d) => d.data === dias[0].data);
+      if (dia?.tipo !== 'trabalho') return;
+      noDia += 1;
+      if (categoriaDoTurno(turnoDoDia(dia)) === categoria) mesmoTurno += 1;
+    });
+    return { categoria, mesmoTurno, noDia };
+  }, [colaborador?.id, dias, emLote, scaleByEmployee, tipo, turno]);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!alterado || isSaving) return;
     setIsSaving(true);
     setSaveError(null);
     try {
-      await onSave(
-        selectedType,
-        selectedType === 'trabalho' ? selectedTurno : undefined,
-        descricao || undefined
-      );
+      await onSave(alteracao);
       onClose();
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Falha ao salvar a alteração do dia.');
+      setSaveError(error instanceof Error ? error.message : 'Não foi possível salvar.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  // Comparado com o dia aberto (o estado é sincronizado com ele num efeito, depois de abrir)
-  const alterado = !!dia && (selectedType !== dia.tipo || descricao !== (dia.descricao || '')
-    || (selectedType === 'trabalho' && selectedTurno !== (dia.turno || '08:00-18:00')));
-  // X, clique fora e Esc; "Cancelar" descarta de propósito, sem perguntar
-  const fechar = () => { if (!isSaving && confirmarSaida(alterado)) onClose(); };
-  useModal(isOpen && !!dia, fechar);
+  if (dias.length === 0) return null;
+  const titulo = emLote ? `${dataBR(dias[0].data)} a ${dataBR(dias[dias.length - 1].data)}` : dataLonga(dias[0].data);
 
   return (
-    <AnimatePresence>
-      {isOpen && dia && (
-        <>
-          {/* Overlay */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={fechar}
-            className="fixed inset-0 bg-black/30 z-50"
+    <ModalFormulario
+      title={titulo}
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      submitLabel={!alterado ? 'Nada alterado' : emLote ? `Aplicar nos ${dias.length} dias` : 'Salvar'}
+      submitDisabled={!alterado}
+      isSubmitting={isSaving}
+      hasUnsavedChanges={alterado}
+      infoBanner={
+        <p className="-mt-4 mb-4 text-xs text-on-surface-variant">
+          {colaborador ? `${colaborador.name} • ${colaborador.tipoEscala || '6x1'} • ${colaborador.cargaHorariaSemanal ?? 44}h/sem • ` : ''}
+          {emLote
+            ? `${dias.length} dias selecionados. Só o que você mudar será aplicado; o resto de cada dia continua como está.`
+            : new Date(`${dias[0].data}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'long' })}
+        </p>
+      }
+    >
+      <fieldset>
+        <legend className="block text-xs font-bold text-on-surface-variant uppercase tracking-widest mb-2">
+          Status do dia{emLote && tipoInicial === undefined && !tipoMudou ? ' (vários)' : ''}
+        </legend>
+        <div className="flex bg-surface-container-low p-1 rounded-xl border border-outline-variant/20">
+          {TIPOS.map((opcao, indice) => (
+            <button
+              key={opcao.tipo}
+              type="button"
+              autoFocus={indice === 0}
+              aria-pressed={tipo === opcao.tipo}
+              onClick={() => setTipo(opcao.tipo)}
+              className={`flex-1 py-2.5 flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
+                tipo === opcao.tipo ? 'bg-surface-container-highest text-on-surface shadow-sm border border-outline-variant/30' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px]">{opcao.icone}</span>
+              {opcao.rotulo}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
+      {tipo === 'trabalho' && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label htmlFor="dia-turno" className="block text-xs font-bold text-on-surface-variant uppercase tracking-widest">
+              Turno
+            </label>
+            <span className="text-[11px] font-medium text-on-surface-variant">
+              {emLote ? `${formatarHoras(horasSelecao)} na seleção` : `Turno de ${formatarHoras(horasSelecao)}`}
+            </span>
+          </div>
+          <TurnoSelect
+            id="dia-turno"
+            value={turno}
+            onChange={setTurno}
+            rotuloVazio={turnoInicial !== undefined ? undefined : emLote && dias.some((d) => turnoDoDia(d)) ? 'Manter o turno de cada dia' : 'Sem turno definido (horário da casa)'}
+            className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-2 text-sm text-on-surface focus:ring-1 focus:ring-primary outline-none"
           />
-
-          {/* Popover */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -10 }}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Editar dia da escala"
-            className="fixed bottom-12 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm"
-          >
-            <div className="bg-surface-container p-6 rounded-3xl shadow-2xl border border-outline-variant/20">
-              {/* Header */}
-              <div className="flex items-start justify-between mb-6">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-xl font-headline text-on-surface capitalize">
-                      {formattedDate}
-                    </h3>
-                    {isToday && <span className="bg-primary text-on-primary text-[11px] uppercase tracking-widest font-bold px-2 py-0.5 rounded-full shadow-sm">Hoje</span>}
-                  </div>
-                  <p className="text-xs text-on-surface-variant uppercase tracking-widest font-bold">
-                    Editar Escala
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={fechar}
-                  disabled={isSaving}
-                  aria-label="Fechar"
-                  className="p-1.5 hover:bg-surface-container-high rounded-full transition-colors disabled:opacity-40"
-                >
-                  <span className="material-symbols-outlined text-on-surface-variant">close</span>
-                </button>
-              </div>
-
-              {/* Type Selection */}
-              <div className="mb-4">
-                <div className="flex bg-surface-container-low p-1 rounded-xl border border-outline-variant/20 mb-4">
-                  {(['trabalho', 'folga', 'fds'] as const).map((type) => (
-                    <button
-                      key={type}
-                      type="button"
-                      aria-pressed={selectedType === type}
-                      onClick={() => {
-                        setSelectedType(type);
-                        if (type === 'trabalho' && !selectedTurno) {
-                          setSelectedTurno('08:00-18:00');
-                        }
-                      }}
-                      className={`flex-1 py-2.5 flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
-                        selectedType === type
-                          ? 'bg-surface-container-highest text-on-surface shadow-sm border border-outline-variant/30'
-                          : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
-                      }`}
-                    >
-                      <span className="material-symbols-outlined text-[16px]">{type === 'trabalho' ? 'work' : type === 'folga' ? 'event_busy' : 'weekend'}</span>
-                      {type === 'trabalho' ? 'Trabalho' : type === 'folga' ? 'Folga' : 'FDS'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Turno Selection (only for trabalho) */}
-              {selectedType === 'trabalho' && (
-                <div className="mb-4">
-                  <label htmlFor="dia-turno" className="block text-xs font-bold text-on-surface-variant uppercase tracking-widest mb-2">
-                    Turno
-                  </label>
-                  <TurnoSelect
-                    id="dia-turno"
-                    value={selectedTurno}
-                    onChange={setSelectedTurno}
-                    className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-2 text-sm text-on-surface focus:ring-1 focus:ring-primary outline-none transition-all"
-                  />
-                </div>
-              )}
-
-              {selectedType !== 'trabalho' && (
-                <div className="mb-4 rounded-xl border border-outline-variant/30 bg-surface-container-low px-4 py-3 flex items-center gap-2 text-xs text-on-surface-variant">
-                  <span className="material-symbols-outlined text-[16px] text-primary">info</span>
-                  O turno será removido automaticamente.
-                </div>
-              )}
-
-              {/* Descrição/Observações */}
-              <div className="mb-4">
-                <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-widest mb-2">
-                  Observações (Opcional)
-                </label>
-                <textarea
-                  value={descricao}
-                  onChange={(e) => setDescricao(e.target.value)}
-                  placeholder="Ex: Substituindo fulano, turno adicional, etc."
-                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm text-on-surface focus:ring-1 focus:ring-primary outline-none transition-all resize-none min-h-[80px]"
-                />
-              </div>
-
-              {saveError && (
-                <div className="mb-4 rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">
-                  {saveError}
-                </div>
-              )}
-
-              {/* Buttons */}
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  disabled={isSaving}
-                  className="flex-1 py-3 rounded-xl border border-outline-variant/30 text-sm font-bold uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-high transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={isSaving}
-                  className="flex-1 py-3 rounded-xl text-sm font-bold uppercase tracking-wider bg-primary text-on-primary hover:bg-primary-dim shadow-sm transition-colors disabled:opacity-60"
-                >
-                  {isSaving ? 'Salvando...' : 'Salvar'}
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        </>
+        </div>
       )}
-    </AnimatePresence>
+
+      {tipo !== undefined && tipo !== 'trabalho' && (
+        <p className="rounded-xl border border-outline-variant/30 bg-surface-container-low px-4 py-3 flex items-center gap-2 text-xs text-on-surface-variant">
+          <span className="material-symbols-outlined text-[16px] text-primary">info</span>
+          O turno deste{emLote ? 's dias' : ' dia'} será removido.
+        </p>
+      )}
+
+      {(avisosInterjornada.length > 0 || avisosSemana.length > 0) && (
+        <div role="alert" className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+          <p className="font-semibold flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[16px]">warning</span>
+            Atenção à CLT
+          </p>
+          {[...avisosInterjornada, ...avisosSemana].map((aviso) => <p key={aviso} className="text-[11px]">{aviso}</p>)}
+        </div>
+      )}
+
+      <div>
+        <label htmlFor="dia-observacao" className="block text-xs font-bold text-on-surface-variant uppercase tracking-widest mb-2">
+          Observações (opcional)
+        </label>
+        <textarea
+          id="dia-observacao"
+          value={descricao}
+          onChange={(e) => setDescricao(e.target.value)}
+          maxLength={200}
+          placeholder={emLote ? 'Deixe em branco para manter a observação de cada dia' : 'Ex.: substituindo fulano, troca autorizada...'}
+          className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm text-on-surface focus:ring-1 focus:ring-primary outline-none resize-none min-h-[72px]"
+        />
+      </div>
+
+      {cobertura && cobertura.categoria && (
+        <p className="text-[11px] text-on-surface-variant flex items-center gap-1.5">
+          <span className="material-symbols-outlined text-[16px] text-primary">groups</span>
+          Outros profissionais neste dia: {cobertura.noDia}, sendo {cobertura.mesmoTurno} no turno {VISUAL_CATEGORIA[cobertura.categoria].rotulo.toLowerCase()}.
+        </p>
+      )}
+
+      {saveError && (
+        <p role="alert" className="rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{saveError}</p>
+      )}
+    </ModalFormulario>
   );
 }
