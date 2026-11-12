@@ -168,27 +168,31 @@ export function RelatorioFinanceiroTab() {
             {data ? `Faturamento${data.usarComissao ? ' e comissão' : ''} por profissional` : 'Faturamento por profissional'}, com os valores gravados em cada atendimento concluído. Clique num profissional para ver os atendimentos.
           </p>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-wrap items-end justify-end gap-3">
+          <div className="flex flex-wrap items-end gap-2">
           {([['mes', 'Este mês'], ['mesPassado', 'Mês passado'], ['30dias', 'Últimos 30 dias']] as const).map(([tipo, rotulo]) => {
             const atalho = periodoRapido(tipo);
             const ativo = atalho.de === periodo.de && atalho.ate === periodo.ate;
             return (
-            <button key={tipo} type="button" aria-pressed={ativo} onClick={() => setPeriodo(atalho)} className={`px-3 py-2 rounded-xl text-[11px] font-bold uppercase tracking-wide ${ativo ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant hover:text-primary'}`}>
+            <button key={tipo} type="button" aria-pressed={ativo} onClick={() => setPeriodo(atalho)} className={`h-10 px-3 rounded-xl text-[11px] font-bold uppercase tracking-wide ${ativo ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant hover:text-primary'}`}>
               {rotulo}
             </button>
             );
           })}
+          </div>
+          <div className="flex items-end gap-3 shrink-0 whitespace-nowrap">
           <label className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">
             De
-            <input type="date" value={periodo.de} max={periodo.ate} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, de: e.target.value }))} className="block mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-2 text-sm normal-case" />
+            <input type="date" value={periodo.de} max={periodo.ate} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, de: e.target.value }))} className="block mt-1 h-10 bg-surface-container-lowest border border-outline-variant/20 rounded-xl px-2 text-sm normal-case" />
           </label>
           <label className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">
             Até
-            <input type="date" value={periodo.ate} min={periodo.de} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, ate: e.target.value }))} className="block mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-2 text-sm normal-case" />
+            <input type="date" value={periodo.ate} min={periodo.de} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, ate: e.target.value }))} className="block mt-1 h-10 bg-surface-container-lowest border border-outline-variant/20 rounded-xl px-2 text-sm normal-case" />
           </label>
-          <button type="button" disabled={!data || data.profissionais.length === 0} onClick={() => data && baixarCsv(data)} title={data && data.profissionais.length === 0 ? 'Sem atendimentos no período' : undefined} className="px-4 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wide bg-primary text-on-primary disabled:opacity-50 flex items-center gap-1">
-            <span className="material-symbols-outlined text-[16px]">download</span> Exportar planilha
+          <button type="button" disabled={!data || data.profissionais.length === 0} onClick={() => data && baixarCsv(data)} title={data && data.profissionais.length === 0 ? 'Sem atendimentos no período' : undefined} className="h-10 px-4 rounded-xl text-[11px] font-bold uppercase tracking-wide bg-primary text-on-primary disabled:opacity-50 flex items-center gap-1">
+            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">download</span> Exportar planilha
           </button>
+          </div>
         </div>
       </div>
 

@@ -427,3 +427,29 @@ export function aplicarAjusteEscala(dia: DiaEscala, ajuste?: AjusteEscala | null
     descricao,
   };
 }
+
+/** Ausências registradas no RH: viram folga na escala, mas não são o descanso semanal */
+export const MOTIVOS_AUSENCIA = ['Férias', 'Atestado médico', 'Afastamento'] as const;
+
+// 6x1: um descanso por semana (segunda a domingo). Feriado e ausência não contam. 5x2 não tem teto aqui: as duas
+// folgas podem cair em quaisquer dias da semana
+const LIMITE_FOLGAS_POR_SEMANA: Partial<Record<TipoEscala, number>> = { '6x1': 1 };
+
+const segundaDaSemana = (data: string) => {
+  const d = dataUTC(data);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+};
+
+/** Semanas (segunda-feira) que passam do limite de folgas da escala, com as datas de folga de cada uma */
+export function semanasComFolgaDemais(tipo: string | null | undefined, dias: DiaEscala[]): Array<{ semana: string; folgas: string[] }> {
+  const limite = LIMITE_FOLGAS_POR_SEMANA[tipo as TipoEscala];
+  if (!limite) return [];
+  const porSemana = new Map<string, string[]>();
+  for (const dia of dias) {
+    if (dia.tipo === 'trabalho' || dia.feriadoNome || MOTIVOS_AUSENCIA.some((m) => m === dia.descricao)) continue;
+    const semana = segundaDaSemana(dia.data);
+    porSemana.set(semana, [...(porSemana.get(semana) ?? []), dia.data]);
+  }
+  return [...porSemana].filter(([, folgas]) => folgas.length > limite).map(([semana, folgas]) => ({ semana, folgas: folgas.sort() }));
+}

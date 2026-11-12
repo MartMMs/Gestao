@@ -3,7 +3,7 @@ import { useAcessosHistorico, useEmployees, type FiltroAcessosHistorico } from '
 import { useAuth } from '../../../AuthContext';
 import { periodoRapido } from '../../../utils/periodos';
 
-const campo = 'bg-surface-container-low border border-outline-variant/30 text-sm rounded-xl px-3 py-2 text-on-surface';
+const campo = 'bg-surface-container-low border border-outline-variant/30 text-sm rounded-xl h-10 px-3 text-on-surface';
 
 // Trilha LGPD: quem abriu o histórico de qual cliente (gravada em GET /agendamentos?clienteId=...)
 export function AcessosHistoricoClientes() {
@@ -22,15 +22,17 @@ export function AcessosHistoricoClientes() {
       <p className="text-xs text-on-surface-variant mb-3">Quem abriu o histórico de atendimentos de cada cliente, de qual IP e quando.</p>
 
       <form
-        className="flex flex-wrap items-end gap-2 mb-3"
+        className="flex flex-wrap items-end gap-3 mb-3"
         onSubmit={(event) => { event.preventDefault(); setFiltro({ ...rascunho, pagina: 1 }); }}
       >
+        <div className="flex items-end gap-3 shrink-0 whitespace-nowrap">
         <label className="text-xs text-on-surface-variant flex flex-col gap-1">De
           <input type="date" required value={rascunho.de} onChange={(e) => alterar({ de: e.target.value })} className={campo} />
         </label>
         <label className="text-xs text-on-surface-variant flex flex-col gap-1">Até
           <input type="date" required value={rascunho.ate} onChange={(e) => alterar({ ate: e.target.value })} className={campo} />
         </label>
+        </div>
         <label className="text-xs text-on-surface-variant flex flex-col gap-1">Quem acessou
           <select value={rascunho.colaboradorId} onChange={(e) => alterar({ colaboradorId: e.target.value })} className={campo}>
             <option value="">Todos</option>
@@ -40,7 +42,7 @@ export function AcessosHistoricoClientes() {
         <label className="text-xs text-on-surface-variant flex flex-col gap-1">Cliente
           <input type="search" maxLength={100} placeholder="Nome do cliente" value={rascunho.cliente} onChange={(e) => alterar({ cliente: e.target.value })} className={campo} />
         </label>
-        <button type="submit" className="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold uppercase tracking-widest hover:bg-primary-dim">Filtrar</button>
+        <button type="submit" className="h-10 px-4 rounded-xl bg-primary text-on-primary text-xs font-bold uppercase tracking-widest hover:bg-primary-dim">Filtrar</button>
       </form>
 
       {isLoading && <p className="text-xs text-on-surface-variant">Carregando...</p>}

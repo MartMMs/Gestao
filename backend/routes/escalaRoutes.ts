@@ -6,7 +6,7 @@ import { HttpError, responderErro, type Notificar } from '../lib/http';
 import { transacaoComTravas, travarAgenda, travarChave } from '../lib/transacao';
 import { dataValida, horarioParaMinutos, partesNoFuso, TURNO_PADRAO, TURNO_REGEX } from '../../shared/agenda';
 import { agendamentosDoDia } from '../services/agendaService';
-import { aplicarAjusteEscala, gerarEscalaComRegras, type TipoEscala as TipoContrato } from '../../shared/escala';
+import { aplicarAjusteEscala, gerarEscalaComRegras, semanasComFolgaDemais, type TipoEscala as TipoContrato } from '../../shared/escala';
 import { analisarConformidadeCLT } from '../../shared/clt';
 
 type TipoEscala = 'trabalho' | 'folga' | 'fds';
@@ -102,6 +102,34 @@ const alertasCltDoMes = async (tx: Prisma.TransactionClient, colaboradorId: stri
   return analise.statusGeral ? [] : analise.resumo;
 };
 
+const dataBR = (data: string) => data.split('-').reverse().join('/').slice(0, 5);
+
+// Conferido depois de todas as gravações da operação (uma troca no meio fica com duas folgas por um instante).
+// A malha sai do dia 1 do mês, como na tela, e cobre as semanas inteiras das datas gravadas
+const conferirFolgasDaSemana = async (tx: Prisma.TransactionClient, colaboradorId: string, datas: string[]) => {
+  const colaborador = await tx.colaborador.findUnique({ where: { id: colaboradorId }, select: { tipoEscala: true, folgasDomingoNoMes: true } });
+  if (!colaborador || !TIPOS_CONTRATO.includes(colaborador.tipoEscala as TipoContrato)) return;
+  for (const data of new Set(datas)) {
+    const d = new Date(`${data}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    const segunda = d.toISOString().slice(0, 10);
+    d.setUTCDate(d.getUTCDate() + 6);
+    const domingo = d.toISOString().slice(0, 10);
+    const inicioGeracao = `${segunda.slice(0, 7)}-01`;
+    const totalDias = Math.round((Date.parse(domingo) - Date.parse(inicioGeracao)) / 86_400_000) + 1;
+    const ajustes = new Map(
+      (await tx.escalaOverride.findMany({ where: { colaboradorId, data: { gte: segunda, lte: domingo } } })).map((o) => [o.data, o]),
+    );
+    const semana = gerarEscalaComRegras({ tipo: colaborador.tipoEscala as TipoContrato, dataInicio: inicioGeracao }, totalDias, { folgasDomingoNoMes: colaborador.folgasDomingoNoMes ?? 2 })
+      .filter((dia) => dia.data >= segunda)
+      .map((dia) => aplicarAjusteEscala(dia, ajustes.get(dia.data)));
+    const [excesso] = semanasComFolgaDemais(colaborador.tipoEscala, semana);
+    if (excesso) {
+      throw new HttpError(409, `Na escala ${colaborador.tipoEscala} cabe uma folga por semana, e a semana de ${dataBR(segunda)} ficaria com folga em ${excesso.folgas.map(dataBR).join(' e ')}. Marque um desses dias como trabalho antes, ou use a troca de dias.`);
+    }
+  }
+};
+
 const garantirColaborador = async (colaboradorId: unknown) => {
   if (typeof colaboradorId !== 'string' || !(await prisma.colaborador.findUnique({ where: { id: colaboradorId } }))) {
     throw new HttpError(400, 'Profissional não encontrado.');
@@ -140,6 +168,7 @@ export function createEscalaRouter(notificar: Notificar) {
       const { salvo, alertasClt } = await transacaoComTravas(async (tx) => {
         await travarChave(tx, `escala:${chaveEscala(colaboradorId, data)}`);
         const gravado = await gravarDiaValidado(tx, colaboradorId, data, dia);
+        await conferirFolgasDaSemana(tx, colaboradorId, [data]);
         return { salvo: gravado, alertasClt: await alertasCltDoMes(tx, colaboradorId, data) };
       });
       notificar();
@@ -175,6 +204,8 @@ export function createEscalaRouter(notificar: Notificar) {
           from: await gravarDiaValidado(tx, from.colaboradorId, from.data, diaDestino),
           to: await gravarDiaValidado(tx, to.colaboradorId, to.data, diaOrigem),
         };
+        await conferirFolgasDaSemana(tx, from.colaboradorId, from.colaboradorId === to.colaboradorId ? [from.data, to.data] : [from.data]);
+        if (to.colaboradorId !== from.colaboradorId) await conferirFolgasDaSemana(tx, to.colaboradorId, [to.data]);
         const alertasClt = [
           ...await alertasCltDoMes(tx, from.colaboradorId, from.data),
           ...(to.colaboradorId !== from.colaboradorId || to.data.slice(0, 7) !== from.data.slice(0, 7)
@@ -208,6 +239,7 @@ export function createEscalaRouter(notificar: Notificar) {
 
         const criados = [];
         for (const alvo of new Set<string>(targetDates)) criados.push(await gravarDiaValidado(tx, colaboradorId, alvo, origem));
+        await conferirFolgasDaSemana(tx, colaboradorId, targetDates);
         const meses = [...new Set<string>(targetDates.map((alvo: string) => alvo.slice(0, 7)))];
         const alertasClt: string[] = [];
         for (const mes of meses) alertasClt.push(...await alertasCltDoMes(tx, colaboradorId, `${mes}-01`));

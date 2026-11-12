@@ -650,7 +650,9 @@ export function usePlanejamentoEscala({
       const failedKeys: string[] = [];
       const motivos: string[] = [];
 
-      for (const key of suggestedPlanningKeys) {
+      // Trabalho antes de folga: no 6x1 o servidor recusa a semana que fica com duas folgas, mesmo por um instante
+      const ordenadas = [...suggestedPlanningKeys].sort((a, b) => Number(planningOverrides[a]?.tipo !== 'trabalho') - Number(planningOverrides[b]?.tipo !== 'trabalho'));
+      for (const key of ordenadas) {
         const override = planningOverrides[key];
         if (!override) continue;
 

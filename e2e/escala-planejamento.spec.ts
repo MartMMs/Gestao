@@ -18,7 +18,7 @@ const criarColaborador = async (request: APIRequestContext, nome: string) => {
   const admin = await authHeaders(request, CONTAS.admin);
   const s = sufixo();
   const r = await request.post(`${apiBase()}/colaboradores`, {
-    headers: admin, data: { nome, email: `escala.${s}@teste.com`, senha: `Provisoria!${s}9`, especialidade: 'Massagem' },
+    headers: admin, data: { nome, email: `escala.${s}@teste.com`, senha: `Provisoria!${s}9`, especialidade: 'Massagem', tipoEscala: '5x2' },
   });
   expect(r.status(), await r.text()).toBe(201);
   return (await r.json()).id as string;

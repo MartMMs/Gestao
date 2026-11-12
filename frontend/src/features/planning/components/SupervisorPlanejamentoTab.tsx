@@ -220,7 +220,8 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
         // Sem mexer na observação, fica a nota já gravada (não o texto que o sistema gera, como "Feriado: ...")
         descricao: alteracao.descricao !== undefined ? alteracao.descricao || undefined : ajustesSalvos.get(`${employeeId}:${dia.data}`)?.descricao,
       };
-    });
+    // Trabalho antes de folga: no 6x1 o servidor recusa a semana que fica com duas folgas, mesmo por um instante
+    }).sort((a, b) => Number(a.tipo !== 'trabalho') - Number(b.tipo !== 'trabalho'));
 
     let salvos = 0;
     for (const ajuste of ajustes) {

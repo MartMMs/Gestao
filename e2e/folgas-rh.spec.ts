@@ -15,7 +15,7 @@ test.describe('RH — folgas', () => {
     // Profissional próprio do teste: a escala e os bloqueios dele somem quando ele é excluído
     const sufixo = Array.from({ length: 6 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join('');
     const criado = await request.post(`${apiBase()}/colaboradores`, {
-      headers: admin, data: { nome: `Papeis Folga ${sufixo}`, email: `papeis.${sufixo}@teste.com`, senha: `Provisoria!${sufixo}9`, especialidade: 'Massagem' },
+      headers: admin, data: { nome: `Papeis Folga ${sufixo}`, email: `papeis.${sufixo}@teste.com`, senha: `Provisoria!${sufixo}9`, especialidade: 'Massagem', tipoEscala: '5x2' },
     });
     expect(criado.status(), await criado.text()).toBe(201);
     const { id } = await criado.json();
@@ -92,6 +92,32 @@ test.describe('RH — folgas', () => {
       await request.delete(`${apiBase()}/colaboradores/${helena.id}`, { headers: admin });
     }
   });
+});
+
+test('6x1: segunda folga na mesma semana é recusada; trocar o domingo por trabalho libera', async ({ request }) => {
+  const admin = await authHeaders(request, CONTAS.admin);
+  const sufixo = Array.from({ length: 6 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join('');
+  const criado = await request.post(`${apiBase()}/colaboradores`, {
+    headers: admin, data: { nome: `Seis Por Um ${sufixo}`, email: `seisx1.${sufixo}@teste.com`, senha: `Provisoria!${sufixo}9`, especialidade: 'Massagem', tipoEscala: '6x1' },
+  });
+  expect(criado.status(), await criado.text()).toBe(201);
+  const { id } = await criado.json();
+  // Quarta e domingo da semana que vem (o domingo já é o descanso do 6x1)
+  const hoje = new Date(`${hojeSP()}T12:00:00Z`);
+  const quarta = somarDias(hojeSP(), ((3 - hoje.getUTCDay() + 7) % 7) + 7);
+  const domingo = somarDias(quarta, 4);
+  const gravar = (data: string, tipo: string) => request.post(`${apiBase()}/escala/override`, { headers: admin, data: { colaboradorId: id, data, tipo, ...(tipo === 'trabalho' ? { turno: '08:00-17:00' } : {}) } });
+  try {
+    const recusada = await gravar(quarta, 'folga');
+    expect(recusada.status()).toBe(409);
+    expect((await recusada.json()).erro).toContain('uma folga por semana');
+
+    expect((await gravar(domingo, 'trabalho')).ok()).toBeTruthy();
+    const aceita = await gravar(quarta, 'folga');
+    expect(aceita.ok(), await aceita.text()).toBeTruthy();
+  } finally {
+    await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: admin });
+  }
 });
 
 // Horário aleatório (HH:MM) para o turno de teste: horário repetido é recusado (409) e duas execuções não colidem
