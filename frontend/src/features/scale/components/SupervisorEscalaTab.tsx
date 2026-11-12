@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { normalizarTexto } from '@shared/validadores';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Client, Service, Bloqueio } from '../../../types';
 import { getDuration, getBrazilCurrentMinuteOfDay, getBrazilCurrentTimeString, getLocalTodayString, matchesAppointmentSearch, shiftDateString } from '../../../features/appointments/utils/appointmentCore';
@@ -15,6 +14,7 @@ import { isTeamMember } from '../../../utils/formatters';
 import { JANELA_AGENDA_DIAS } from '@shared/agendaJanela';
 import { bloqueioDiaInteiro, horarioParaMinutos, minutoDentroDoBloqueio, minutosParaHorario } from '@shared/agenda';
 import type { DiaEscala } from '@shared/escala';
+import { estaDeFolga, statusDoDia, type EmployeeDayStatus } from '../utils/statusDoDia';
 
 const { START_HOUR, END_HOUR, HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
 // Referências fixas para listas vazias (um [] novo a cada render anularia os memos e o React.memo)
@@ -51,11 +51,6 @@ interface SupervisorEscalaTabProps {
   buildScaleForEmployee?: (employeeId: string) => DiaEscala[];
 }
 
-type EmployeeDayStatus = {
-  label: 'Folga' | 'FDS' | 'Férias' | 'Bloqueio';
-  reason: string;
-  isAllDayUnavailable: boolean;
-};
 
 export function SupervisorEscalaTab({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onOpenUpcomingAppointments, onReassignAppointment, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onAlterarStatus, onEditClient, onAddBloqueio, onDeleteBloqueio, setToastMessage, setErrorMessage, buildScaleForEmployee }: SupervisorEscalaTabProps) {
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
@@ -160,73 +155,11 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     return map;
   }, [scaleOverrides, receptionDate]);
 
-  const isFeriasReason = useCallback((value?: string | null) => {
-    if (!value) return false;
-    return normalizarTexto(value).includes('ferias');
-  }, []);
-
-  const getEmployeeDayStatus = useCallback((emp: Employee): EmployeeDayStatus | null => {
-    // 1. Verifica se a escala base oficial da equipe diz que é folga neste mês
-    if (buildScaleForEmployee) {
-      const scaleDay = buildScaleForEmployee(emp.id).find((d) => d.data === receptionDate);
-      if (scaleDay && scaleDay.tipo !== 'trabalho') {
-        const isFerias = isFeriasReason(scaleDay.descricao);
-        return {
-          label: isFerias ? 'Férias' : (scaleDay.tipo === 'fds' ? 'FDS' : 'Folga'),
-          reason: scaleDay.descricao || 'Folga contratual (Escala)',
-          isAllDayUnavailable: true,
-        };
-      }
-    }
-
-    // 2. Verifica overrides e bloqueios manuais locais
-    const override = dayScaleOverrideByEmployee.get(emp.id);
-    if (override) {
-      const isFerias = isFeriasReason(override.descricao);
-      if (isFerias) {
-        return {
-          label: 'Férias',
-          reason: override.descricao || 'Férias planejadas',
-          isAllDayUnavailable: true,
-        };
-      }
-
-      if (override.tipo === 'fds') {
-        return {
-          label: 'FDS',
-          reason: override.descricao || 'Fim de semana (escala)',
-          isAllDayUnavailable: true,
-        };
-      }
-
-      return {
-        label: 'Folga',
-        reason: override.descricao || 'Folga planejada',
-        isAllDayUnavailable: true,
-      };
-    }
-
-    const dayBlocks = (emp.bloqueios || []).filter((bloq) => bloq.data === receptionDate);
-    if (dayBlocks.length === 0) return null;
-
-    const fullDayBlock = dayBlocks.find(bloqueioDiaInteiro);
-
-    if (!fullDayBlock) {
-      const reason = dayBlocks.map((bloq) => bloq.motivo).filter(Boolean).join(' | ') || 'Bloqueio parcial';
-      return {
-        label: 'Bloqueio',
-        reason,
-        isAllDayUnavailable: false,
-      };
-    }
-
-    const isFerias = isFeriasReason(fullDayBlock.motivo);
-    return {
-      label: isFerias ? 'Férias' : 'Folga',
-      reason: fullDayBlock.motivo,
-      isAllDayUnavailable: true,
-    };
-  }, [dayScaleOverrideByEmployee, receptionDate, isFeriasReason, buildScaleForEmployee]);
+  const getEmployeeDayStatus = useCallback((emp: Employee): EmployeeDayStatus | null => statusDoDia(
+    buildScaleForEmployee?.(emp.id).find((d) => d.data === receptionDate),
+    dayScaleOverrideByEmployee.get(emp.id),
+    (emp.bloqueios || []).filter((bloq) => bloq.data === receptionDate),
+  ), [dayScaleOverrideByEmployee, receptionDate, buildScaleForEmployee]);
 
   // Situação do dia de cada profissional, calculada uma vez por data (gerar a escala do mês é caro)
   const dayStatusByEmployee = useMemo(() => {
@@ -293,10 +226,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     .filter((emp) => isTeamMember(emp))
     .filter((emp) => {
       if (professionalFilter === 'all') return true;
-      if (professionalFilter === OFF_DAY_FILTER) {
-        const status = dayStatusByEmployee.get(emp.id);
-        return Boolean(status?.isAllDayUnavailable && status.label !== 'Bloqueio');
-      }
+      if (professionalFilter === OFF_DAY_FILTER) return estaDeFolga(dayStatusByEmployee.get(emp.id));
       return emp.id === professionalFilter;
     }), [employees, professionalFilter, dayStatusByEmployee]);
 
@@ -591,6 +521,9 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
         </div>
         {visao !== 'dia' && professionalFilter === OFF_DAY_FILTER && (
           <p className="text-[11px] text-on-surface-variant mb-2 shrink-0">"Somente de folga" vale só na visão Dia: aqui aparecem os atendimentos de todos.</p>
+        )}
+        {visao === 'dia' && professionalFilter === OFF_DAY_FILTER && activeEmployees.length === 0 && (
+          <p role="status" className="text-sm text-on-surface-variant mb-2 shrink-0">Nenhum profissional de folga neste dia.</p>
         )}
         {visao === 'dia' && (
           <p className="text-[11px] text-on-surface-variant mb-2 shrink-0">

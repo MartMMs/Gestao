@@ -7,6 +7,10 @@ describe('shared/escopos', () => {
     for (const g of ['escala', 'clientes'] as const)
       for (const e of ESCOPOS[g]) expect(ESCOPOS_PUBLICOS).not.toContain(e);
   });
+  it('bloqueio recarrega os profissionais (onde os bloqueios vêm) e avisa o totem', () => {
+    expect(ESCOPOS.bloqueios).toContain('employees');
+    expect(ESCOPOS.bloqueios.some((e) => ESCOPOS_PUBLICOS.includes(e))).toBe(true);
+  });
   it('todo escopo de todo grupo é válido', () => {
     for (const lista of Object.values(ESCOPOS)) for (const e of lista) expect(ehEscopoMudanca(e)).toBe(true);
   });

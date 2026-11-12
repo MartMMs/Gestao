@@ -101,7 +101,7 @@ const profissionalDesconhecido = async (permitidos: string[], jaGravados: string
 };
 const erroProfissional = (nome: string) => `"${nome}" não está na equipe. Escolha um profissional ativo (use os botões com os nomes).`;
 
-export function createServicosRouter(notificar: Notificar) {
+export function createServicosRouter(notificar: Notificar, notificarBloqueio: Notificar) {
   const router = Router();
 
   router.get('/servicos', verificarToken, async (req, res) => {
@@ -255,7 +255,7 @@ export function createServicosRouter(notificar: Notificar) {
         for (const data of unicas) gravados.push(await tx.bloqueio.create({ data: { data, horaInicio, horaFim, motivo, colaboradorId } }));
         return gravados;
       });
-      notificar();
+      notificarBloqueio();
       res.status(201).json(Array.isArray(req.body?.datas) ? criados : criados[0]);
     } catch (error) {
       responderErro(res, error, 'Erro ao criar bloqueio');
@@ -266,7 +266,7 @@ export function createServicosRouter(notificar: Notificar) {
     try {
       const removido = await prisma.bloqueio.deleteMany({ where: { id: req.params.id } });
       if (removido.count === 0) return res.status(404).json({ erro: 'Bloqueio não encontrado.' });
-      notificar();
+      notificarBloqueio();
       res.json({ mensagem: 'Bloqueio removido com sucesso' });
     } catch (error) {
       responderErro(res, error, 'Erro ao excluir bloqueio');

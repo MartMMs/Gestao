@@ -199,13 +199,8 @@ Atalhos locais (`Gestao-*.desktop`, tasks do VS Code) podem ser criados por cada
 - Refatoracao por features em andamento com entregas principais aplicadas.
 - Pendencias de consolidacao:
    - tela para consultar a trilha de auditoria de acessos ao historico de clientes
-   - filtrar agenda para destacar somente profissionais em folga (regra final de exibicao)
-   - permitir ajuste de horario de trabalho pelo Supervisor com persistencia na listagem
-   - continuar saneamento de `any` residual em `SupervisorView` e `SupervisorPlanejamentoTab` (props ainda genericas)
    - integrar um gateway de pagamento real ao webhook assinado
-   - finalizar adocao de hooks/contexto compartilhado em todos os fluxos do Supervisor
    - envio de lembretes por WhatsApp
-   - criacao de bloqueio ainda sem transacao/trava
 
 ## Documentacao relacionada
 

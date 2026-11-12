@@ -18,7 +18,10 @@ export function createRouter(eventos: Eventos) {
   router.use(createColaboradoresRouter(eventos));
   router.use(createAgendamentosRouter(() => eventos.notificarMudanca(ESCOPOS.agenda)));
   router.use(createClientesRouter(() => eventos.notificarMudanca(ESCOPOS.clientes)));
-  router.use(createServicosRouter(() => eventos.notificarMudanca(ESCOPOS.servicos)));
+  router.use(createServicosRouter(
+    () => eventos.notificarMudanca(ESCOPOS.servicos),
+    () => eventos.notificarMudanca(ESCOPOS.bloqueios),
+  ));
   router.use(createEscalaRouter(() => eventos.notificarMudanca(ESCOPOS.escala)));
   router.use(createTurnosRouter(() => eventos.notificarMudanca(ESCOPOS.turnos)));
   router.use(createRelatoriosRouter());

@@ -17,7 +17,7 @@ Período sugerido: 10/04/2026 a 16/04/2026
 
 | Item | Objetivo | Responsável | Estimativa |
 |------|----------|-------------|------------|
-| BLG-001 | Regra final de exibição no agendamento para folga | Produto/Supervisão + Frontend | 3h |
+| BLG-001 | Regra final de exibição no agendamento para folga (concluído em 12/11/2026) | Produto/Supervisão + Frontend | 3h |
 | BLG-002 | Bloqueio automático/manual para colaborador em folga | Backend + Frontend | 8h |
 | BLG-003 | Feriados automáticos integrados na malha (concluído em 09/04/2026) | Backend + Frontend | 6h |
 
@@ -42,7 +42,8 @@ Esforço agregado estimado para roadmap P2 (BLG-008 a BLG-013): 70h a 110h.
 
 ## P0 - Sprint Atual (Operacional)
 
-- [ ] BLG-001 - Definir regra final de exibição no agendamento para colaboradores de folga.
+- [x] BLG-001 - Definir regra final de exibição no agendamento para colaboradores de folga.
+  - Regra aplicada: o filtro "Somente de folga" (agenda, visão Dia) mostra quem está de folga, FDS ou férias (escala ou ajuste do dia) ou com bloqueio do dia inteiro; bloqueio parcial fica de fora (`frontend/src/features/scale/utils/statusDoDia.ts`, com teste).
   - Responsável: Produto/Supervisão
   - Co-responsável: Frontend
   - Critério de aceite: regra documentada e aplicada na tela de agendamento sem divergência de comportamento.
