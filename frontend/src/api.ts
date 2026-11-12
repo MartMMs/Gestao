@@ -1,5 +1,5 @@
 import { CODIGO_VERSAO_DESATUALIZADA } from '@shared/statusAgendamento';
-import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { Appointment, Bloqueio, Client, Employee, EmployeeUpdate, Service, ServiceEligibilityMode, TurnoSwapRequest, TurnoSwapStatus, ConfiguracaoEmpresa } from './types';
 import { getApiUrl } from './config/api';
 import { redactSensitiveData } from '@shared/redact';
@@ -531,6 +531,19 @@ export interface RegistroAuditoria {
   id: string; acao: string; alvo: string; usuarioNome: string; criadoEm: string;
   antes: Record<string, unknown> | null; depois: Record<string, unknown> | null;
 }
+
+export interface AcessoHistorico {
+  id: string; criadoEm: string; ip: string | null; registros: number; colaboradorNome: string; clienteNome: string;
+}
+export interface PaginaAcessosHistorico { total: number; pagina: number; porPagina: number; itens: AcessoHistorico[] }
+export interface FiltroAcessosHistorico { de: string; ate: string; colaboradorId: string; cliente: string; pagina: number }
+
+export const useAcessosHistorico = (token: string | null, filtro: FiltroAcessosHistorico) => useQuery<PaginaAcessosHistorico>({
+  queryKey: ['auditoria', 'acessos-historico', filtro],
+  queryFn: () => fetchApi(`/auditoria/acessos-historico?${new URLSearchParams({ ...filtro, pagina: String(filtro.pagina) })}`, token),
+  enabled: Boolean(token),
+  placeholderData: keepPreviousData,
+});
 
 export const useAuditoria = (token: string | null, habilitado: boolean) => useQuery<RegistroAuditoria[]>({
   queryKey: ['auditoria'],

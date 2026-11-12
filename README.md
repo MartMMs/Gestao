@@ -198,7 +198,6 @@ Atalhos locais (`Gestao-*.desktop`, tasks do VS Code) podem ser criados por cada
 - Split frontend/backend concluido.
 - Refatoracao por features em andamento com entregas principais aplicadas.
 - Pendencias de consolidacao:
-   - tela para consultar a trilha de auditoria de acessos ao historico de clientes
    - integrar um gateway de pagamento real ao webhook assinado
    - envio de lembretes por WhatsApp
 

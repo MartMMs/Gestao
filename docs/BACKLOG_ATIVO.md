@@ -134,3 +134,5 @@ Esforço agregado estimado para roadmap P2 (BLG-008 a BLG-013): 70h a 110h.
 - Pendências removidas dos documentos históricos e centralizadas neste arquivo.
 - BLG-003 concluído com validação de testes/lint/build em 09/04/2026.
 - BLG-004 concluído com validação de lint/build em 09/04/2026.
+- BLG-001 concluído em 12/11/2026 (regra do filtro "Somente de folga" com teste).
+- Trilha de acessos ao histórico de clientes (LGPD) consultável em Relatórios, para supervisão e administração, em 12/11/2026 (`GET /auditoria/acessos-historico`).

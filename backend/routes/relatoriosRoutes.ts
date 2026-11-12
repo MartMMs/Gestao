@@ -47,6 +47,7 @@ const lerPeriodo = (de: unknown, ate: unknown) => {
 };
 
 const LIMITE_DETALHE = 2000;
+const ACESSOS_POR_PAGINA = 50;
 
 // Atendimentos do período que entram no relatório (mesma consulta no agregado e no detalhe)
 const buscarDoPeriodo = (inicio: string, fim: string, agora: Date, filtroExtra: { colaboradorId?: string } = {}, take?: number) => {
@@ -199,6 +200,50 @@ export function createRelatoriosRouter() {
       res.json(registros.map((r) => ({ ...r, usuarioNome: r.usuarioId ? nomes.get(r.usuarioId) ?? 'Usuário removido' : 'Sistema' })));
     } catch (error) {
       responderErro(res, error, 'Erro ao buscar o histórico de alterações');
+    }
+  });
+
+  // Quem abriu o histórico de qual cliente (LGPD), paginado. Filtros: período (de/ate), colaboradorId e nome do cliente
+  router.get('/auditoria/acessos-historico', verificarSupervisorToken, async (req, res) => {
+    try {
+      const { inicio, fim } = lerPeriodo(req.query.de, req.query.ate);
+      const pagina = Math.max(1, Math.floor(Number(req.query.pagina)) || 1);
+      const colaboradorId = typeof req.query.colaboradorId === 'string' && req.query.colaboradorId ? req.query.colaboradorId : undefined;
+      const nomeCliente = typeof req.query.cliente === 'string' ? req.query.cliente.trim().slice(0, 100) : '';
+      const clienteIds = nomeCliente
+        ? (await prisma.cliente.findMany({ where: { nome: { contains: nomeCliente, mode: 'insensitive' } }, select: { id: true }, take: 500 })).map((c) => c.id)
+        : undefined;
+
+      const where = {
+        criadoEm: { gte: instanteNoFuso(inicio, '00:00'), lt: new Date(instanteNoFuso(fim, '23:59').getTime() + 60_000) },
+        ...(colaboradorId ? { colaboradorId } : {}),
+        ...(clienteIds ? { clienteId: { in: clienteIds } } : {}),
+      };
+      const [total, acessos] = await Promise.all([
+        prisma.acessoHistoricoCliente.count({ where }),
+        prisma.acessoHistoricoCliente.findMany({ where, orderBy: { criadoEm: 'desc' }, skip: (pagina - 1) * ACESSOS_POR_PAGINA, take: ACESSOS_POR_PAGINA }),
+      ]);
+      const [colaboradores, clientes] = await Promise.all([
+        prisma.colaborador.findMany({ where: { id: { in: [...new Set(acessos.map((a) => a.colaboradorId))] } }, select: { id: true, nome: true } }),
+        prisma.cliente.findMany({ where: { id: { in: [...new Set(acessos.map((a) => a.clienteId))] } }, select: { id: true, nome: true } }),
+      ]);
+      const nomeColaborador = new Map(colaboradores.map((c) => [c.id, c.nome]));
+      const nomeDoCliente = new Map(clientes.map((c) => [c.id, c.nome]));
+      res.json({
+        total,
+        pagina,
+        porPagina: ACESSOS_POR_PAGINA,
+        itens: acessos.map((a) => ({
+          id: a.id,
+          criadoEm: a.criadoEm,
+          ip: a.ip,
+          registros: a.registros,
+          colaboradorNome: nomeColaborador.get(a.colaboradorId) ?? 'Usuário removido',
+          clienteNome: nomeDoCliente.get(a.clienteId) ?? 'Cliente removido',
+        })),
+      });
+    } catch (error) {
+      responderErro(res, error, 'Erro ao buscar os acessos ao histórico');
     }
   });
 

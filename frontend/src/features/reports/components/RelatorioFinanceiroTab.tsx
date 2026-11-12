@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { isApiError, useAtendimentosDoRelatorio, useAuditoria, useRelatorioFinanceiro, type RelatorioFinanceiro } from '../../../api';
 import { useAuth } from '../../../AuthContext';
 import { periodoRapido } from '../../../utils/periodos';
+import { AcessosHistoricoClientes } from './AcessosHistoricoClientes';
 
 const reais = (valor: number) => valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBr = (iso: string) => iso.split('-').reverse().join('/');
@@ -309,6 +310,7 @@ export function RelatorioFinanceiroTab() {
       )}
 
       {currentUser?.role === 'admin' && <HistoricoAlteracoes />}
+      <AcessosHistoricoClientes />
     </motion.div>
   );
 }
