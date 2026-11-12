@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { prisma } from '../db';
 import { usuarioEhAdmin, usuarioEhSupervisor, verificarSupervisorToken, verificarToken } from '../auth';
-import { responderErro, type Notificar } from '../lib/http';
+import { HttpError, responderErro, type Notificar } from '../lib/http';
+import { transacaoComTravas, travarAgenda } from '../lib/transacao';
 import { prepararBloqueio } from '../lib/privacidade';
 import { registrarAuditoria } from '../lib/auditoria';
 import { MODOS_ELEGIBILIDADE, agendamentosDoDia, normalizarModoElegibilidade } from '../services/agendaService';
@@ -235,23 +236,25 @@ export function createServicosRouter(notificar: Notificar) {
 
       const unicas = Array.from(new Set(datas as string[]));
 
-      // Não bloqueia dias com atendimentos marcados no intervalo (férias/folga com clientes agendados)
+      // Não bloqueia dias com atendimentos marcados no intervalo (férias/folga com clientes agendados).
+      // Mesma trava da marcação (agenda do profissional): nenhum agendamento entra entre a conferência e a gravação
       const inicioMin = horarioParaMinutos(horaInicio);
       const fimMin = horarioParaMinutos(horaFim);
-      const comConflito: string[] = [];
-      for (const data of unicas) {
-        const doDia = await agendamentosDoDia(prisma, data, { colaboradorId });
-        if (doDia.some((ag) => ag.inicioMin < fimMin && inicioMin < ag.fimMin)) comConflito.push(data);
-      }
-      if (comConflito.length > 0) {
-        const lista = comConflito.slice(0, 5).map((d) => d.split('-').reverse().join('/')).join(', ');
-        return res.status(409).json({
-          erro: `Há atendimentos marcados em ${comConflito.length} dia(s) do período (${lista}${comConflito.length > 5 ? '…' : ''}). Realoque-os antes de bloquear.`,
-        });
-      }
-      const criados = await prisma.$transaction(unicas.map((data) => prisma.bloqueio.create({
-        data: { data, horaInicio, horaFim, motivo, colaboradorId },
-      })));
+      const criados = await transacaoComTravas(async (tx) => {
+        await travarAgenda(tx, colaboradorId);
+        const comConflito: string[] = [];
+        for (const data of unicas) {
+          const doDia = await agendamentosDoDia(tx, data, { colaboradorId });
+          if (doDia.some((ag) => ag.inicioMin < fimMin && inicioMin < ag.fimMin)) comConflito.push(data);
+        }
+        if (comConflito.length > 0) {
+          const lista = comConflito.slice(0, 5).map((d) => d.split('-').reverse().join('/')).join(', ');
+          throw new HttpError(409, `Há atendimentos marcados em ${comConflito.length} dia(s) do período (${lista}${comConflito.length > 5 ? '…' : ''}). Realoque-os antes de bloquear.`);
+        }
+        const gravados = [];
+        for (const data of unicas) gravados.push(await tx.bloqueio.create({ data: { data, horaInicio, horaFim, motivo, colaboradorId } }));
+        return gravados;
+      });
       notificar();
       res.status(201).json(Array.isArray(req.body?.datas) ? criados : criados[0]);
     } catch (error) {
