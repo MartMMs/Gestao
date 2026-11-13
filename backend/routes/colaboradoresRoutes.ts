@@ -12,7 +12,7 @@ import { transacaoComTravas, travarAgenda } from '../lib/transacao';
 import { prepararBloqueio } from '../lib/privacidade';
 import { INVALIDAR_SESSOES, PAPEIS_ATENDIMENTO, validarSenha } from '../lib/usuarios';
 import { validarDisponibilidadeProfissional } from '../services/agendaService';
-import { partesNoFuso } from '../../shared/agenda';
+import { partesNoFuso, TURNO_REGEX } from '../../shared/agenda';
 import { ESCOPOS } from '../../shared/escopos';
 import { EMAIL_REGEX, MENSAGEM_USUARIO_INVALIDO, USUARIO_REGEX, normalizarNome } from '../../shared/validadores';
 
@@ -100,6 +100,13 @@ const lerCamposEscala = (body: Record<string, unknown>) => {
       throw new HttpError(400, `Tipo de escala inválido. Use: ${TIPOS_ESCALA.join(', ')}.`);
     }
     dados.tipoEscala = body.tipoEscala;
+  }
+  if (body.turnoPadrao !== undefined) {
+    // Vazio ou null apaga (volta ao horário da casa)
+    if (body.turnoPadrao === null || body.turnoPadrao === '') dados.turnoPadrao = null;
+    else if (typeof body.turnoPadrao !== 'string' || !TURNO_REGEX.test(body.turnoPadrao) || body.turnoPadrao.slice(0, 5) === body.turnoPadrao.slice(6)) {
+      throw new HttpError(400, 'Horário de trabalho inválido. Informe entrada e saída diferentes, no formato HH:MM.');
+    } else dados.turnoPadrao = body.turnoPadrao;
   }
   if (typeof body.especialidade === 'string') dados.especialidade = body.especialidade.trim().slice(0, LIMITE_ESPECIALIDADE);
   for (const campo of ['folgasDomingoNoMes', 'cargaHorariaSemanal'] as const) {

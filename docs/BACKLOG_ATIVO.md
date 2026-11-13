@@ -127,6 +127,15 @@ Esforço agregado estimado para roadmap P2 (BLG-008 a BLG-013): 70h a 110h.
   - Critério de aceite: regras de tier calculadas pelo histórico e sinalização operacional na recepção.
   - Fonte: REFACTOR.md
 
+- [ ] BLG-014 - Conectar um provedor real de pagamento do totem (sob demanda).
+  - Responsável: Backend
+  - Critério de aceite: provedor escolhido atende o contrato do adapter HTTP (`backend/services/gatewayPagamento.ts`): `POST {referencia, valor, descricao}` -> `{pixCopiaECola, pixQrCode?, cartaoOnlineDisponivel?}` e webhook assinado devolvendo a `referencia` (id aleatório gravado em `referenciaPagamento`, nunca o token da reserva). Pendente: cancelar a cobrança órfã quando o provedor oferecer. Pré-pronto e desligado por padrão (`PAYMENT_GATEWAY_URL` vazio = pagamento na recepção).
+
+- [ ] BLG-015 - Conectar um provedor real de WhatsApp (sob demanda).
+  - Responsável: Backend
+  - Co-responsável: Produto/Supervisão (consentimento LGPD/opt-out)
+  - Critério de aceite: provedor recebe `POST {telefone, mensagem}` (`backend/services/whatsapp.ts`); confirmação do totem e lembrete 24h entregues. Pré-pronto e desligado por padrão (`WHATSAPP_WEBHOOK_URL` vazio = só log com telefone mascarado). Definir formato do telefone (+55) e opt-out antes de ligar.
+
 ## Itens Encerrados Nesta Consolidação
 
 - Revisão dos checklists antigos com status desatualizado.
@@ -136,3 +145,7 @@ Esforço agregado estimado para roadmap P2 (BLG-008 a BLG-013): 70h a 110h.
 - BLG-004 concluído com validação de lint/build em 09/04/2026.
 - BLG-001 concluído em 12/11/2026 (regra do filtro "Somente de folga" com teste).
 - Trilha de acessos ao histórico de clientes (LGPD) consultável em Relatórios, para supervisão e administração, em 12/11/2026 (`GET /auditoria/acessos-historico`).
+- Código de reserva AG-XXXXXX para todos os agendamentos e busca com Enter na Agenda da Recepção (13/11/2026).
+- Lista "Sem baixa" na Agenda da Recepção (13/11/2026).
+- Regra de folgas por escala no servidor (6x1: uma folga comum por semana; 5x2: dias livres) e horário de trabalho (`turnoPadrao`) no cadastro (13/11/2026).
+- 13ª rodada da banca: APROVADO PRA SUBIR 4/4 (13/11/2026).

@@ -230,9 +230,11 @@ export type SessaoReservaTotem = {
   pixCopiaECola?: string;
   pixQrCode?: string;
   cartaoOnlineDisponivel?: boolean;
+  /** Referência enviada ao gateway e devolvida no webhook (não é o sessionToken) */
+  referenciaPagamento?: string;
 };
 
-type SessaoReserva = Pick<SessaoReservaTotem, 'servicoIds' | 'data' | 'horario' | 'terapeutaId' | 'salaId' | 'valorTotal'>;
+type SessaoReserva = Pick<SessaoReservaTotem, 'servicoIds' | 'data' | 'horario' | 'terapeutaId' | 'salaId' | 'valorTotal' | 'referenciaPagamento'>;
 
 /**
  * Cria o agendamento de uma reserva do totem, revalidando o horário no banco (a recepção pode ter usado
@@ -322,6 +324,7 @@ export const criarAgendamentoTotem = async (
         lockExpiresAt: opcoes.cobranca.comPagamentoOnline ? new Date(Date.now() + PRAZO_PAGAMENTO_MINUTOS * 60_000) : null,
         metodoPagamento: opcoes.cobranca.comPagamentoOnline ? opcoes.metodoPagamento : 'presencial_no_local',
         reservaToken: opcoes.sessionToken,
+        referenciaPagamento: sessao.referenciaPagamento ?? null,
         reservaOrigem: ORIGEM_TOTEM,
         consentimentoDadosEm: cliente.consentimentoEm,
         consentimentoVersao: cliente.consentimentoVersao,

@@ -3,7 +3,7 @@
  * Lógica de cálculo de escalas (6x1, 5x2, 12x36, rotativo)
  */
 
-import { horarioParaMinutos } from './agenda';
+import { diaMesBR, horarioParaMinutos, TURNO_REGEX } from './agenda';
 import { ehFeriado, obterNomeFeriado } from './feriadosBR';
 
 export type TipoEscala = '6x1' | '5x1' | '5x2' | '12x36' | 'rotativo' | 'personalizado';
@@ -285,11 +285,17 @@ export function aplicarFeriadosNaEscala(dias: DiaEscala[]): DiaEscala[] {
 export function gerarEscalaComRegras(
   config: ConfiguracaoEscala,
   numeroDias: number,
-  options?: { folgasDomingoNoMes?: number },
+  options?: { folgasDomingoNoMes?: number; turnoPadrao?: string | null },
 ): DiaEscala[] {
   const diasBase = gerarEscala(config, numeroDias);
   const diasComFeriado = aplicarFeriadosNaEscala(diasBase);
-  return aplicarFolgasDomingoNoMes(diasComFeriado, options?.folgasDomingoNoMes ?? 0);
+  const dias = aplicarFolgasDomingoNoMes(diasComFeriado, options?.folgasDomingoNoMes ?? 0);
+  // Turno padrão do cadastro nos dias de trabalho que a regra não fixou (o 12x36 traz o do plantão). O ajuste do dia
+  // é aplicado depois e tem prioridade; sem turno padrão fica como antes (horário da casa)
+  const turno = options?.turnoPadrao && TURNO_REGEX.test(options.turnoPadrao) ? options.turnoPadrao : null;
+  if (!turno) return dias;
+  const { horaInicio, horaFim } = separarTurno(turno);
+  return dias.map((dia) => (dia.tipo === 'trabalho' && !dia.turno ? { ...dia, turno, horaInicio, horaFim } : dia));
 }
 
 /**
@@ -434,8 +440,17 @@ export const MOTIVOS_AUSENCIA = ['Férias', 'Atestado médico', 'Afastamento'] a
 // 6x1: um descanso por semana (segunda a domingo). Feriado e ausência não contam. 5x2 não tem teto aqui: as duas
 // folgas podem cair em quaisquer dias da semana
 const LIMITE_FOLGAS_POR_SEMANA: Partial<Record<TipoEscala, number>> = { '6x1': 1 };
+export const limiteFolgasPorSemana = (tipo: string | null | undefined) => LIMITE_FOLGAS_POR_SEMANA[tipo as TipoEscala];
 
-const segundaDaSemana = (data: string) => {
+/** Ausência do RH pelo começo da observação: "Férias – 2ª parcela" continua sendo férias */
+// shortcut: o motivo mora no texto da observação, sem campo próprio; criar um campo `motivo` no ajuste se o RH crescer
+export const ehAusencia = (descricao?: string | null) => Boolean(descricao) && MOTIVOS_AUSENCIA.some((m) => descricao!.startsWith(m));
+
+/** Dia que conta como descanso semanal (folga comum: não feriado, não ausência) */
+export const contaComoFolgaSemanal = (dia: DiaEscala) => dia.tipo !== 'trabalho' && !dia.feriadoNome && !ehAusencia(dia.descricao);
+
+/** Segunda-feira (AAAA-MM-DD) da semana do dia */
+export const segundaDaSemana = (data: string) => {
   const d = dataUTC(data);
   d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
   return d.toISOString().slice(0, 10);
@@ -443,13 +458,27 @@ const segundaDaSemana = (data: string) => {
 
 /** Semanas (segunda-feira) que passam do limite de folgas da escala, com as datas de folga de cada uma */
 export function semanasComFolgaDemais(tipo: string | null | undefined, dias: DiaEscala[]): Array<{ semana: string; folgas: string[] }> {
-  const limite = LIMITE_FOLGAS_POR_SEMANA[tipo as TipoEscala];
+  const limite = limiteFolgasPorSemana(tipo);
   if (!limite) return [];
   const porSemana = new Map<string, string[]>();
   for (const dia of dias) {
-    if (dia.tipo === 'trabalho' || dia.feriadoNome || MOTIVOS_AUSENCIA.some((m) => m === dia.descricao)) continue;
+    if (!contaComoFolgaSemanal(dia)) continue;
     const semana = segundaDaSemana(dia.data);
     porSemana.set(semana, [...(porSemana.get(semana) ?? []), dia.data]);
   }
   return [...porSemana].filter(([, folgas]) => folgas.length > limite).map(([semana, folgas]) => ({ semana, folgas: folgas.sort() }));
 }
+
+/**
+ * Semana em que a mudança (antes → depois) deixa mais folgas que o limite e ACRESCENTOU folga. Uma semana que já estava
+ * acima (gravada antes da regra) continua editável e pode ser corrigida aos poucos. Usada pela API e pela tela.
+ */
+export function folgaAcimaDoLimite(tipo: string | null | undefined, antes: DiaEscala[], depois: DiaEscala[]) {
+  const eram = new Map(semanasComFolgaDemais(tipo, antes).map((s) => [s.semana, s.folgas.length]));
+  return semanasComFolgaDemais(tipo, depois).find((s) => s.folgas.length > (eram.get(s.semana) ?? 0)) ?? null;
+}
+
+export const mensagemFolgaAcimaDoLimite = (tipo: string, excesso: { semana: string; folgas: string[] }) => {
+  const limite = limiteFolgasPorSemana(tipo) ?? 0;
+  return `Na escala ${tipo} cabe${limite > 1 ? 'm' : ''} ${limite === 1 ? 'uma folga' : `${limite} folgas`} por semana, e a semana de ${diaMesBR(excesso.semana)} ficaria com folga em ${excesso.folgas.map(diaMesBR).join(' e ')}. Marque um desses dias como trabalho antes, ou use a troca de dias.`;
+};

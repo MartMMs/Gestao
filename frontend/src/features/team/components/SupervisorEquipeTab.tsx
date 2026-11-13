@@ -45,6 +45,10 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   const [newEmpCargo, setNewEmpCargo] = useState('');
   const [newEmpTipoEscala, setNewEmpTipoEscala] = useState<Employee['tipoEscala']>('6x1');
   // number | '' para o campo poder ficar vazio enquanto a pessoa redigita (o valor é validado ao salvar)
+  // Caixinha "Informar horário de trabalho": desmarcada, o profissional segue o horário da casa
+  const [informarHorario, setInformarHorario] = useState(false);
+  const [newEmpEntrada, setNewEmpEntrada] = useState('08:00');
+  const [newEmpSaida, setNewEmpSaida] = useState('17:00');
   const [newEmpFolgasDomingoNoMes, setNewEmpFolgasDomingoNoMes] = useState<number | ''>(2);
   const [newEmpCargaHoraria, setNewEmpCargaHoraria] = useState<number | ''>(40);
   const [newEmpHabilidades, setNewEmpHabilidades] = useState<string[]>([]);
@@ -181,6 +185,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
           ...(pedeSenhaAtual ? { senhaAtual: newEmpSenhaAtual } : {}),
           cargo: newEmpCargo.trim(),
           tipoEscala: newEmpTipoEscala,
+          turnoPadrao: informarHorario ? `${newEmpEntrada}-${newEmpSaida}` : null,
           folgasDomingoNoMes: newEmpFolgasDomingoNoMes,
           cargaHorariaSemanal: newEmpCargaHoraria,
           habilidades: newEmpHabilidades,
@@ -200,6 +205,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
           specialty: '',
           cargo: newEmpCargo.trim(),
           tipoEscala: newEmpTipoEscala,
+          turnoPadrao: informarHorario ? `${newEmpEntrada}-${newEmpSaida}` : null,
           folgasDomingoNoMes: newEmpFolgasDomingoNoMes,
           cargaHorariaSemanal: newEmpCargaHoraria,
           habilidades: newEmpHabilidades,
@@ -232,6 +238,9 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
     setNewEmpSenhaAtual('');
     setNewEmpCargo(emp ? emp.cargo || emp.specialty || '' : '');
     setNewEmpTipoEscala(emp?.tipoEscala || '6x1');
+    setInformarHorario(Boolean(emp?.turnoPadrao));
+    setNewEmpEntrada(emp?.turnoPadrao?.slice(0, 5) || '08:00');
+    setNewEmpSaida(emp?.turnoPadrao?.slice(6) || '17:00');
     setNewEmpFolgasDomingoNoMes(emp?.folgasDomingoNoMes ?? 2);
     setNewEmpCargaHoraria(emp?.cargaHorariaSemanal ?? 40);
     setNewEmpHabilidades(emp?.habilidades || []);
@@ -657,6 +666,28 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                   <option value="12x36">12x36 (12h trab, 36h folga)</option>
                   <option value="rotativo">Rotativo (3 turnos)</option>
                 </select>
+              </div>
+              <div className="rounded-xl border border-outline-variant/20 p-3">
+                <label className="flex items-center gap-2 text-sm text-on-surface">
+                  <input type="checkbox" checked={informarHorario} onChange={e => setInformarHorario(e.target.checked)} />
+                  Informar horário de trabalho
+                </label>
+                {informarHorario ? (
+                  <div className="mt-3 flex items-end gap-3">
+                    <label className="flex-1 text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Entrada
+                      <input type="time" required value={newEmpEntrada} onChange={e => setNewEmpEntrada(e.target.value)} className="block mt-1 w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-2 text-sm" />
+                    </label>
+                    <label className="flex-1 text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Saída
+                      <input type="time" required value={newEmpSaida} onChange={e => setNewEmpSaida(e.target.value)} className="block mt-1 w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-2 text-sm" />
+                    </label>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[11px] text-on-surface-variant">Sem horário, os dias de trabalho seguem o horário da casa.</p>
+                )}
+                {informarHorario && newEmpSaida < newEmpEntrada && (
+                  <p role="status" className="mt-2 text-[11px] font-bold text-error">Saída antes da entrada: vira turno noturno, terminando às {newEmpSaida} do dia seguinte. Confira se não inverteu os horários.</p>
+                )}
+                {informarHorario && <p className="mt-2 text-[11px] text-on-surface-variant">Com a regra de turno acima, os dias de trabalho aparecem com esse horário no calendário do RH e na Timeline. Um ajuste feito num dia tem prioridade.</p>}
               </div>
               <input type="number" min={0} max={5} value={newEmpFolgasDomingoNoMes} onChange={e => setNewEmpFolgasDomingoNoMes(e.target.value === '' ? '' : Number(e.target.value))} placeholder="Folgas de domingo por mês (Ex: 2)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />
               <input type="number" min={1} max={44} value={newEmpCargaHoraria} onChange={e => setNewEmpCargaHoraria(e.target.value === '' ? '' : Number(e.target.value))} placeholder="Carga horária semanal (Ex: 40)" className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-3 text-sm" />

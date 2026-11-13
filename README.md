@@ -37,9 +37,23 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
   dashboard e relatorio usam o mesmo calculo; falta conta o agendado vencido sem baixa.
 - **Privacidade:** comissao escondida de quem nao e supervisor; ficha de cliente excluida nao recebe atendimento
   nem dados; consentimento versionado no totem; senha provisoria.
+- **Codigo de reserva (`AG-XXXXXX`):** todo agendamento tem um, inclusive os criados pela equipe (aparece no titulo de
+  "Editar Agendamento"). Na Agenda da Recepcao, digite o codigo na busca e tecle Enter: a agenda vai para o dia e abre a reserva.
+- **Sem baixa:** botao "Sem baixa (N)" na Agenda da Recepcao (supervisao e recepcao) lista os atendimentos que ja
+  terminaram e ninguem concluiu nem marcou falta; cada item abre o atendimento para dar baixa.
+- **Folgas por escala:** no 6x1 o servidor aceita uma folga comum por semana (segunda a domingo) ao marcar, trocar ou
+  replicar; so recusa quando a operacao acrescenta folga acima do limite (semana antiga com folga a mais continua
+  editavel). Feriado e ausencias do RH (Ferias, Atestado medico, Afastamento) nao contam. No 5x2 as duas folgas podem
+  cair em quaisquer dias. A Grade avisa antes de gravar.
+- **Horario de trabalho no cadastro:** "Informar horario de trabalho" (entrada e saida) no Criar/Editar Usuario grava
+  `turnoPadrao`; o calendario do RH, a Timeline e a agenda mostram esse horario nos dias de trabalho, sem gravar dia a dia.
+  Sem ele, vale o horario da casa, como antes; um ajuste feito no dia tem prioridade.
+- **Auditoria LGPD:** relatorio "Acessos ao historico de clientes" (quem abriu o historico de qual cliente, IP e quando).
+- **Pagamento e WhatsApp pre-prontos:** adapters HTTP genericos, desligados por padrao (ver "Integracoes" abaixo).
 
 > **Antes de subir esta versao:** faca backup do banco e rode `cd backend && npx prisma migrate deploy`
-> (migrations de auditoria, comissao proporcional, troca de senha obrigatoria, consentimento do totem e usuario de acesso).
+> (migrations de auditoria, comissao proporcional, troca de senha obrigatoria, consentimento do totem, usuario de acesso,
+> horario padrao do colaborador `turnoPadrao` e referencia de pagamento `referenciaPagamento`).
 > Veja os detalhes completos em [docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md](docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md).
 
 ## Guias detalhados
@@ -108,6 +122,9 @@ Veja `.env.example`. Principais:
 - `CORS_ORIGINS` opcional (origens aceitas, separadas por virgula)
 - `TRUST_PROXY` opcional (atras de nginx/proxy reverso)
 - `PAYMENT_WEBHOOK_SECRET` (segredo HMAC do gateway; sem ele, pagamentos online ficam "aguardando pagamento")
+- `PAYMENT_GATEWAY_URL` / `PAYMENT_GATEWAY_TOKEN` opcionais: adapter HTTP do gateway (vazio = pagamento na recepcao)
+- `WHATSAPP_WEBHOOK_URL` / `WHATSAPP_WEBHOOK_TOKEN` opcionais: envio por WhatsApp (vazio = so log com telefone mascarado).
+  Em producao as URLs precisam ser `https://` e o token e obrigatorio quando a URL existe
 - `LIMPEZA_AGENDAMENTOS_DIAS` (padrao 30): agendamentos nunca concluidos apos esse prazo viram "no_show"; 0 desativa
 - `E2E_PASSWORD` / `SEED_PASSWORD` (senhas dos usuarios de teste e de demonstracao)
 - `VITE_API_URL` / `VITE_SOCKET_URL` opcionais (aplicadas no build do frontend)
@@ -167,6 +184,27 @@ npm run test:unit
 Testes E2E (precisam do banco e de `E2E_PASSWORD` no `.env`):
 
 ```bash
+## Integracoes (pagamento e WhatsApp)
+
+Nenhum SDK de terceiro: os dois pontos de extensao sao adapters HTTP genericos, desligados enquanto a URL estiver vazia.
+Para ligar um provedor real, aponte a URL para ele ou para um servico intermediario seu que traduza o contrato.
+
+**Gateway de pagamento** (`backend/services/gatewayPagamento.ts`), ativo com `PAYMENT_GATEWAY_URL` e `PAYMENT_WEBHOOK_SECRET`:
+
+- `POST PAYMENT_GATEWAY_URL` com `Authorization: Bearer PAYMENT_GATEWAY_TOKEN` e corpo `{ referencia, valor, descricao }`;
+  resposta `{ pixCopiaECola, pixQrCode?, cartaoOnlineDisponivel? }` (8 s de limite).
+- `referencia` e um id aleatorio da cobranca (gravado em `referenciaPagamento`); nunca o token da reserva do totem, que e credencial.
+  O webhook devolve a mesma `referencia` (ou `agendamentoId`; se vierem os dois, precisam ser do mesmo agendamento).
+- Gateway fora do ar: a reserva e liberada na hora e o totem recebe 503 ("tente de novo").
+
+**WhatsApp** (`backend/services/whatsapp.ts`), ativo com `WHATSAPP_WEBHOOK_URL`:
+
+- `POST WHATSAPP_WEBHOOK_URL` com `Authorization: Bearer WHATSAPP_WEBHOOK_TOKEN` e corpo `{ telefone, mensagem }`.
+- Confirmacao da reserva do totem e lembrete 24 h antes (job a cada 10 min, ate 200 por rodada, uma rodada por vez;
+  cada agendamento recebe no maximo um lembrete, marcado no Redis).
+- As mensagens levam so o primeiro nome, dia, hora e o codigo da reserva: nada de servico, profissional ou sala.
+- Antes de ligar: definir o formato do telefone que o provedor exige (ex.: `+55`) e o consentimento/opt-out (LGPD).
+
 npm --prefix backend run seed:ci   # cria admin@serenidade.com, helena e ana com a senha E2E_PASSWORD
 npm run test:e2e
 ```
@@ -198,8 +236,7 @@ Atalhos locais (`Gestao-*.desktop`, tasks do VS Code) podem ser criados por cada
 - Split frontend/backend concluido.
 - Refatoracao por features em andamento com entregas principais aplicadas.
 - Pendencias de consolidacao:
-   - integrar um gateway de pagamento real ao webhook assinado
-   - envio de lembretes por WhatsApp
+   - conectar provedores reais de pagamento e WhatsApp (pontos de extensao prontos e desligados por padrao; ver BLG-014/015)
 
 ## Documentacao relacionada
 

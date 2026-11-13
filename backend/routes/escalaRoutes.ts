@@ -4,9 +4,9 @@ import { prisma } from '../db';
 import { getUsuario, usuarioEhSupervisor, verificarSupervisorToken, verificarToken } from '../auth';
 import { HttpError, responderErro, type Notificar } from '../lib/http';
 import { transacaoComTravas, travarAgenda, travarChave } from '../lib/transacao';
-import { dataValida, horarioParaMinutos, partesNoFuso, TURNO_PADRAO, TURNO_REGEX } from '../../shared/agenda';
+import { dataValida, diaMesBR, horarioParaMinutos, partesNoFuso, TURNO_PADRAO, TURNO_REGEX } from '../../shared/agenda';
 import { agendamentosDoDia } from '../services/agendaService';
-import { aplicarAjusteEscala, gerarEscalaComRegras, semanasComFolgaDemais, type TipoEscala as TipoContrato } from '../../shared/escala';
+import { aplicarAjusteEscala, folgaAcimaDoLimite, gerarEscalaComRegras, limiteFolgasPorSemana, mensagemFolgaAcimaDoLimite, segundaDaSemana, type TipoEscala as TipoContrato } from '../../shared/escala';
 import { analisarConformidadeCLT } from '../../shared/clt';
 
 type TipoEscala = 'trabalho' | 'folga' | 'fds';
@@ -72,62 +72,66 @@ const gravarDiaValidado = async (tx: Prisma.TransactionClient, colaboradorId: st
 
 const TIPOS_CONTRATO: TipoContrato[] = ['6x1', '5x2', '5x1', '12x36', 'rotativo'];
 
-// Escala do mês do profissional (contrato + ajustes salvos) analisada com as mesmas regras de CLT da tela.
-// A API não bloqueia (a supervisão decide), mas devolve os alertas: a regra não depende mais só do frontend.
-const alertasCltDoMes = async (tx: Prisma.TransactionClient, colaboradorId: string, data: string): Promise<string[]> => {
-  const colaborador = await tx.colaborador.findUnique({ where: { id: colaboradorId } });
-  if (!colaborador) return [];
-  // Tipo de contrato desconhecido não vira 6x1 em silêncio: sem contrato válido não há o que analisar
-  if (!TIPOS_CONTRATO.includes(colaborador.tipoEscala as TipoContrato)) return [];
-  const mes = data.slice(0, 7);
-  const [ano, numeroMes] = mes.split('-').map(Number);
-  // Inclui a última semana do mês anterior: descanso e 7º dia atravessam a virada do mês. A malha é gerada desde o
-  // dia 1 do mês anterior e depois recortada, para as folgas de domingo daquele mês saírem iguais às da tela dele.
-  const inicioGeracao = new Date(Date.UTC(ano, numeroMes - 2, 1)).toISOString().slice(0, 10);
-  const inicioIso = new Date(Date.UTC(ano, numeroMes - 1, 1 - 7)).toISOString().slice(0, 10);
-  const fimIso = new Date(Date.UTC(ano, numeroMes, 0)).toISOString().slice(0, 10);
-  const totalDias = Math.round((Date.parse(fimIso) - Date.parse(inicioGeracao)) / 86_400_000) + 1;
-  const base = gerarEscalaComRegras(
-    { tipo: colaborador.tipoEscala as TipoContrato, dataInicio: inicioGeracao },
-    totalDias,
-    { folgasDomingoNoMes: colaborador.folgasDomingoNoMes ?? 2 },
-  ).filter((dia) => dia.data >= inicioIso);
+type Contrato = { id: string; tipoEscala: string | null; folgasDomingoNoMes: number | null; turnoPadrao: string | null };
+
+// Tipo de contrato desconhecido não vira 6x1 em silêncio: sem contrato válido não há o que analisar
+const contratoDe = async (tx: Prisma.TransactionClient, colaboradorId: string): Promise<Contrato | null> => {
+  const c = await tx.colaborador.findUnique({ where: { id: colaboradorId }, select: { id: true, tipoEscala: true, folgasDomingoNoMes: true, turnoPadrao: true } });
+  return c && TIPOS_CONTRATO.includes(c.tipoEscala as TipoContrato) ? c : null;
+};
+
+// Escala efetiva (contrato + ajustes salvos) de `de` a `ate`, a mesma da tela. Gerada desde o dia 1 do mês anterior a
+// `de` e recortada: as folgas de domingo de cada mês saem iguais às da tela daquele mês
+const malhaEfetiva = async (tx: Prisma.TransactionClient, c: Contrato, de: string, ate: string) => {
+  const [ano, mes] = de.split('-').map(Number);
+  const inicioGeracao = new Date(Date.UTC(ano, mes - 2, 1)).toISOString().slice(0, 10);
+  const totalDias = Math.round((Date.parse(ate) - Date.parse(inicioGeracao)) / 86_400_000) + 1;
   const ajustes = new Map(
-    (await tx.escalaOverride.findMany({ where: { colaboradorId, data: { gte: inicioIso, lte: fimIso } } })).map((o) => [o.data, o]),
+    (await tx.escalaOverride.findMany({ where: { colaboradorId: c.id, data: { gte: de, lte: ate } } })).map((o) => [o.data, o]),
   );
-  const analise = analisarConformidadeCLT(
-    base.map((dia) => aplicarAjusteEscala(dia, ajustes.get(dia.data))),
-    { tipoEscala: colaborador.tipoEscala ?? undefined },
-  );
+  return gerarEscalaComRegras(
+    { tipo: c.tipoEscala as TipoContrato, dataInicio: inicioGeracao },
+    totalDias,
+    { folgasDomingoNoMes: c.folgasDomingoNoMes ?? 2, turnoPadrao: c.turnoPadrao },
+  ).filter((dia) => dia.data >= de).map((dia) => aplicarAjusteEscala(dia, ajustes.get(dia.data)));
+};
+
+const somarDias = (data: string, dias: number) => new Date(Date.parse(`${data}T12:00:00Z`) + dias * 86_400_000).toISOString().slice(0, 10);
+
+// Escala do mês do profissional analisada com as mesmas regras de CLT da tela, incluindo a última semana do mês
+// anterior (descanso e 7º dia atravessam a virada). A API não bloqueia (a supervisão decide), mas devolve os alertas
+const alertasCltDoMes = async (tx: Prisma.TransactionClient, colaboradorId: string, data: string): Promise<string[]> => {
+  const c = await contratoDe(tx, colaboradorId);
+  if (!c) return [];
+  const [ano, mes] = data.slice(0, 7).split('-').map(Number);
+  const fimDoMes = new Date(Date.UTC(ano, mes, 0)).toISOString().slice(0, 10);
+  const analise = analisarConformidadeCLT(await malhaEfetiva(tx, c, somarDias(`${data.slice(0, 7)}-01`, -7), fimDoMes), { tipoEscala: c.tipoEscala ?? undefined });
   return analise.statusGeral ? [] : analise.resumo;
 };
 
-const dataBR = (data: string) => data.split('-').reverse().join('/').slice(0, 5);
 
-// Conferido depois de todas as gravações da operação (uma troca no meio fica com duas folgas por um instante).
-// A malha sai do dia 1 do mês, como na tela, e cobre as semanas inteiras das datas gravadas
-const conferirFolgasDaSemana = async (tx: Prisma.TransactionClient, colaboradorId: string, datas: string[]) => {
-  const colaborador = await tx.colaborador.findUnique({ where: { id: colaboradorId }, select: { tipoEscala: true, folgasDomingoNoMes: true } });
-  if (!colaborador || !TIPOS_CONTRATO.includes(colaborador.tipoEscala as TipoContrato)) return;
-  for (const data of new Set(datas)) {
-    const d = new Date(`${data}T12:00:00Z`);
-    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
-    const segunda = d.toISOString().slice(0, 10);
-    d.setUTCDate(d.getUTCDate() + 6);
-    const domingo = d.toISOString().slice(0, 10);
-    const inicioGeracao = `${segunda.slice(0, 7)}-01`;
-    const totalDias = Math.round((Date.parse(domingo) - Date.parse(inicioGeracao)) / 86_400_000) + 1;
-    const ajustes = new Map(
-      (await tx.escalaOverride.findMany({ where: { colaboradorId, data: { gte: segunda, lte: domingo } } })).map((o) => [o.data, o]),
-    );
-    const semana = gerarEscalaComRegras({ tipo: colaborador.tipoEscala as TipoContrato, dataInicio: inicioGeracao }, totalDias, { folgasDomingoNoMes: colaborador.folgasDomingoNoMes ?? 2 })
-      .filter((dia) => dia.data >= segunda)
-      .map((dia) => aplicarAjusteEscala(dia, ajustes.get(dia.data)));
-    const [excesso] = semanasComFolgaDemais(colaborador.tipoEscala, semana);
-    if (excesso) {
-      throw new HttpError(409, `Na escala ${colaborador.tipoEscala} cabe uma folga por semana, e a semana de ${dataBR(segunda)} ficaria com folga em ${excesso.folgas.map(dataBR).join(' e ')}. Marque um desses dias como trabalho antes, ou use a troca de dias.`);
-    }
-  }
+// Escala das semanas inteiras (segunda a domingo) das datas
+const semanasDe = async (tx: Prisma.TransactionClient, c: Contrato, datas: string[]) => {
+  const dias = [];
+  for (const segunda of new Set(datas.map(segundaDaSemana))) dias.push(...await malhaEfetiva(tx, c, segunda, somarDias(segunda, 6)));
+  return dias;
+};
+
+/**
+ * Regra do 6x1 (uma folga por semana, shared/escala.ts folgaAcimaDoLimite): lida ANTES das gravações e conferida
+ * DEPOIS de todas (uma troca no meio fica com duas folgas por um instante).
+ */
+const vigiarFolgasDaSemana = async (tx: Prisma.TransactionClient, colaboradorId: string, datas: string[]) => {
+  const c = await contratoDe(tx, colaboradorId);
+  const limite = limiteFolgasPorSemana(c?.tipoEscala);
+  if (!c || !limite) return async () => {};
+  // Trava da semana (além da do dia): duas abas marcando folga em dias diferentes da mesma semana não passam juntas
+  for (const segunda of [...new Set(datas.map(segundaDaSemana))].sort()) await travarChave(tx, `escala-semana:${colaboradorId}:${segunda}`);
+  const antes = await semanasDe(tx, c, datas);
+  return async () => {
+    const excesso = folgaAcimaDoLimite(c.tipoEscala, antes, await semanasDe(tx, c, datas));
+    if (excesso) throw new HttpError(409, mensagemFolgaAcimaDoLimite(c.tipoEscala!, excesso));
+  };
 };
 
 const garantirColaborador = async (colaboradorId: unknown) => {
@@ -167,8 +171,9 @@ export function createEscalaRouter(notificar: Notificar) {
 
       const { salvo, alertasClt } = await transacaoComTravas(async (tx) => {
         await travarChave(tx, `escala:${chaveEscala(colaboradorId, data)}`);
+        const conferirFolgas = await vigiarFolgasDaSemana(tx, colaboradorId, [data]);
         const gravado = await gravarDiaValidado(tx, colaboradorId, data, dia);
-        await conferirFolgasDaSemana(tx, colaboradorId, [data]);
+        await conferirFolgas();
         return { salvo: gravado, alertasClt: await alertasCltDoMes(tx, colaboradorId, data) };
       });
       notificar();
@@ -200,12 +205,15 @@ export function createEscalaRouter(notificar: Notificar) {
         const diaOrigem = await lerDia(from);
         const diaDestino = await lerDia(to);
 
+        const mesmoColaborador = from.colaboradorId === to.colaboradorId;
+        const conferirOrigem = await vigiarFolgasDaSemana(tx, from.colaboradorId, mesmoColaborador ? [from.data, to.data] : [from.data]);
+        const conferirDestino = mesmoColaborador ? async () => {} : await vigiarFolgasDaSemana(tx, to.colaboradorId, [to.data]);
         const gravados = {
           from: await gravarDiaValidado(tx, from.colaboradorId, from.data, diaDestino),
           to: await gravarDiaValidado(tx, to.colaboradorId, to.data, diaOrigem),
         };
-        await conferirFolgasDaSemana(tx, from.colaboradorId, from.colaboradorId === to.colaboradorId ? [from.data, to.data] : [from.data]);
-        if (to.colaboradorId !== from.colaboradorId) await conferirFolgasDaSemana(tx, to.colaboradorId, [to.data]);
+        await conferirOrigem();
+        await conferirDestino();
         const alertasClt = [
           ...await alertasCltDoMes(tx, from.colaboradorId, from.data),
           ...(to.colaboradorId !== from.colaboradorId || to.data.slice(0, 7) !== from.data.slice(0, 7)
@@ -237,9 +245,10 @@ export function createEscalaRouter(notificar: Notificar) {
         const origem = normalizarDia(salvo) ?? normalizarDia(source);
         if (!origem) throw new HttpError(404, 'Dia de origem não encontrado para replicação.');
 
+        const conferirFolgas = await vigiarFolgasDaSemana(tx, colaboradorId, targetDates);
         const criados = [];
         for (const alvo of new Set<string>(targetDates)) criados.push(await gravarDiaValidado(tx, colaboradorId, alvo, origem));
-        await conferirFolgasDaSemana(tx, colaboradorId, targetDates);
+        await conferirFolgas();
         const meses = [...new Set<string>(targetDates.map((alvo: string) => alvo.slice(0, 7)))];
         const alertasClt: string[] = [];
         for (const mes of meses) alertasClt.push(...await alertasCltDoMes(tx, colaboradorId, `${mes}-01`));

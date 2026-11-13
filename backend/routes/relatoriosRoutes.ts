@@ -225,10 +225,11 @@ export function createRelatoriosRouter() {
       ]);
       const [colaboradores, clientes] = await Promise.all([
         prisma.colaborador.findMany({ where: { id: { in: [...new Set(acessos.map((a) => a.colaboradorId))] } }, select: { id: true, nome: true } }),
-        prisma.cliente.findMany({ where: { id: { in: [...new Set(acessos.map((a) => a.clienteId))] } }, select: { id: true, nome: true } }),
+        prisma.cliente.findMany({ where: { id: { in: [...new Set(acessos.map((a) => a.clienteId))] } }, select: { id: true, nome: true, codigo: true, removidoEm: true } }),
       ]);
       const nomeColaborador = new Map(colaboradores.map((c) => [c.id, c.nome]));
-      const nomeDoCliente = new Map(clientes.map((c) => [c.id, c.nome]));
+      // Cliente excluído com histórico fica anonimizado (removidoEm): aparece pelo código, que continua na trilha
+      const nomeDoCliente = new Map(clientes.map((c) => [c.id, c.removidoEm ? `Cliente #${c.codigo} (dados removidos)` : c.nome]));
       res.json({
         total,
         pagina,
@@ -239,7 +240,7 @@ export function createRelatoriosRouter() {
           ip: a.ip,
           registros: a.registros,
           colaboradorNome: nomeColaborador.get(a.colaboradorId) ?? 'Usuário removido',
-          clienteNome: nomeDoCliente.get(a.clienteId) ?? 'Cliente removido',
+          clienteNome: nomeDoCliente.get(a.clienteId) ?? 'Cliente excluído',
         })),
       });
     } catch (error) {

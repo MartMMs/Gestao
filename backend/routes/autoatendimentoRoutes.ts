@@ -18,7 +18,7 @@ import {
   mensagemIndisponibilidadeEscala, mensagemForaDoTurno,
   verificarCLTInterjornadaEmMemoria,
 } from '../services/agendaService';
-import { HttpError, responderErro, ipDoCliente } from '../lib/http';
+import { HttpError, ServicoIndisponivelError, responderErro, ipDoCliente } from '../lib/http';
 import { redactSensitiveData } from '../../shared/redact';
 import {
   PAPEIS_ATENDIMENTO,
@@ -381,9 +381,22 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       // Com pagamento online, a cobrança (código Pix etc.) vem do gateway do banco; o totem nunca monta uma
       if (cobraOnline && gatewayPagamento) {
         // Uma cobrança para cada opção do checkout (sinal ou integral): o código mostrado tem o valor que o cliente escolher
-        const sinal = await gatewayPagamento.criarCobranca({ sessionToken, valor: valorSinal, descricao: sessao.servicoNome });
-        const integral = await gatewayPagamento.criarCobranca({ sessionToken, valor: resumo.valorTotal, descricao: `${sessao.servicoNome} (integral)` });
-        Object.assign(sessao, sinal, { pixCopiaEColaIntegral: integral.pixCopiaECola, pixQrCodeIntegral: integral.pixQrCode });
+        // Referência própria: o sessionToken lê, confirma e cancela a reserva, então não vai para terceiros
+        const referencia = crypto.randomUUID();
+        sessao.referenciaPagamento = referencia;
+        try {
+          const sinal = await gatewayPagamento.criarCobranca({ referencia, valor: valorSinal, descricao: sessao.servicoNome });
+          const integral = await gatewayPagamento.criarCobranca({ referencia, valor: resumo.valorTotal, descricao: `${sessao.servicoNome} (integral)` });
+          Object.assign(sessao, sinal, { pixCopiaEColaIntegral: integral.pixCopiaECola, pixQrCodeIntegral: integral.pixQrCode });
+        } catch (erro) {
+          // Sem cobrança o cliente não consegue pagar: solta o horário na hora, em vez de deixá-lo preso até expirar
+          // shortcut: se o sinal foi criado e o integral falhou, a cobrança do sinal fica aberta no gateway (o código não
+          // aparece na tela, e um pagamento nela dá 404 no webhook); acrescentar cancelarCobranca ao contrato quando o
+          // provedor real oferecer
+          await liberarReserva(sessionToken, { lockKeys });
+          console.error('[PAGAMENTO] Falha ao criar a cobrança:', erro instanceof Error ? erro.message : erro);
+          throw new ServicoIndisponivelError();
+        }
       }
       await redisService.setSession(`reserva:${sessionToken}`, sessao, ttlSegundos);
 
@@ -482,7 +495,10 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         try {
           await liberarReserva(sessionToken, sessao);
           await redisService.setSession(chaveResultado, resposta, TTL_RESULTADO_SEGUNDOS);
-          await communicationService.enqueueTransactionalNotifications(voucher);
+          // Sem esperar: um provedor lento não pode atrasar o voucher na tela do totem
+          communicationService.enviarConfirmacao(voucher).catch((erro: unknown) => {
+            console.error('[WHATSAPP] Falha ao enviar a confirmação:', erro instanceof Error ? erro.message : 'erro desconhecido');
+          });
         } catch (error) {
           console.error('[TOTEM] Agendamento criado, mas a finalização falhou:', redactSensitiveData(error));
         }
@@ -519,7 +535,8 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
   /**
    * Webhook do gateway de pagamento. Exige `x-webhook-timestamp` (segundos, até 5 min de diferença) e
    * `x-webhook-signature` = HMAC-SHA256 de `${timestamp}.${corpo}` com PAYMENT_WEBHOOK_SECRET.
-   * Corpo: { event: 'payment.succeeded', agendamentoId, valorPago, tipo: 'sinal' | 'integral' }
+   * Corpo: { event: 'payment.succeeded', agendamentoId | referencia, valorPago, tipo: 'sinal' | 'integral' }
+   * `referencia` é o que o gateway recebeu ao criar a cobrança (aleatória, gravada em referenciaPagamento).
    * Só confirma uma vez (reenvios não mudam nada) e o valor pago precisa cobrir o valor cobrado.
    */
   router.post('/webhook-pagamento', async (req, res) => {
@@ -531,18 +548,24 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         return limite.allowed ? res.status(401).json({ erro: 'Assinatura inválida.' }) : res.status(429).json({ erro: 'Muitas chamadas ao webhook.' });
       }
 
-      const { event, agendamentoId, valorPago, tipo } = req.body ?? {};
+      const { event, valorPago, tipo, referencia } = req.body ?? {};
+      const idInformado: unknown = req.body?.agendamentoId;
       if (event !== 'payment.succeeded') return res.json({ received: true });
-      if (typeof agendamentoId !== 'string') return res.status(400).json({ erro: 'agendamentoId obrigatório.' });
+      if (typeof idInformado !== 'string' && typeof referencia !== 'string') return res.status(400).json({ erro: 'agendamentoId ou referencia obrigatório.' });
       if (tipo !== 'sinal' && tipo !== 'integral') return res.status(400).json({ erro: 'tipo deve ser "sinal" ou "integral".' });
       const valor = Number(valorPago);
       if (!Number.isFinite(valor) || valor <= 0) return res.status(400).json({ erro: 'valorPago inválido.' });
 
       const agendamento = await prisma.agendamento.findUnique({
-        where: { id: agendamentoId },
-        select: { valorSinal: true, valorTotal: true, statusPagamento: true, status: true },
+        where: typeof idInformado === 'string' ? { id: idInformado } : { referenciaPagamento: referencia as string },
+        select: { id: true, valorSinal: true, valorTotal: true, statusPagamento: true, status: true, referenciaPagamento: true },
       });
       if (!agendamento) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
+      // Os dois informados precisam ser do mesmo agendamento
+      if (typeof idInformado === 'string' && typeof referencia === 'string' && agendamento.referenciaPagamento !== referencia) {
+        return res.status(404).json({ erro: 'Agendamento não encontrado.' });
+      }
+      const agendamentoId = agendamento.id;
       // Reenvio de um pagamento já registrado (mesmo tipo) não muda nada, nem depois de cancelado
       const jaRegistrado = agendamento.statusPagamento === 'integral_pago' || agendamento.statusPagamento === 'pago_apos_expirar'
         || (tipo === 'sinal' && agendamento.statusPagamento === 'sinal_pago');

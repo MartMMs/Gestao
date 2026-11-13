@@ -19,6 +19,8 @@ model Colaborador {
   especialidade String
   cargo         String?
   tipoEscala    String?       @default("6x1")
+  // Horário padrão dos dias de trabalho ("HH:MM-HH:MM"); nulo = sem turno (horário da casa). Ajuste do dia tem prioridade
+  turnoPadrao   String?
   folgasDomingoNoMes Int?     @default(2)
   cargaHorariaSemanal Int?    @default(40)
   habilidades   String[]      @default([])
@@ -105,6 +107,8 @@ model Agendamento {
   atualizadoEm     DateTime    @default(now()) @updatedAt
   // Reserva do totem que originou o agendamento (garante uma confirmação por reserva)
   reservaToken     String?     @unique
+  // Referência da cobrança no gateway (aleatória): o token da reserva é credencial e não sai do servidor
+  referenciaPagamento String?  @unique
 
   colaborador   Colaborador @relation(fields: [colaboradorId], references: [id])
   cliente       Cliente     @relation(fields: [clienteId], references: [id])

@@ -109,3 +109,10 @@ export function analisarMes(escala: DiaEscala[], prefixoMes: string, tipoEscala?
     diasSemTurno: doMes.filter((dia) => dia.tipo === 'trabalho' && !turnoDoDia(dia)).length,
   };
 }
+
+/**
+ * Ordem de gravação de vários dias: trabalho antes de folga. No 6x1 o servidor recusa a operação que deixa a semana
+ * com uma folga a mais, e gravar a folga nova antes de o domingo virar trabalho passaria por esse estado.
+ */
+export const trabalhoAntesDeFolga = (a: { tipo?: string } | undefined, b: { tipo?: string } | undefined) =>
+  Number(a?.tipo !== 'trabalho') - Number(b?.tipo !== 'trabalho');

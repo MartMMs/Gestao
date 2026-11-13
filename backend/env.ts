@@ -8,6 +8,21 @@ dotenv.config({ path: path.resolve(__dirname, '../.env'), quiet: true });
 
 const producao = process.env.NODE_ENV === 'production';
 
+// URL de integração externa (gateway, WhatsApp): vazia desliga. Em produção só HTTPS, porque leva token e dados de cliente
+const lerUrlIntegracao = (nome: string): string => {
+  const valor = (process.env[nome] || '').trim();
+  if (!valor) return '';
+  let url: URL;
+  try {
+    url = new URL(valor);
+  } catch {
+    // Sem repetir o valor: a URL pode trazer credencial (usuário:senha@ ou ?token=) e iria para o log do boot
+    throw new Error(`${nome} inválida: informe uma URL completa (https://...).`);
+  }
+  if (url.protocol !== 'https:' && (producao || url.protocol !== 'http:')) throw new Error(`${nome} precisa usar https://.`);
+  return url.toString();
+};
+
 // Validade do token: "30m", "2h", "1d" ou segundos. Nunca passa de 12h (token não é revogável antes de expirar).
 const JWT_EXPIRES_MAX_SEGUNDOS = 12 * 60 * 60;
 const lerValidadeToken = (valor: string | undefined): number => {
@@ -54,6 +69,10 @@ export const config = {
   loginMaxDesafiosPorMinutoIp: inteiroPositivo(process.env.LOGIN_MAX_DESAFIOS_POR_MINUTO_IP, 120),
   totemMaxRequisicoesPorMinuto: Number(process.env.TOTEM_MAX_REQUISICOES_POR_MINUTO) || 60,
   pagamentoWebhookSecret: process.env.PAYMENT_WEBHOOK_SECRET || '',
+  pagamentoGatewayUrl: lerUrlIntegracao('PAYMENT_GATEWAY_URL'),
+  pagamentoGatewayToken: process.env.PAYMENT_GATEWAY_TOKEN || '',
+  whatsappUrl: lerUrlIntegracao('WHATSAPP_WEBHOOK_URL'),
+  whatsappToken: process.env.WHATSAPP_WEBHOOK_TOKEN || '',
 };
 
 // Em produção, falha no boot em vez de rodar com padrões pensados para a rede local de desenvolvimento
@@ -88,5 +107,8 @@ export const validarConfigProducao = (): string[] => {
   // Valores do CI (1000) copiados para o servidor deixariam a força bruta por IP praticamente livre
   if (config.loginMaxTentativasIp > 200) erros.push('LOGIN_MAX_TENTATIVAS_IP acima de 200 não é aceito em produção.');
   if (config.loginMaxDesafiosPorMinutoIp > 300) erros.push('LOGIN_MAX_DESAFIOS_POR_MINUTO_IP acima de 300 não é aceito em produção.');
+  // Sem token, o servidor subiria e só falharia (401 do provedor) com o cliente na frente do totem
+  if (config.pagamentoGatewayUrl && !config.pagamentoGatewayToken) erros.push('PAYMENT_GATEWAY_TOKEN é obrigatório quando PAYMENT_GATEWAY_URL está definida.');
+  if (config.whatsappUrl && !config.whatsappToken) erros.push('WHATSAPP_WEBHOOK_TOKEN é obrigatório quando WHATSAPP_WEBHOOK_URL está definida.');
   return erros;
 };

@@ -11,6 +11,10 @@ import { configurarSocket, criarEventos } from './lib/eventos';
 import { hostDaRequisicao, responderErro } from './lib/http';
 import { redactSensitiveData } from '../shared/redact';
 import { ESCOPOS } from '../shared/escopos';
+import { LIMITE_LEMBRETES_POR_RODADA, enviarLembretes, filtroLembretes } from './services/whatsapp';
+import { whatsapp } from './services/communicationService';
+import { getEmpresaConfig } from './services/configService';
+import { redisService } from './services/redisService';
 
 // Falha cedo: sem segredo JWT forte qualquer um poderia forjar tokens
 try {
@@ -128,6 +132,36 @@ const manutencaoAgenda = async () => {
   }
 };
 setInterval(manutencaoAgenda, 5 * 60 * 1000);
+
+// Lembrete de 24h por WhatsApp (só com WHATSAPP_WEBHOOK_URL). Marca antes de enviar: na falha, não repete (melhor
+// perder um lembrete que mandar vários). A marca dura 2 dias, mais que a janela de 24h.
+let lembretesRodando = false;
+const lembretesWhatsapp = async () => {
+  // Provedor lento (8 s por envio) pode passar dos 10 min do intervalo: uma rodada por vez
+  if (lembretesRodando) return;
+  lembretesRodando = true;
+  try {
+    const enviados = await enviarLembretes({
+      provider: whatsapp,
+      empresa: (await getEmpresaConfig()).nomeEmpresa,
+      agora: new Date(),
+      buscar: async (de, ate) => (await prisma.agendamento.findMany({
+        where: filtroLembretes(de, ate),
+        select: { id: true, data: true, cliente: { select: { nome: true, telefone: true } } },
+        orderBy: { data: 'asc' },
+        take: LIMITE_LEMBRETES_POR_RODADA,
+      })).map((ag) => ({ id: ag.id, data: ag.data, clienteNome: ag.cliente.nome, clienteTelefone: ag.cliente.telefone })),
+      marcarUmaVez: (id) => redisService.acquireLock(`lembrete-24h:${id}`, 2 * 86_400, '1'),
+      registrarFalha: (id, erro) => console.error(`[WHATSAPP] Lembrete do agendamento ${id} não enviado:`, erro instanceof Error ? erro.message : 'erro desconhecido'),
+    });
+    if (enviados > 0) console.log(`[WHATSAPP] ${enviados} lembrete(s) enviado(s).`);
+  } catch (error) {
+    console.error('🚨 Erro nos lembretes por WhatsApp:', redactSensitiveData(error));
+  } finally {
+    lembretesRodando = false;
+  }
+};
+if (whatsapp.ativo) setInterval(lembretesWhatsapp, 10 * 60 * 1000);
 
 // Porta definida no .env (padrão 3333)
 const PORT = config.porta;

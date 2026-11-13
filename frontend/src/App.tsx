@@ -369,7 +369,7 @@ export default function App() {
             dataInicio: firstDay,
           },
           daysInMonth,
-          { folgasDomingoNoMes: emp.folgasDomingoNoMes ?? 2 },
+          { folgasDomingoNoMes: emp.folgasDomingoNoMes ?? 2, turnoPadrao: emp.turnoPadrao },
         );
 
         const malha = diasComRegras.map((dia) => applyOverrideToDia(emp.id, dia));

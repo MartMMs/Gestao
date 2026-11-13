@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Employee, TurnoSwapRequest, TurnoSwapStatus, EmployeeUpdate } from '../../../types';
 import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import { aplicarAjusteEscala, gerarEscalaComRegras, type DiaEscala } from '../../../utils/escalaCalculator';
-import { categoriaDoDia, turnoDoDia } from '../utils/turnos';
+import { categoriaDoDia, trabalhoAntesDeFolga, turnoDoDia } from '../utils/turnos';
 import { analisarConformidadeCLT } from '../../../utils/cltValidator';
 import { isTeamMember } from '../../../utils/formatters';
 import type { ScaleOverridePayload } from '../../../api';
@@ -172,7 +172,7 @@ export function usePlanejamentoEscala({
         dataInicio: firstDay,
       },
       daysInMonth,
-      { folgasDomingoNoMes: options?.folgasDomingoNoMes ?? employee.folgasDomingoNoMes ?? 2 },
+      { folgasDomingoNoMes: options?.folgasDomingoNoMes ?? employee.folgasDomingoNoMes ?? 2, turnoPadrao: employee.turnoPadrao },
     );
 
     return diasComRegras.map((dia) => applyOverrideToDia(employeeId, dia));
@@ -650,8 +650,7 @@ export function usePlanejamentoEscala({
       const failedKeys: string[] = [];
       const motivos: string[] = [];
 
-      // Trabalho antes de folga: no 6x1 o servidor recusa a semana que fica com duas folgas, mesmo por um instante
-      const ordenadas = [...suggestedPlanningKeys].sort((a, b) => Number(planningOverrides[a]?.tipo !== 'trabalho') - Number(planningOverrides[b]?.tipo !== 'trabalho'));
+      const ordenadas = [...suggestedPlanningKeys].sort((a, b) => trabalhoAntesDeFolga(planningOverrides[a], planningOverrides[b]));
       for (const key of ordenadas) {
         const override = planningOverrides[key];
         if (!override) continue;

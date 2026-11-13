@@ -1,5 +1,6 @@
 import { prisma } from '../db';
 import { config as ambiente } from '../env';
+import { criarGatewayHttp } from './gatewayPagamento';
 
 // Configurações padrão criadas na primeira leitura (fonte única para API interna e totem)
 
@@ -43,15 +44,17 @@ export const getAutoatendimentoConfig = () => prisma.configuracaoAutoatendimento
   create: AUTOATENDIMENTO_PADRAO,
 });
 
-// Integração com o banco: quem conectar a API implementa a criação da cobrança aqui (gera o Pix "copia e cola" e,
-// se houver, o checkout de cartão) e a registra em gatewayPagamento. Sem integração, nada é cobrado online.
+// Integração com o banco: a cobrança (Pix "copia e cola" e, se houver, checkout de cartão) vem do adapter HTTP de
+// gatewayPagamento.ts quando PAYMENT_GATEWAY_URL está definida. Sem ela, nada é cobrado online.
 export type CobrancaGateway = { pixCopiaECola?: string; pixQrCode?: string; cartaoOnlineDisponivel?: boolean };
 // Na sessão do totem: a cobrança do sinal fica nos campos acima e a do valor integral aqui
 export type CobrancasDaReserva = CobrancaGateway & { pixCopiaEColaIntegral?: string; pixQrCodeIntegral?: string };
 export type GatewayPagamento = {
-  criarCobranca: (reserva: { sessionToken: string; valor: number; descricao: string }) => Promise<CobrancaGateway>;
+  criarCobranca: (cobranca: { referencia: string; valor: number; descricao: string }) => Promise<CobrancaGateway>;
 };
-export const gatewayPagamento: GatewayPagamento | null = null;
+export const gatewayPagamento: GatewayPagamento | null = ambiente.pagamentoGatewayUrl
+  ? criarGatewayHttp({ url: ambiente.pagamentoGatewayUrl, token: ambiente.pagamentoGatewayToken })
+  : null;
 
 // O pagamento online só vale com o gateway implementado E o segredo do webhook configurado (para receber as
 // confirmações). Sem os dois, o botão "exigir pagamento" fica guardado, mas o totem confirma a reserva com

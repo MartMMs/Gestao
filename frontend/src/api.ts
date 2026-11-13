@@ -196,6 +196,7 @@ interface BackendEmployee {
   diasTrabalho?: string;
   cargo?: string;
   tipoEscala?: string;
+  turnoPadrao?: string | null;
   cargaHorariaSemanal?: number;
   folgasDomingoNoMes?: number;
   habilidades?: string[];
@@ -304,6 +305,7 @@ const normalizeEmployee = (employee: BackendEmployee): Employee => {
     cargo: employee.cargo || undefined,
     tipoEscala: (employee.tipoEscala as Employee['tipoEscala']) || undefined,
     folgasDomingoNoMes: typeof employee.folgasDomingoNoMes === 'number' ? employee.folgasDomingoNoMes : undefined,
+    turnoPadrao: employee.turnoPadrao || null,
     cargaHorariaSemanal: typeof employee.cargaHorariaSemanal === 'number' ? employee.cargaHorariaSemanal : undefined,
     habilidades: Array.isArray(employee.habilidades) ? employee.habilidades : [],
     bloqueios: Array.isArray(employee.bloqueios) ? employee.bloqueios : [],
@@ -616,6 +618,7 @@ export const useAddEmployee = (token: string | null) => {
           especialidade: data.specialty || undefined,
           cargo: data.cargo,
           tipoEscala: data.tipoEscala,
+          turnoPadrao: data.turnoPadrao,
           folgasDomingoNoMes: data.folgasDomingoNoMes,
           cargaHorariaSemanal: data.cargaHorariaSemanal,
           habilidades: data.habilidades,
@@ -654,6 +657,7 @@ export const useEditEmployee = (token: string | null) => {
           especialidade: data.specialty,
           cargo: data.cargo,
           tipoEscala: data.tipoEscala,
+          turnoPadrao: data.turnoPadrao,
           folgasDomingoNoMes: data.folgasDomingoNoMes,
           cargaHorariaSemanal: data.cargaHorariaSemanal,
           habilidades: data.habilidades,

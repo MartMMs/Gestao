@@ -115,7 +115,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
           dataInicio: firstDay,
         },
         daysInMonth,
-        { folgasDomingoNoMes: emp.folgasDomingoNoMes ?? 2 },
+        { folgasDomingoNoMes: emp.folgasDomingoNoMes ?? 2, turnoPadrao: emp.turnoPadrao },
       );
       const dayMap = new Map<number, DiaEscala>();
 

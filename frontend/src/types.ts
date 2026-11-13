@@ -43,6 +43,8 @@ export interface Employee {
   specialty: string;
   cargo?: string;
   tipoEscala?: TipoEscala;
+  // Horário padrão dos dias de trabalho ("HH:MM-HH:MM"); sem ele, horário da casa
+  turnoPadrao?: string | null;
   folgasDomingoNoMes?: number;
   cargaHorariaSemanal?: number;
   habilidades?: string[];

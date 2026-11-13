@@ -6,6 +6,7 @@ import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
 import { ehVersaoDesatualizada, isApiError, useCheckinAppointment, useClients } from '../../../api';
 import { normalizarNome } from '@shared/validadores';
+import { codigoReserva } from '@shared/codigoReserva';
 import { CODIGO_FORA_DA_AGENDA, statusFechado } from '@shared/statusAgendamento';
 import { useAuth } from '../../../AuthContext';
 import { formatPhone } from '../../../utils/formatters';
@@ -219,7 +220,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
   return (<>
     <ModalFormulario
       showSubmitButton={!nadaEditavel}
-      title="Editar Agendamento"
+      title={`Editar Agendamento · ${codigoReserva(editingAppointment.id)}`}
       onClose={closeAndDiscard}
       hasUnsavedChanges={hasUnsavedChanges}
       onSubmit={handleEditSubmit}

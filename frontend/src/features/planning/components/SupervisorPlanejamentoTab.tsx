@@ -2,11 +2,12 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Employee, TurnoSwapRequest } from '../../../types';
 import type { ScaleOverridePayload } from '../../../api';
-import { type DiaEscala } from '../../../utils/escalaCalculator';
+import { aplicarAjusteEscala, type DiaEscala } from '../../../utils/escalaCalculator';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { CalendarioEscala } from './CalendarioEscala';
 import { PlanningDayPopover, type AlteracaoDias } from './PlanningDayPopover';
-import { turnoDoDia } from '../utils/turnos';
+import { trabalhoAntesDeFolga, turnoDoDia } from '../utils/turnos';
+import { folgaAcimaDoLimite, mensagemFolgaAcimaDoLimite } from '@shared/escala';
 import { preencher12x36, repetirMesAnterior } from '../utils/modelosEscala';
 import { PlanningEmployeeSidebar } from './PlanningEmployeeSidebar';
 import { TimelineGantt } from './TimelineGantt';
@@ -220,8 +221,15 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
         // Sem mexer na observação, fica a nota já gravada (não o texto que o sistema gera, como "Feriado: ...")
         descricao: alteracao.descricao !== undefined ? alteracao.descricao || undefined : ajustesSalvos.get(`${employeeId}:${dia.data}`)?.descricao,
       };
-    // Trabalho antes de folga: no 6x1 o servidor recusa a semana que fica com duas folgas, mesmo por um instante
-    }).sort((a, b) => Number(a.tipo !== 'trabalho') - Number(b.tipo !== 'trabalho'));
+    }).sort(trabalhoAntesDeFolga);
+
+    // Mesma regra do servidor (6x1: uma folga por semana), conferida antes de gravar o primeiro dia
+    // O contrato gravado, que é o que o servidor confere (não o tipo escolhido na tela e ainda não salvo)
+    const tipoEscala = (employees as Employee[]).find((e) => e.id === employeeId)?.tipoEscala;
+    const antes = escalaComVizinhos(employeeId);
+    const porData = new Map(ajustes.map((a) => [a.data, a]));
+    const excesso = folgaAcimaDoLimite(tipoEscala, antes, antes.map((dia) => aplicarAjusteEscala(dia, porData.get(dia.data))));
+    if (excesso) throw new Error(mensagemFolgaAcimaDoLimite(tipoEscala!, excesso));
 
     let salvos = 0;
     for (const ajuste of ajustes) {

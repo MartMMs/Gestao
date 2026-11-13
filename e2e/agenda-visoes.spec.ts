@@ -7,7 +7,7 @@ test.describe('UI — agenda: visões de semana e mês', () => {
     await loginPelaTela(page, CONTAS.supervisor);
     await expect(page.getByRole('heading', { name: /Portal d[oa] Supervis(or|[aã]o)/i })).toBeVisible();
     await page.getByRole('button', { name: /^Agenda$/i }).click();
-    await expect(page.getByPlaceholder(/Buscar Cliente ou Servi[cç]o/i)).toBeVisible();
+    await expect(page.getByRole('textbox', { name: /Buscar cliente, servi[cç]o/i })).toBeVisible();
 
     // Dia: legenda da grade, com o estado "sem baixa" separado da falta
     await expect(page.getByLabel('Legenda de cores da agenda')).toContainText(/Sem baixa/i);

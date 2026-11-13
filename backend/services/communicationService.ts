@@ -1,6 +1,13 @@
-import { instanteNoFuso } from '../../shared/agenda';
+import { diaMesBR } from '../../shared/agenda';
+import { codigoReserva } from '../../shared/codigoReserva';
 import { mascararTelefone } from '../lib/privacidade';
 import { getEmpresaConfig } from './configService';
+import { config as ambiente } from '../env';
+import { criarWhatsappHttp, criarWhatsappLog } from './whatsapp';
+
+export const whatsapp = ambiente.whatsappUrl
+  ? criarWhatsappHttp({ url: ambiente.whatsappUrl, token: ambiente.whatsappToken })
+  : criarWhatsappLog((telefone) => mascararTelefone(telefone) ?? '');
 
 export interface VoucherData {
   reservaId: string;
@@ -20,20 +27,7 @@ export interface VoucherData {
   orientacoesCheckIn: string[];
 }
 
-export interface DisparoFila {
-  id: string;
-  tipo: 'confirmacao_imediata' | 'lembrete_24h' | 'lembrete_2h';
-  canal: 'whatsapp' | 'email';
-  destinatario: string;
-  conteudo: string;
-  status: 'enviado' | 'agendado';
-  agendadoPara: Date;
-  enviadoEm?: Date;
-}
-
 class CommunicationService {
-  private queue: DisparoFila[] = [];
-
   generateVoucher(data: {
     id: string;
     clienteNome: string;
@@ -50,8 +44,7 @@ class CommunicationService {
     politicaCancelamento?: string;
     orientacoesCheckIn?: string[];
   }): VoucherData {
-    const hash = data.id.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase();
-    const codigoConfirmacao = `AG-${hash}`;
+    const codigoConfirmacao = codigoReserva(data.id);
 
     return {
       reservaId: data.id,
@@ -75,60 +68,16 @@ class CommunicationService {
     };
   }
 
-  async enqueueTransactionalNotifications(voucher: VoucherData): Promise<void> {
+  // Confirmação da reserva do totem. Os lembretes de 24h saem pelo job (enviarLembretes), para todos os agendamentos
+  async enviarConfirmacao(voucher: VoucherData): Promise<void> {
     // Nome da clínica configurado (nunca uma marca fixa no código)
     const empresa = (await getEmpresaConfig()).nomeEmpresa;
-    const agora = new Date();
-    const dataSessao = instanteNoFuso(voucher.data, voucher.horario);
     const aguardandoPagamento = voucher.statusPagamento === 'aguardando_pagamento';
-
-    // 1. Mensagem de Confirmação Imediata
-    const msgConfirmacao: DisparoFila = {
-      id: `disp-${Date.now()}-1`,
-      tipo: 'confirmacao_imediata',
-      canal: 'whatsapp',
-      destinatario: voucher.clienteTelefone,
-      conteudo: `*${empresa}*\nOlá, ${voucher.clienteNome}! ${aguardandoPagamento ? 'Recebemos sua reserva! Ela será confirmada assim que o pagamento for aprovado.' : 'Sua reserva foi confirmada com sucesso!'}\n\n📋 *Código:* ${voucher.codigoConfirmacao}\n🌿 *Terapia:* ${voucher.terapiaNome}\n🗓️ *Data:* ${voucher.data} às ${voucher.horario}\n🏠 *Espaço:* ${voucher.salaNome}\n👤 *Terapeuta:* ${voucher.terapeutaNome}\n\nRecomendamos chegar 15 minutos antes para seu ritual de boas-vindas. Esperamos por você!`,
-      status: 'enviado',
-      agendadoPara: agora,
-      enviadoEm: agora,
-    };
-    this.queue.push(msgConfirmacao);
-    console.log(`[COMUNICAÇÃO] 📲 Mensagem transacional enviada para ${mascararTelefone(voucher.clienteTelefone)} (Reserva ${voucher.codigoConfirmacao})`);
-
-    // 2. Lembrete 24h antes
-    const data24hAntes = new Date(dataSessao.getTime() - 24 * 60 * 60 * 1000);
-    if (data24hAntes > agora) {
-      this.queue.push({
-        id: `disp-${Date.now()}-2`,
-        tipo: 'lembrete_24h',
-        canal: 'whatsapp',
-        destinatario: voucher.clienteTelefone,
-        conteudo: `*Lembrete ${empresa}*: seu atendimento (${voucher.terapiaNome}) está agendado para amanhã às ${voucher.horario}. Até lá!`,
-        status: 'agendado',
-        agendadoPara: data24hAntes,
-      });
-      console.log(`[COMUNICAÇÃO] ⏰ Lembrete 24h agendado para ${data24hAntes.toISOString()}`);
-    }
-
-    // 3. Lembrete 2h antes
-    const data2hAntes = new Date(dataSessao.getTime() - 2 * 60 * 60 * 1000);
-    if (data2hAntes > agora) {
-      this.queue.push({
-        id: `disp-${Date.now()}-3`,
-        tipo: 'lembrete_2h',
-        canal: 'whatsapp',
-        destinatario: voucher.clienteTelefone,
-        conteudo: `*Seu horário em ${empresa} começa em 2 horas.* Local: *${voucher.salaNome}*. Até breve!`,
-        status: 'agendado',
-        agendadoPara: data2hAntes,
-      });
-      console.log(`[COMUNICAÇÃO] ⏰ Lembrete 2h agendado para ${data2hAntes.toISOString()}`);
-    }
-  }
-
-  getQueue() {
-    return this.queue;
+    // Mesma regra do lembrete: primeiro nome, dia e hora, sem profissional, sala nem serviço (a prévia da mensagem
+    // aparece com o celular bloqueado, e um telefone digitado errado entrega a mensagem a outra pessoa)
+    const primeiroNome = voucher.clienteNome.trim().split(/\s+/)[0] || voucher.clienteNome;
+    const mensagem = `*${empresa}*\nOlá, ${primeiroNome}! ${aguardandoPagamento ? 'Recebemos sua reserva! Ela será confirmada assim que o pagamento for aprovado.' : 'Sua reserva foi confirmada.'}\n🗓️ ${diaMesBR(voucher.data)} às ${voucher.horario} · código ${voucher.codigoConfirmacao}\n\nRecomendamos chegar 15 minutos antes.`;
+    await whatsapp.enviar(voucher.clienteTelefone, mensagem);
   }
 }
 

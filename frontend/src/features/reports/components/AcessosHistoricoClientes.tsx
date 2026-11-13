@@ -27,10 +27,10 @@ export function AcessosHistoricoClientes() {
       >
         <div className="flex items-end gap-3 shrink-0 whitespace-nowrap">
         <label className="text-xs text-on-surface-variant flex flex-col gap-1">De
-          <input type="date" required value={rascunho.de} onChange={(e) => alterar({ de: e.target.value })} className={campo} />
+          <input type="date" required max={rascunho.ate} value={rascunho.de} onChange={(e) => alterar({ de: e.target.value })} className={campo} />
         </label>
         <label className="text-xs text-on-surface-variant flex flex-col gap-1">Até
-          <input type="date" required value={rascunho.ate} onChange={(e) => alterar({ ate: e.target.value })} className={campo} />
+          <input type="date" required min={rascunho.de} value={rascunho.ate} onChange={(e) => alterar({ ate: e.target.value })} className={campo} />
         </label>
         </div>
         <label className="text-xs text-on-surface-variant flex flex-col gap-1">Quem acessou
@@ -52,7 +52,7 @@ export function AcessosHistoricoClientes() {
           <button type="button" onClick={() => refetch()} className="font-bold underline">Tentar de novo</button>
         </p>
       )}
-      {data && data.itens.length === 0 && <p className="text-xs text-on-surface-variant">Nenhum acesso no período.</p>}
+      {data && data.itens.length === 0 && <p className="text-xs text-on-surface-variant">{filtro.cliente || filtro.colaboradorId ? 'Nenhum acesso no período com esse cliente ou essa pessoa. Confira o nome digitado.' : 'Nenhum acesso no período.'}</p>}
       {data && data.itens.length > 0 && (
         <div className={`overflow-x-auto ${isFetching ? 'opacity-60' : ''}`}>
           <table className="w-full text-xs">

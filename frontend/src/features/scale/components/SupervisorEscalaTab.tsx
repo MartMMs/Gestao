@@ -14,6 +14,8 @@ import { isTeamMember } from '../../../utils/formatters';
 import { JANELA_AGENDA_DIAS } from '@shared/agendaJanela';
 import { bloqueioDiaInteiro, horarioParaMinutos, minutoDentroDoBloqueio, minutosParaHorario } from '@shared/agenda';
 import type { DiaEscala } from '@shared/escala';
+import { ListaSemBaixa, useSemBaixa } from './ListaSemBaixa';
+import { codigoReserva, lerCodigoReserva } from '@shared/codigoReserva';
 import { estaDeFolga, statusDoDia, type EmployeeDayStatus } from '../utils/statusDoDia';
 
 const { START_HOUR, END_HOUR, HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
@@ -289,6 +291,24 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     employeeUnavailableReasons,
   }), [receptionDate, services, isTodayView, currentMinute, todayStr, employeeUnavailableReasons]);
 
+  const [mostrarSemBaixa, setMostrarSemBaixa] = useState(false);
+  const semBaixa = useSemBaixa(appointments, services);
+  const abrirAtendimento = (app: Appointment) => {
+    setReceptionDate(app.date);
+    setVisao('dia');
+    setMostrarSemBaixa(false);
+    openEditAppointmentModal(app);
+  };
+
+  // Enter com um código de reserva: vai para o dia do atendimento e abre o agendamento
+  const abrirPorCodigo = () => {
+    const codigo = lerCodigoReserva(scheduleSearchTerm);
+    if (!codigo) return;
+    const achado = appointments.find((a) => codigoReserva(a.id) === codigo);
+    if (!achado) { setErrorMessage(`Nenhuma reserva ${codigo} na agenda (canceladas e de mais de um ano não aparecem).`); return; }
+    abrirAtendimento(achado);
+  };
+
   // Arrastar o card: muda profissional e horário juntos. Vai só o necessário (o servidor mantém cliente e serviços)
   // e a versão do registro, para não sobrescrever uma edição feita por outra pessoa nesse meio tempo
   const appointmentsRef = useRef(appointments);
@@ -478,16 +498,23 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
             <button onClick={() => onOpenUpcomingAppointments?.()} className="px-4 py-3 border border-primary/40 text-primary rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-primary/10 transition-all flex items-center gap-2">
               <span className="material-symbols-outlined text-[18px]">event_note</span> Lista de Hoje
             </button>
+            {semBaixa.length > 0 && (
+              <button onClick={() => setMostrarSemBaixa((v) => !v)} aria-expanded={mostrarSemBaixa} aria-controls="lista-sem-baixa" className="px-4 py-3 border border-error/40 text-error rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-error/10 transition-all flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">pending_actions</span> Sem baixa ({semBaixa.length})
+              </button>
+            )}
             <button onClick={() => openBlockModal('', '')} className="px-4 py-3 bg-error/15 text-error rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-error/25 transition-all flex items-center gap-2">
               <span className="material-symbols-outlined text-[18px]">block</span> Bloqueio
             </button>
           </div>
         </div>
 
+        {mostrarSemBaixa && semBaixa.length > 0 && <ListaSemBaixa itens={semBaixa} employees={employees} onAbrir={abrirAtendimento} />}
+
         <div className="flex flex-col md:flex-row gap-3 mb-6 shrink-0">
           <div className="relative flex-1">
             <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline-variant text-[18px]">search</span>
-            <input type="text" placeholder="Buscar Cliente ou Serviço..." value={scheduleSearchTerm} onChange={e => setScheduleSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-surface-container-low border border-outline-variant/30 text-sm rounded-xl focus:ring-1 focus:ring-primary text-on-surface" />
+            <input type="text" placeholder="Buscar cliente, serviço ou código (AG-...)" aria-label="Buscar cliente, serviço ou código da reserva" value={scheduleSearchTerm} onChange={e => setScheduleSearchTerm(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') abrirPorCodigo(); }} className="w-full pl-10 pr-4 py-2 bg-surface-container-low border border-outline-variant/30 text-sm rounded-xl focus:ring-1 focus:ring-primary text-on-surface" />
           </div>
           <select
             value={professionalFilter}
