@@ -53,10 +53,10 @@ test.describe('RH — folgas', () => {
 
     const admin = await authHeaders(request, CONTAS.admin);
     // Profissional próprio do teste: os outros testes marcam atendimentos para a equipe do seed, e dia com
-    // atendimento não vira folga (409)
+    // atendimento não vira folga (409). 5x2: no 6x1 a folga do rodízio na mesma semana recusaria a segunda (ex.: hoje domingo)
     const sufixo = Array.from({ length: 6 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join('');
     const criado = await request.post(`${apiBase()}/colaboradores`, {
-      headers: admin, data: { nome: `Folga Teste ${sufixo}`, email: `folga.${sufixo}@teste.com`, senha: `Provisoria!${sufixo}9`, especialidade: 'Massagem' },
+      headers: admin, data: { nome: `Folga Teste ${sufixo}`, email: `folga.${sufixo}@teste.com`, senha: `Provisoria!${sufixo}9`, especialidade: 'Massagem', tipoEscala: '5x2' },
     });
     expect(criado.status(), await criado.text()).toBe(201);
     const helena = (await criado.json()) as { id: string; nome: string };

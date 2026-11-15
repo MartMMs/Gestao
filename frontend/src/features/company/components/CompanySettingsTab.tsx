@@ -163,7 +163,9 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
     e.preventDefault();
     setSaveError(null);
     try {
-      await updateMutation.mutateAsync(form);
+      // O horário de funcionamento tem cartão próprio: este formulário não regrava uma cópia antiga dele
+      const { horaAbertura: _a, horaFechamento: _f, horaLimiteAgendamento: _l, diasFuncionamento: _d, ...dadosEmpresa } = form;
+      await updateMutation.mutateAsync(dadosEmpresa);
       // O que acabou de ser salvo vira a base: a config recarregada entra sem aviso. Não null: salvar sem mudança
       // não recarrega nada, e a próxima config de fora apagaria o que fosse digitado depois
       baseRef.current = form;

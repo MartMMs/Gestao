@@ -1,3 +1,4 @@
+import { HorarioFuncionamentoCard } from '../features/company/components/HorarioFuncionamentoCard';
 import { valorDoAtendimento } from '../utils/valorAtendimento';
 import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { normalizarTexto } from '@shared/validadores';
@@ -551,7 +552,10 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
       )}
 
       {activeTab === 'autoatendimento' && (
-        <AutoatendimentoAdminTab />
+        <div className="space-y-8">
+          <HorarioFuncionamentoCard />
+          <AutoatendimentoAdminTab />
+        </div>
       )}
 
       {activeTab === 'relatorios' && <RelatorioFinanceiroTab />}

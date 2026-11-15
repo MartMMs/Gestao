@@ -929,7 +929,8 @@ export const invalidarConfigEmpresa = (queryClient: QueryClient) => Promise.all(
 export const useUpdateCompanyConfig = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: Partial<ConfiguracaoEmpresa>) =>
+    // confirmarForaDoHorario: grava o horário mesmo com atendimentos marcados fora dele (o servidor avisou antes)
+    mutationFn: (data: Partial<ConfiguracaoEmpresa> & { confirmarForaDoHorario?: boolean }) =>
       fetchApi('/empresa/config', token, {
         method: 'PUT',
         body: JSON.stringify(data),

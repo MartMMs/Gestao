@@ -48,12 +48,19 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
 - **Horario de trabalho no cadastro:** "Informar horario de trabalho" (entrada e saida) no Criar/Editar Usuario grava
   `turnoPadrao`; o calendario do RH, a Timeline e a agenda mostram esse horario nos dias de trabalho, sem gravar dia a dia.
   Sem ele, vale o horario da casa, como antes; um ajuste feito no dia tem prioridade.
+- **Horario de funcionamento configuravel:** cartao "Horario de funcionamento" no Empresa & Segmento (administrador) e
+  no Totem & Autoatendimento (supervisao): abertura, fechamento, ultimo horario para comecar um atendimento e dias de
+  funcionamento. Vale para a agenda da equipe, o totem e a grade da agenda (antes era fixo: 09:00 as 21:00, todos os dias).
+  Alteracoes ficam no historico de auditoria; atendimentos ja marcados nao mudam, mas se algum ficar fora do novo
+  horario o servidor avisa (409) e so grava com confirmacao. A grade cresce para mostrar esses atendimentos.
+  Folga de dia inteiro passa a ser gravada como 00:00-23:59 (a migration converte as que cobriam 09:00-21:00), para
+  continuar valendo quando o horario muda.
 - **Auditoria LGPD:** relatorio "Acessos ao historico de clientes" (quem abriu o historico de qual cliente, IP e quando).
 - **Pagamento e WhatsApp pre-prontos:** adapters HTTP genericos, desligados por padrao (ver "Integracoes" abaixo).
 
 > **Antes de subir esta versao:** faca backup do banco e rode `cd backend && npx prisma migrate deploy`
 > (migrations de auditoria, comissao proporcional, troca de senha obrigatoria, consentimento do totem, usuario de acesso,
-> horario padrao do colaborador `turnoPadrao` e referencia de pagamento `referenciaPagamento`).
+> horario padrao do colaborador `turnoPadrao` referencia de pagamento `referenciaPagamento`, horario de funcionamento da empresa e folga de dia inteiro 00:00-23:59).
 > Veja os detalhes completos em [docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md](docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md).
 
 ## Guias detalhados

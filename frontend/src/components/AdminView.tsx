@@ -1,3 +1,4 @@
+import { HorarioFuncionamentoCard } from '../features/company/components/HorarioFuncionamentoCard';
 import React, { useState } from 'react';
 import { useToast } from '../hooks/useToast';
 import { motion } from 'motion/react';
@@ -360,7 +361,12 @@ export function AdminView({
       </div>
 
       {/* Conteúdo da Aba Ativa */}
-      {activeTab === 'empresa' && <CompanySettingsTab token={token || null} />}
+      {activeTab === 'empresa' && (
+        <div className="space-y-8">
+          <HorarioFuncionamentoCard />
+          <CompanySettingsTab token={token || null} />
+        </div>
+      )}
       {activeTab === 'relatorios' && <RelatorioFinanceiroTab />}
 
       {activeTab === 'servicos' && (

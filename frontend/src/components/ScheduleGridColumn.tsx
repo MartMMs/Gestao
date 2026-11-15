@@ -201,8 +201,10 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
       )}
 
       {empBlockers.map((bloq) => {
-        const top = (horarioParaMinutos(bloq.horaInicio) - startHour * 60) * minuteHeight;
-        const endTop = (horarioParaMinutos(bloq.horaFim) - startHour * 60) * minuteHeight;
+        // Recortado à grade: folga (00:00–23:59) e bloqueio fora do expediente não saem da coluna
+        const alturaGrade = (endHour - startHour + 1) * hourHeight;
+        const top = Math.max(0, (horarioParaMinutos(bloq.horaInicio) - startHour * 60) * minuteHeight);
+        const endTop = Math.min(alturaGrade, (horarioParaMinutos(bloq.horaFim) - startHour * 60) * minuteHeight);
         const height = Math.max(endTop - top, 20);
 
         return (

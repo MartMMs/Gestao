@@ -21,6 +21,11 @@ export interface ConfiguracaoEmpresa {
   usarComissao?: boolean;
   // Ligado: agendar e cadastrar cliente exigem ficha de anamnese
   exigirAnamnese?: boolean;
+  // Horário de funcionamento (HH:MM) e dias abertos (0 = domingo); limite = último início aceito
+  horaAbertura?: string;
+  horaFechamento?: string;
+  horaLimiteAgendamento?: string | null;
+  diasFuncionamento?: number[];
   atualizadoEm?: string;
 }
 
@@ -148,6 +153,8 @@ export interface AutoatendimentoSlot {
 
 export interface AutoatendimentoDisponibilidadeResponse {
   data: string;
+  // Só sem horários: por que (dia fechado ou sem vaga)
+  mensagem?: string;
   servico: {
     id: string;
     nome: string;

@@ -38,6 +38,7 @@ const ACAO_ROTULO: Record<string, string> = {
   'totem.cobranca': 'Cobrança do totem',
   'empresa.comissao': 'Comissão da empresa',
   'empresa.anamnese': 'Exigência de anamnese',
+  'empresa.horario': 'Horário de funcionamento',
   'cliente.anamnese': 'Ficha de anamnese',
   'agendamento.reaberto': 'Atendimento reaberto',
   'agendamento.valores': 'Valor do atendimento alterado',

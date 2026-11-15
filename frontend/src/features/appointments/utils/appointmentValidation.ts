@@ -1,6 +1,6 @@
 import { Appointment, Service } from '../../../types';
 import { getBrazilCurrentTimeString, getDuration, getLocalTodayString, hasOverlap } from './appointmentCore';
-import { validarHorarioAgendamento } from '@shared/agenda';
+import { validarHorarioAgendamento, type Funcionamento } from '@shared/agenda';
 
 type ServiceLike = Pick<Service, 'nome'> & Partial<Pick<Service, 'id' | 'duracao' | 'preco'>>;
 
@@ -14,6 +14,8 @@ interface ValidateAppointmentInput {
   ignoreAppointmentId?: string;
   // Edição sem troca de data/horário: não recusa por já ter passado (ex.: incluir serviço após o início)
   permitirPassado?: boolean;
+  // Horário da empresa (useFuncionamento); sem ele vale o padrão
+  funcionamento?: Funcionamento;
 }
 
 export function validateAppointmentScheduling(input: ValidateAppointmentInput): string | null {
@@ -26,6 +28,7 @@ export function validateAppointmentScheduling(input: ValidateAppointmentInput): 
     services,
     ignoreAppointmentId,
     permitirPassado = false,
+    funcionamento,
   } = input;
 
   // Mesmas regras do backend (horário de funcionamento, múltiplos de 15 min, fechamento, passado)
@@ -36,7 +39,7 @@ export function validateAppointmentScheduling(input: ValidateAppointmentInput): 
     return 'Não é permitido agendar no passado. Escolha uma data e horário futuros.';
   }
 
-  const scheduleError = validarHorarioAgendamento(date, time, durationMinutes);
+  const scheduleError = validarHorarioAgendamento(date, time, durationMinutes, { funcionamento });
   if (scheduleError) return scheduleError;
 
   const isOccupied = hasOverlap(

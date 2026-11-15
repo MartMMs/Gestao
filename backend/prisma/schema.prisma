@@ -202,6 +202,11 @@ model ConfiguracaoEmpresa {
   usarComissao         Boolean  @default(true)
   // Ligado: agendar (pela equipe) e cadastrar cliente exigem ficha de anamnese preenchida
   exigirAnamnese       Boolean  @default(false)
+  // Horário de funcionamento: vale para a agenda da equipe, o totem e a grade. Limite = último início aceito (null = até fechar)
+  horaAbertura          String   @default("09:00")
+  horaFechamento        String   @default("21:00")
+  horaLimiteAgendamento String?
+  diasFuncionamento     Int[]    @default([0, 1, 2, 3, 4, 5, 6])
   atualizadoEm         DateTime @updatedAt
 }
 // Trilha de auditoria: cada abertura do histórico (com dados de saúde) de um cliente.

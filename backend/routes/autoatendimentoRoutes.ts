@@ -37,8 +37,9 @@ import {
 import { buscarServicosPorId } from '../services/servicoService';
 import type { Eventos } from '../lib/eventos';
 import {
-  HORA_ABERTURA,
-  HORA_FECHAMENTO,
+  diaDaSemana,
+  lerFuncionamento,
+  NOMES_DIAS_SEMANA,
   INTERVALO_SLOT_TOTEM_MIN,
   dataValida,
   duracaoServico,
@@ -223,6 +224,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       const indisponivelNaEscala = new Set(escalas.filter((e) => mensagemIndisponibilidadeEscala(e)).map((e) => e.colaboradorId));
       const elegiveis = colaboradores.filter((c) => !indisponivelNaEscala.has(c.id) && !erroElegibilidade(c, servicos));
       const agora = new Date();
+      const funcionamento = lerFuncionamento(await getEmpresaConfig());
 
       const slots: Array<{
         horario: string;
@@ -232,10 +234,12 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         motivoIndisponibilidade?: string;
       }> = [];
 
-      for (let inicio = HORA_ABERTURA * 60; inicio + resumo.duracaoTotalSlot <= HORA_FECHAMENTO * 60; inicio += INTERVALO_SLOT_TOTEM_MIN) {
+      // Primeiro horário alinhado aos 30 min do totem (abertura 08:15 começa em 08:30; sem isso nenhum horário passaria)
+      const primeiroHorario = Math.ceil(horarioParaMinutos(funcionamento.abertura) / INTERVALO_SLOT_TOTEM_MIN) * INTERVALO_SLOT_TOTEM_MIN;
+      for (let inicio = primeiroHorario; inicio + resumo.duracaoTotalSlot <= horarioParaMinutos(funcionamento.fechamento); inicio += INTERVALO_SLOT_TOTEM_MIN) {
         const horario = minutosParaHorario(inicio);
         // Horários que já passaram não são oferecidos
-        if (validarHorarioAgendamento(data, horario, resumo.duracaoTotalSlot, { agora, intervaloMin: INTERVALO_SLOT_TOTEM_MIN })) continue;
+        if (validarHorarioAgendamento(data, horario, resumo.duracaoTotalSlot, { agora, intervaloMin: INTERVALO_SLOT_TOTEM_MIN, funcionamento })) continue;
         const fim = inicio + resumo.duracaoTotalSlot;
         const blocos = blocosDoIntervalo(inicio, fim);
 
@@ -291,7 +295,12 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         },
         ...resumo,
         slots,
-        ...(slots.length === 0 ? { mensagem: 'Não há horários disponíveis para esta data.' } : {}),
+        ...(slots.length === 0 ? {
+          // Dia fechado não é dia lotado: o cliente precisa saber que não adianta tentar outro horário
+          mensagem: funcionamento.dias.includes(diaDaSemana(data))
+            ? 'Não há horários disponíveis para esta data.'
+            : `Não abrimos ${diaDaSemana(data) === 0 || diaDaSemana(data) === 6 ? 'aos' : 'às'} ${NOMES_DIAS_SEMANA[diaDaSemana(data)]}s.`,
+        } : {}),
       });
     } catch (error) {
       responderErro(res, error, 'Erro ao calcular disponibilidade.');
@@ -324,6 +333,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       const erroHorario = validarHorarioAgendamento(data, horario, resumo.duracaoTotalSlot, {
         agora: new Date(),
         intervaloMin: INTERVALO_SLOT_TOTEM_MIN,
+        funcionamento: lerFuncionamento(await getEmpresaConfig()),
       });
       if (erroHorario) return res.status(400).json({ erro: erroHorario });
 

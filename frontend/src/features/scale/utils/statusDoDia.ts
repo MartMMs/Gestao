@@ -1,5 +1,5 @@
 import { normalizarTexto } from '@shared/validadores';
-import { bloqueioDiaInteiro } from '@shared/agenda';
+import { bloqueioDiaInteiro, FUNCIONAMENTO_PADRAO, type Funcionamento } from '@shared/agenda';
 import type { DiaEscala } from '@shared/escala';
 import type { Bloqueio } from '../../../types';
 
@@ -18,6 +18,7 @@ export const statusDoDia = (
   diaEscala: DiaEscala | undefined,
   ajuste: AjusteDoDia | undefined,
   bloqueiosDoDia: Bloqueio[],
+  funcionamento: Funcionamento = FUNCIONAMENTO_PADRAO,
 ): EmployeeDayStatus | null => {
   if (diaEscala && diaEscala.tipo !== 'trabalho') {
     return {
@@ -34,7 +35,7 @@ export const statusDoDia = (
   }
 
   if (bloqueiosDoDia.length === 0) return null;
-  const diaInteiro = bloqueiosDoDia.find(bloqueioDiaInteiro);
+  const diaInteiro = bloqueiosDoDia.find((b) => bloqueioDiaInteiro(b, funcionamento));
   if (!diaInteiro) {
     return {
       label: 'Bloqueio',

@@ -43,6 +43,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
   // "Hoje" no fuso de Brasília (toISOString usaria UTC e pularia para amanhã depois das 21h)
   const [selectedDate, setSelectedDate] = useState<string>(() => getLocalTodayString());
   const [slots, setSlots] = useState<AutoatendimentoSlot[]>([]);
+  const [mensagemSemHorario, setMensagemSemHorario] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<AutoatendimentoSlot | null>(null);
@@ -82,6 +83,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
       const res = await fetchAutoatendimentoDisponibilidade(ids, dateStr);
       if (ultimaBuscaRef.current !== dateStr) return;
       setSlots(res.slots || []);
+      setMensagemSemHorario(res.mensagem ?? null);
     } catch (err: unknown) {
       if (ultimaBuscaRef.current !== dateStr) return;
       setError(mensagemDeErro(err, 'Falha ao carregar horários disponíveis.'));
@@ -294,7 +296,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
             </span>
             <p className="text-sm font-bold text-on-surface">Nenhum horário livre nesta data.</p>
             <p className="text-xs text-on-surface-variant">
-              Por favor, selecione outro dia no calendário acima.
+              {mensagemSemHorario && mensagemSemHorario.startsWith('Não abrimos') ? `${mensagemSemHorario} ` : ''}Por favor, selecione outro dia no calendário acima.
             </p>
           </div>
         ) : (

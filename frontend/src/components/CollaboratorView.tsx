@@ -1,5 +1,6 @@
+import { horasDaGrade, useFuncionamento } from '../config/funcionamento';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { horarioParaMinutos, minutoDentroDoBloqueio } from '@shared/agenda';
+import { horarioParaMinutos, INTERVALO_AGENDAMENTO_MIN, minutoDentroDoBloqueio, validarHorarioAgendamento } from '@shared/agenda';
 import { useToast } from '../hooks/useToast';
 import { useModal } from '../hooks/useModal';
 import { Employee, Appointment, Service, Client } from '../types';
@@ -13,7 +14,7 @@ import { useScheduleModals } from '../features/appointments/hooks';
 import { ScheduleRulerGrid } from './ScheduleRulerGrid';
 import { SolicitarTroca, type TrocaTurnoPayload } from './SolicitarTroca';
 
-const { START_HOUR, END_HOUR, HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
+const { HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
 
 interface CollaboratorViewProps {
   currentUser: Employee;
@@ -44,7 +45,13 @@ export function CollaboratorView({
   onEditClient,
   onSubmitTurnoSwapRequest,
 }: CollaboratorViewProps) {
+  const funcionamento = useFuncionamento();
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
+  const intervalosDoDia = useMemo(() => appointments
+    .filter((a) => a.date === receptionDate && a.status !== 'cancelled')
+    .map((a): [number, number] => { const i = horarioParaMinutos(a.time); return [i, i + getDuration(a.services, services)]; }),
+  [appointments, receptionDate, services]);
+  const { horaInicioGrade, horaFimGrade } = horasDaGrade(funcionamento, intervalosDoDia);
   const { toastMessage, setToastMessage } = useToast();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentMinute, setCurrentMinute] = useState(new Date());
@@ -141,11 +148,19 @@ export function CollaboratorView({
   const handleGridClick = useCallback((e: React.MouseEvent<HTMLDivElement>, empId: string) => {
     if (e.target !== e.currentTarget) return; // ignore clicks on events
     const totalMinutes = e.nativeEvent.offsetY / MINUTE_HEIGHT;
-    const hours = Math.floor(totalMinutes / 60) + START_HOUR;
+    const hours = Math.floor(totalMinutes / 60) + horaInicioGrade;
     const minutes = Math.floor(totalMinutes % 60);
     const roundedMinutes = Math.round(minutes / 15) * 15;
     let finalHours = hours; let finalMins = roundedMinutes;
     if (finalMins === 60) { finalHours += 1; finalMins = 0; }
+
+    const horario = `${finalHours.toString().padStart(2, '0')}:${finalMins.toString().padStart(2, '0')}`;
+    // Dia fechado, antes da abertura ou depois do último horário: avisa já no clique
+    const foraDoHorario = validarHorarioAgendamento(receptionDate, horario, INTERVALO_AGENDAMENTO_MIN, { funcionamento });
+    if (foraDoHorario) {
+      setErrorMessage(foraDoHorario);
+      return;
+    }
 
     const clickedMinutes = finalHours * 60 + finalMins;
     const blockingReason = (currentUser.bloqueios || []).find(
@@ -157,8 +172,8 @@ export function CollaboratorView({
       return;
     }
 
-    openBookingModal(`${finalHours.toString().padStart(2, '0')}:${finalMins.toString().padStart(2, '0')}`, empId);
-  }, [currentUser.bloqueios, openBookingModal, receptionDate]);
+    openBookingModal(horario, empId);
+  }, [currentUser.bloqueios, openBookingModal, receptionDate, horaInicioGrade, funcionamento, setErrorMessage]);
 
   const handleEditAppointmentClick = useCallback((app: Appointment) => openEditAppointmentModal(app), [openEditAppointmentModal]);
 
@@ -174,8 +189,8 @@ export function CollaboratorView({
   // Lógica de renderização da linha do tempo (simplificada da SupervisorView)
   const todayStr = getLocalTodayString();
   const isTodayView = receptionDate === todayStr;
-  const currentMinuteTop = isTodayView ? (getBrazilCurrentMinuteOfDay() - START_HOUR * 60) * MINUTE_HEIGHT : -100;
-  const timelineHeight = (END_HOUR - START_HOUR + 1) * HOUR_HEIGHT;
+  const currentMinuteTop = isTodayView ? (getBrazilCurrentMinuteOfDay() - horaInicioGrade * 60) * MINUTE_HEIGHT : -100;
+  const timelineHeight = (horaFimGrade - horaInicioGrade + 1) * HOUR_HEIGHT;
 
   useModal(showFolgas, () => setShowFolgas(false));
   useModal(showMyScheduleModal, () => setShowMyScheduleModal(false));
@@ -286,8 +301,8 @@ export function CollaboratorView({
           {/* Corpo da Agenda */}
           <div className="flex flex-1 overflow-y-auto relative custom-scrollbar">
             <ScheduleRulerGrid
-              startHour={START_HOUR}
-              endHour={END_HOUR}
+              startHour={horaInicioGrade}
+              endHour={horaFimGrade}
               hourHeight={HOUR_HEIGHT}
               hourColumnClassName="w-14 shrink-0 bg-surface-container-lowest/95 backdrop-blur border-r border-outline-variant/20 sticky left-0 z-10 flex flex-col"
               labelClassName="absolute top-1 right-2 text-[11px] font-bold text-on-surface-variant bg-surface-container-lowest px-1 leading-none"
@@ -298,8 +313,9 @@ export function CollaboratorView({
 
               {/* Bloqueios */}
               {myBlockers.map(bloq => {
-                const top = (horarioParaMinutos(bloq.horaInicio) - START_HOUR * 60) * MINUTE_HEIGHT;
-                const height = Math.max((horarioParaMinutos(bloq.horaFim) - START_HOUR * 60) * MINUTE_HEIGHT - top, 20);
+                // Recortado à grade: folga (00:00–23:59) não sai da coluna
+                const top = Math.max(0, (horarioParaMinutos(bloq.horaInicio) - horaInicioGrade * 60) * MINUTE_HEIGHT);
+                const height = Math.max(Math.min(timelineHeight, (horarioParaMinutos(bloq.horaFim) - horaInicioGrade * 60) * MINUTE_HEIGHT) - top, 20);
                 return (
                   <div key={bloq.id} className="absolute left-2 right-2 bg-surface-container-high/60 backdrop-blur-sm rounded-lg border border-outline-variant/30 flex items-center justify-center group overflow-hidden" style={{ top, height }}>
                     <div className="absolute inset-0 opacity-10 repeating-linear-gradient-45 from-transparent to-on-surface-variant"></div>
@@ -321,7 +337,7 @@ export function CollaboratorView({
                 const isPastDay = app.date < todayStr;
                 const isNoShow = !isCompleted && isPastDay;
                 
-                const top = (horarioParaMinutos(app.time) - START_HOUR * 60) * MINUTE_HEIGHT;
+                const top = (horarioParaMinutos(app.time) - horaInicioGrade * 60) * MINUTE_HEIGHT;
                 
                 const durationMins = getDuration(app.services, services);
                 const height = Math.max(durationMins * MINUTE_HEIGHT, 30);

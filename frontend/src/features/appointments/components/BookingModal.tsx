@@ -1,3 +1,4 @@
+import { useFuncionamento } from '../../../config/funcionamento';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { normalizarTexto } from '@shared/validadores';
 import { horarioParaMinutos } from '@shared/agenda';
@@ -13,7 +14,6 @@ import { MENSAGEM_ANAMNESE_OBRIGATORIA } from '@shared/anamnese';
 import { useAuth } from '../../../AuthContext';
 import { formatPhone, formatCpf, isTeamMember } from '../../../utils/formatters';
 import { useFormDraft } from '../../../hooks/useFormDraft';
-import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
 import { isApiError, useCompanyConfig } from '../../../api';
 
@@ -119,6 +119,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   );
 
   const [clientMode, setClientMode] = useState<'search' | 'new'>(() => draft.clientMode || 'search');
+  const funcionamento = useFuncionamento();
   const [bookDate, setBookDate] = useState(() => draft.bookDate || receptionDate);
   const [bookName, setBookName] = useState(() => draft.bookName || '');
   const [clientSearchTerm, setClientSearchTerm] = useState('');
@@ -426,6 +427,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       serviceNames: bookService,
       appointments,
       services,
+      funcionamento,
     });
 
     if (scheduleValidationError) {
@@ -435,12 +437,6 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
     const startMinutes = horarioParaMinutos(bookTime);
     const durationMinutes = getDuration(bookService, services);
-    const closingMinutes = SCHEDULE_CONFIG.END_HOUR * 60;
-
-    if (startMinutes + durationMinutes > closingMinutes) {
-      setErrorMessage(`Este agendamento ultrapassa o fechamento às ${String(SCHEDULE_CONFIG.END_HOUR).padStart(2, '0')}:00. Reduza os serviços ou escolha um horário mais cedo.`);
-      return;
-    }
 
     const selectedEmployee = employees.find((emp) => emp.id === bookEmp);
     const overlapBlock = (selectedEmployee?.bloqueios || [])

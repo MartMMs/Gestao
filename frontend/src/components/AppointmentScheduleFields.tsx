@@ -1,6 +1,6 @@
+import { useFuncionamento } from '../config/funcionamento';
 import React from 'react';
 import { Employee, Service } from '../types';
-import { SCHEDULE_CONFIG } from '../config/scheduleConfig';
 
 interface AppointmentScheduleFieldsProps {
   date: string;
@@ -27,8 +27,6 @@ interface AppointmentScheduleFieldsProps {
   employeeHelperText?: string;
 }
 
-const START_TIME = `${String(SCHEDULE_CONFIG.START_HOUR).padStart(2, '0')}:00`;
-const END_TIME = `${String(SCHEDULE_CONFIG.END_HOUR).padStart(2, '0')}:00`;
 
 export function AppointmentScheduleFields({
   date,
@@ -53,6 +51,7 @@ export function AppointmentScheduleFields({
   detailsDisabled = false,
   employeeHelperText,
 }: AppointmentScheduleFieldsProps) {
+  const funcionamento = useFuncionamento();
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -72,8 +71,8 @@ export function AppointmentScheduleFields({
           <input
             required
             type="time"
-            min={START_TIME}
-            max={END_TIME}
+            min={funcionamento.abertura}
+            max={funcionamento.limite ?? funcionamento.fechamento}
             value={time}
             onChange={(e) => onTimeChange(e.target.value)}
             disabled={disabled}
