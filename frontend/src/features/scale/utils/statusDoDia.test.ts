@@ -1,16 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { estaDeFolga, statusDoDia } from './statusDoDia';
 import type { Bloqueio } from '../../../types';
+import { FUNCIONAMENTO_PADRAO } from '@shared/agenda';
 
 const DATA = '2026-12-10';
 const bloqueio = (horaInicio: string, horaFim: string, motivo = 'Médico'): Bloqueio => ({ id: 'b', data: DATA, horaInicio, horaFim, motivo, colaboradorId: 'c' });
-const filtro = (...args: Parameters<typeof statusDoDia>) => estaDeFolga(statusDoDia(...args));
+// Horário padrão da casa (09:00–21:00): o "dia inteiro" dos bloqueios é medido contra ele
+type Args = Parameters<typeof statusDoDia>;
+const status = (dia: Args[0], ajuste: Args[1], bloqueios: Args[2]) => statusDoDia(dia, ajuste, bloqueios, FUNCIONAMENTO_PADRAO);
+const filtro = (dia: Args[0], ajuste: Args[1], bloqueios: Args[2]) => estaDeFolga(status(dia, ajuste, bloqueios));
 
 describe('filtro "Somente de folga"', () => {
   it('entra quem está de folga, FDS ou férias pela escala', () => {
     expect(filtro({ data: DATA, tipo: 'folga' }, undefined, [])).toBe(true);
     expect(filtro({ data: DATA, tipo: 'fds' }, undefined, [])).toBe(true);
-    expect(statusDoDia({ data: DATA, tipo: 'folga', descricao: 'Férias 30 dias' }, undefined, [])?.label).toBe('Férias');
+    expect(status({ data: DATA, tipo: 'folga', descricao: 'Férias 30 dias' }, undefined, [])?.label).toBe('Férias');
   });
 
   it('entra quem tem folga, FDS ou férias no ajuste do dia', () => {
@@ -25,9 +29,9 @@ describe('filtro "Somente de folga"', () => {
   });
 
   it('fica de fora quem tem só bloqueio parcial', () => {
-    const status = statusDoDia(undefined, undefined, [bloqueio('10:00', '12:00'), bloqueio('15:00', '16:00', 'Curso')]);
-    expect(status).toEqual({ label: 'Bloqueio', reason: 'Médico | Curso', isAllDayUnavailable: false });
-    expect(estaDeFolga(status)).toBe(false);
+    const resultado = status(undefined, undefined, [bloqueio('10:00', '12:00'), bloqueio('15:00', '16:00', 'Curso')]);
+    expect(resultado).toEqual({ label: 'Bloqueio', reason: 'Médico | Curso', isAllDayUnavailable: false });
+    expect(estaDeFolga(resultado)).toBe(false);
   });
 
   it('fica de fora quem trabalha normalmente', () => {

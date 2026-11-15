@@ -39,7 +39,7 @@ import type { Eventos } from '../lib/eventos';
 import {
   diaDaSemana,
   lerFuncionamento,
-  NOMES_DIAS_SEMANA,
+  diaNoPlural,
   INTERVALO_SLOT_TOTEM_MIN,
   dataValida,
   duracaoServico,
@@ -299,7 +299,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
           // Dia fechado não é dia lotado: o cliente precisa saber que não adianta tentar outro horário
           mensagem: funcionamento.dias.includes(diaDaSemana(data))
             ? 'Não há horários disponíveis para esta data.'
-            : `Não abrimos ${diaDaSemana(data) === 0 || diaDaSemana(data) === 6 ? 'aos' : 'às'} ${NOMES_DIAS_SEMANA[diaDaSemana(data)]}s.`,
+            : `Não abrimos ${diaNoPlural(diaDaSemana(data))}.`,
         } : {}),
       });
     } catch (error) {

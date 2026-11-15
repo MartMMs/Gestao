@@ -87,7 +87,20 @@ export function ModuloRH({ planejamento, onSaveScaleOverride, onReplicateScaleDa
   return (
     <div className="space-y-4">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        <nav role="tablist" aria-label="Áreas do Módulo RH" className="flex bg-surface-container-low p-1 rounded-2xl border border-outline-variant/20 overflow-x-auto max-w-full">
+        <nav
+          role="tablist"
+          aria-label="Áreas do Módulo RH"
+          onKeyDown={(event) => {
+            // Padrão de abas: setas trocam de aba, Home/End vão à primeira/última, e o foco acompanha
+            const atual = ABAS.findIndex((a) => a.id === aba);
+            const destino = { ArrowRight: atual + 1, ArrowLeft: atual - 1, Home: 0, End: ABAS.length - 1 }[event.key];
+            if (destino === undefined) return;
+            event.preventDefault();
+            const proxima = ABAS[(destino + ABAS.length) % ABAS.length].id;
+            setAba(proxima);
+            document.getElementById(`rh-aba-${proxima}`)?.focus();
+          }}
+          className="flex bg-surface-container-low p-1 rounded-2xl border border-outline-variant/20 overflow-x-auto max-w-full">
           {ABAS.map(({ id, rotulo, icone }) => (
             <button
               key={id}
@@ -96,6 +109,7 @@ export function ModuloRH({ planejamento, onSaveScaleOverride, onReplicateScaleDa
               id={`rh-aba-${id}`}
               aria-controls={`rh-painel-${id}`}
               aria-selected={aba === id}
+              tabIndex={aba === id ? 0 : -1}
               onClick={() => setAba(id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all ${aba === id ? 'bg-primary text-on-primary shadow-md' : 'text-on-surface-variant hover:text-primary'}`}
             >

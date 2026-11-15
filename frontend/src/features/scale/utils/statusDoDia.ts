@@ -1,5 +1,5 @@
 import { normalizarTexto } from '@shared/validadores';
-import { bloqueioDiaInteiro, FUNCIONAMENTO_PADRAO, type Funcionamento } from '@shared/agenda';
+import { bloqueioDiaInteiro, type Funcionamento } from '@shared/agenda';
 import type { DiaEscala } from '@shared/escala';
 import type { Bloqueio } from '../../../types';
 
@@ -18,7 +18,7 @@ export const statusDoDia = (
   diaEscala: DiaEscala | undefined,
   ajuste: AjusteDoDia | undefined,
   bloqueiosDoDia: Bloqueio[],
-  funcionamento: Funcionamento = FUNCIONAMENTO_PADRAO,
+  funcionamento: Funcionamento,
 ): EmployeeDayStatus | null => {
   if (diaEscala && diaEscala.tipo !== 'trabalho') {
     return {

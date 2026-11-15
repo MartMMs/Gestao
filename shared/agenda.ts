@@ -37,6 +37,8 @@ export const FUNCIONAMENTO_PADRAO: Funcionamento = {
   abertura: '09:00', fechamento: '21:00', limite: null, dias: [0, 1, 2, 3, 4, 5, 6],
 };
 export const NOMES_DIAS_SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+// "aos domingos", "às segundas": o dia da semana no plural, para avisos de dia fechado
+export const diaNoPlural = (semana: number) => `${semana === 0 || semana === 6 ? 'aos' : 'às'} ${NOMES_DIAS_SEMANA[semana]}s`;
 
 // Lê da config da empresa (ou de dados ainda não carregados): campo ausente ou inválido vale o padrão
 export const lerFuncionamento = (cfg?: {
@@ -85,7 +87,8 @@ export const FOLGA_INICIO = '00:00';
 export const FOLGA_FIM = '23:59';
 
 // Bloqueio que cobre todo o expediente (da abertura ao fechamento): o profissional fica indisponível no dia
-export const bloqueioDiaInteiro = (bloqueio: { horaInicio: string; horaFim: string }, f: Funcionamento = FUNCIONAMENTO_PADRAO) =>
+// O horário é obrigatório: sem ele valeria o padrão 09:00–21:00 calado, mesmo com a casa configurada de outro jeito
+export const bloqueioDiaInteiro = (bloqueio: { horaInicio: string; horaFim: string }, f: Funcionamento) =>
   horarioParaMinutos(bloqueio.horaInicio) <= horarioParaMinutos(f.abertura)
   && horarioParaMinutos(bloqueio.horaFim) >= horarioParaMinutos(f.fechamento);
 
@@ -147,7 +150,7 @@ export const validarHorarioAgendamento = (
   if (!Number.isFinite(duracaoMin) || duracaoMin <= 0) return 'Duração do atendimento inválida.';
 
   const semana = diaDaSemana(data);
-  if (!f.dias.includes(semana)) return `A casa não abre ${semana === 0 || semana === 6 ? 'aos' : 'às'} ${NOMES_DIAS_SEMANA[semana]}s.`;
+  if (!f.dias.includes(semana)) return `A casa não abre ${diaNoPlural(semana)}.`;
   const inicio = horarioParaMinutos(horario);
   const abre = horarioParaMinutos(f.abertura);
   const fecha = horarioParaMinutos(f.fechamento);

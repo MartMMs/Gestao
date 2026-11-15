@@ -98,8 +98,17 @@ const CAMPOS_EMPRESA = [
   'termoEspaco', 'termoServico', 'telefoneContato', 'emailContato', 'endereco', 'corTemaPrimaria',
 ] as const;
 
-const validarConfigEmpresa = (body: Record<string, unknown>) => {
-  const dados: Record<string, string | boolean | number[] | null> = {};
+// Campos validados do PUT; os do horário com o tipo certo (o PUT monta o horário novo sem conversões)
+type DadosEmpresa = {
+  [campo: string]: string | boolean | number[] | null | undefined;
+  horaAbertura?: string;
+  horaFechamento?: string;
+  horaLimiteAgendamento?: string | null;
+  diasFuncionamento?: number[];
+};
+
+const validarConfigEmpresa = (body: Record<string, unknown>): { erro: string; dados?: undefined } | { dados: DadosEmpresa; erro?: undefined } => {
+  const dados: DadosEmpresa = {};
   for (const campo of ['horaAbertura', 'horaFechamento'] as const) {
     if (body[campo] === undefined) continue;
     if (!horarioValido(body[campo])) return { erro: 'Informe abertura e fechamento no formato HH:MM.' };
@@ -389,10 +398,10 @@ export function createEmpresaRouter(eventos: Eventos) {
       // Horário confere com o que já está gravado (mudar só o fechamento não pode deixar o limite depois dele)
       const d = validacao.dados;
       const novoHorario: Funcionamento = {
-        abertura: (d.horaAbertura as string | undefined) ?? atual.horaAbertura,
-        fechamento: (d.horaFechamento as string | undefined) ?? atual.horaFechamento,
-        limite: d.horaLimiteAgendamento !== undefined ? d.horaLimiteAgendamento as string | null : atual.horaLimiteAgendamento,
-        dias: (d.diasFuncionamento as number[] | undefined) ?? atual.diasFuncionamento,
+        abertura: d.horaAbertura ?? atual.horaAbertura,
+        fechamento: d.horaFechamento ?? atual.horaFechamento,
+        limite: d.horaLimiteAgendamento !== undefined ? d.horaLimiteAgendamento : atual.horaLimiteAgendamento,
+        dias: d.diasFuncionamento ?? atual.diasFuncionamento,
       };
       const erroHorario = validarFuncionamento(novoHorario);
       if (erroHorario) return res.status(400).json({ erro: erroHorario });

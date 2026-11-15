@@ -51,7 +51,8 @@ export function CollaboratorView({
   onAlterarStatus,
   onReassignAppointment,
 }: CollaboratorViewProps) {
-  const agendaDaCasa = currentUser.role === 'receptionist' && !!onAlterarStatus && !!onEditAppointment && !!onDeleteAppointment;
+  // Recepção trabalha na agenda da casa: decidido pelo papel, não pelos callbacks que o App passa
+  const agendaDaCasa = currentUser.role === 'receptionist';
   const funcionamento = useFuncionamento();
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
   const intervalosDoDia = useMemo(() => appointments
@@ -408,6 +409,11 @@ export function CollaboratorView({
 
       </>)}
 
+      {agendaDaCasa && activeTab === 'agenda' && !(onAlterarStatus && onEditAppointment && onDeleteAppointment) && (
+        <p role="alert" className="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
+          A agenda da casa não carregou. Recarregue a página; se continuar, avise o suporte.
+        </p>
+      )}
       {agendaDaCasa && activeTab === 'agenda' && onAlterarStatus && onEditAppointment && onDeleteAppointment && (
           <SupervisorEscalaTab
             employees={employees}
