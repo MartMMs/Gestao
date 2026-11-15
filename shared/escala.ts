@@ -341,46 +341,6 @@ export function aplicarFolgasDomingoNoMes(dias: DiaEscala[], folgasDomingoNoMes:
 }
 
 /**
- * Calcula total de horas em uma escala
- */
-export function calcularHorasEscala(dias: DiaEscala[]): {
-  horasTrabalhadas: number;
-  diasFolga: number;
-  diasTrabalho: number;
-  percentualUtilizacao: number;
-} {
-  let horasTrabalhadas = 0;
-  let diasFolga = 0;
-  let diasTrabalho = 0;
-  
-  dias.forEach(dia => {
-    if (dia.tipo === 'trabalho') {
-      diasTrabalho++;
-      if (dia.horaInicio && dia.horaFim) {
-        let horas = (horarioParaMinutos(dia.horaFim) - horarioParaMinutos(dia.horaInicio)) / 60;
-        
-        // Considerar turno que passa da meia-noite
-        if (horas < 0) horas += 24;
-        
-        horasTrabalhadas += horas;
-      }
-    } else if (dia.tipo === 'folga') {
-      diasFolga++;
-    }
-  });
-  
-  const totalDias = dias.length;
-  const percentualUtilizacao = totalDias > 0 ? (diasTrabalho / totalDias) * 100 : 0;
-  
-  return {
-    horasTrabalhadas: Math.round(horasTrabalhadas * 10) / 10,
-    diasFolga,
-    diasTrabalho,
-    percentualUtilizacao: Math.round(percentualUtilizacao),
-  };
-}
-
-/**
  * Retorna próximo dia de folga
  */
 export function proximaFolga(dias: DiaEscala[], dataReferencia: string): string | null {

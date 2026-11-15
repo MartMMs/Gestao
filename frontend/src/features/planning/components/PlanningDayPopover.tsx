@@ -1,7 +1,8 @@
+import { diaMesBR } from '@shared/agenda';
 import React, { useMemo, useState } from 'react';
 import { Employee } from '../../../types';
 import { aplicarAjusteEscala, DiaEscala } from '../../../utils/escalaCalculator';
-import { analisarInterjornadaEscala, horasDoDia } from '../../../utils/cltValidator';
+import { analisarInterjornadaEscala, horasDoDia, horasPorSemana, inicioDaSemana } from '../../../utils/cltValidator';
 import { ModalFormulario } from '../../../components/ModalFormulario';
 import { TurnoSelect } from './TurnoSelect';
 import { VISUAL_CATEGORIA, categoriaDoTurno, formatarHoras, turnoDoDia } from '../utils/turnos';
@@ -29,13 +30,7 @@ const TIPOS: { tipo: DiaEscala['tipo']; rotulo: string; icone: string }[] = [
   { tipo: 'fds', rotulo: 'FDS', icone: 'weekend' },
 ];
 
-const dataBR = (data: string) => data.split('-').reverse().slice(0, 2).join('/');
 const dataLonga = (data: string) => new Date(`${data}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
-const inicioDaSemana = (data: string) => {
-  const d = new Date(`${data}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
-  return d.toISOString().slice(0, 10);
-};
 const unico = <T,>(valores: T[]) => (new Set(valores).size === 1 ? valores[0] : undefined);
 
 export function PlanningDayPopover({ dias, colaborador, escalaContexto, notaSalva, scaleByEmployee, onClose, onSave }: PlanningDayPopoverProps) {
@@ -71,20 +66,15 @@ export function PlanningDayPopover({ dias, colaborador, escalaContexto, notaSalv
 
   const avisosInterjornada = useMemo(() => analisarInterjornadaEscala(proposta).violacoes
     .filter((v) => datas.has(v.dataTurnoAtual) || datas.has(v.dataTurnoAnterior))
-    .map((v) => `Descanso de ${formatarHoras(v.descansoHoras)} entre ${dataBR(v.dataTurnoAnterior)} (${v.turnoAnterior}) e ${dataBR(v.dataTurnoAtual)} (${v.turnoAtual}). O mínimo é 11h (CLT, art. 66).`),
+    .map((v) => `Descanso de ${formatarHoras(v.descansoHoras)} entre ${diaMesBR(v.dataTurnoAnterior)} (${v.turnoAnterior}) e ${diaMesBR(v.dataTurnoAtual)} (${v.turnoAtual}). O mínimo é 11h (CLT, art. 66).`),
   [datas, proposta]);
 
   // Todas as semanas que a seleção toca, inteiras (inclusive dias do mês vizinho)
   const avisosSemana = useMemo(() => {
     const contrato = Number(colaborador?.cargaHorariaSemanal) > 0 ? Number(colaborador?.cargaHorariaSemanal) : 44;
     const semanas = new Set([...datas].map(inicioDaSemana));
-    const horas = new Map<string, number>();
-    proposta.forEach((dia) => {
-      const semana = inicioDaSemana(dia.data);
-      if (semanas.has(semana)) horas.set(semana, (horas.get(semana) ?? 0) + horasDoDia(dia));
-    });
-    return [...horas].filter(([, total]) => total > contrato)
-      .map(([semana, total]) => `Semana de ${dataBR(semana)}: ${formatarHoras(total)}, ${formatarHoras(total - contrato)} acima do contrato de ${contrato}h.`);
+    return [...horasPorSemana(proposta)].filter(([semana, total]) => semanas.has(semana) && total > contrato)
+      .map(([semana, total]) => `Semana de ${diaMesBR(semana)}: ${formatarHoras(total)}, ${formatarHoras(total - contrato)} acima do contrato de ${contrato}h.`);
   }, [colaborador?.cargaHorariaSemanal, datas, proposta]);
 
   const horasSelecao = proposta.filter((d) => datas.has(d.data)).reduce((soma, d) => soma + horasDoDia(d), 0);
@@ -121,7 +111,7 @@ export function PlanningDayPopover({ dias, colaborador, escalaContexto, notaSalv
   };
 
   if (dias.length === 0) return null;
-  const titulo = emLote ? `${dataBR(dias[0].data)} a ${dataBR(dias[dias.length - 1].data)}` : dataLonga(dias[0].data);
+  const titulo = emLote ? `${diaMesBR(dias[0].data)} a ${diaMesBR(dias[dias.length - 1].data)}` : dataLonga(dias[0].data);
 
   return (
     <ModalFormulario
@@ -172,7 +162,7 @@ export function PlanningDayPopover({ dias, colaborador, escalaContexto, notaSalv
             </label>
             <span className="text-[11px] font-medium text-on-surface-variant">
               {/* Horas de trabalho: o turno menos o intervalo mínimo da CLT, a mesma conta dos alertas */}
-              {`${formatarHoras(horasSelecao)} de trabalho${emLote ? ' na seleção' : ''} (sem o intervalo)`}
+              {`${formatarHoras(horasSelecao)} de trabalho${emLote ? ' na seleção' : ''}, já descontado o intervalo mínimo da CLT`}
             </span>
           </div>
           <TurnoSelect

@@ -221,7 +221,7 @@ export function AdminView({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="w-full min-w-0 space-y-6">
       {/* Barra de Notificação Toast */}
       {toastMessage && (
         <motion.div
@@ -248,8 +248,8 @@ export function AdminView({
           <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-sm shrink-0">
             <span className="material-symbols-outlined text-3xl">{companyConfig?.icone || 'admin_panel_settings'}</span>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-[11px] font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-2.5 py-0.5 rounded-full">
                 Modo Administrador Geral
               </span>

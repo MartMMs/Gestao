@@ -685,7 +685,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
   // Realocar o atendimento para outro profissional (recepção e supervisores)
   const realocar = async (req: Request, id: string, destinoId: unknown, versao: unknown) => {
     if (!gerenciaAgenda(req)) throw new HttpError(403, 'Apenas a recepção ou supervisores podem realocar atendimentos.');
-    if (typeof destinoId !== 'string' || !destinoId) throw new HttpError(400, 'Informe o colaborador de destino.');
+    if (typeof destinoId !== 'string' || !UUID_REGEX.test(destinoId)) throw new HttpError(400, 'Informe o colaborador de destino.');
 
     const versaoEsperada = exigirVersao(versao);
 
@@ -693,7 +693,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
       // Trava do destino antes da linha: a mesma ordem da edição (agenda, depois agendamento), sem impasse entre elas
       await travarAgenda(tx, destinoId);
       await travarAgendamento(tx, id);
-      const agendamento = await tx.agendamento.findUnique({ where: { id }, include: { servicos: true } });
+      const agendamento = await tx.agendamento.findUnique({ where: { id }, include: { servicos: true, cliente: { select: { codigo: true } }, colaborador: { select: { nome: true } } } });
       if (!agendamento) throw new HttpError(404, 'Agendamento não encontrado.');
       conferirVersao(agendamento.atualizadoEm, versaoEsperada);
       // Mesma regra da edição: registro fechado não troca de profissional (mudaria o dono do faturamento e da comissão)
@@ -706,7 +706,10 @@ export function createAgendamentosRouter(notificar: Notificar) {
       const indisponivel = await validarDisponibilidadeProfissional(tx, destinoId, agendamento.data, agendamento.servicos, { ignorarAgendamentoId: id });
       if (indisponivel) throw new HttpError(indisponivel.status, indisponivel.erro);
 
-      return tx.agendamento.update({ where: { id }, data: { colaboradorId: destinoId }, include: INCLUDE_COMPLETO });
+      const realocado = await tx.agendamento.update({ where: { id }, data: { colaboradorId: destinoId }, include: INCLUDE_COMPLETO });
+      // Trocar o profissional muda o dono do faturamento e da comissão: fica registrado quem trocou
+      await registrarAuditoria(req, { acao: 'agendamento.realocado', alvo: alvoDoAtendimento(agendamento), antes: { profissional: agendamento.colaborador?.nome }, depois: { profissional: realocado.colaborador?.nome }, tx });
+      return realocado;
     });
   };
 

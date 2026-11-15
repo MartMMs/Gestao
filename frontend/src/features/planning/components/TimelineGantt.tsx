@@ -175,32 +175,6 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
     return counts;
   }, [appointments, year, monthNum]);
 
-  // Calcula cobertura de Habilidades Vitais (ex: Primeiros Socorros)
-  const vitalSkillsCoverageByDay = useMemo(() => {
-    const coverage = new Map<number, boolean>();
-    const daysInMonth = new Date(year, monthNum, 0).getDate();
-    for (let d = 1; d <= daysInMonth; d++) coverage.set(d, false);
-
-    escalasByEmployee.forEach((dayMap, employeeId) => {
-      const emp = employees.find((e) => e.id === employeeId);
-      const hasVitalSkill = emp?.habilidades?.some((h) => 
-        h.toLowerCase().includes('primeiros socorros') || 
-        h.toLowerCase().includes('emergencia') || 
-        h.toLowerCase().includes('emergência')
-      );
-
-      if (hasVitalSkill) {
-        for (const [day, dia] of dayMap.entries()) {
-          if (dia.tipo === 'trabalho') {
-            coverage.set(day, true);
-          }
-        }
-      }
-    });
-
-    return coverage;
-  }, [escalasByEmployee, employees, year, monthNum]);
-
   // Alerta simples de descanso semanal: marca a partir do 7o dia consecutivo de trabalho
   const cltViolationByEmployee = useMemo(() => {
     const map = new Map<string, Set<number>>();
@@ -397,45 +371,6 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
               </div>
             </div>
 
-            {/* Vital Skills summary (Habilidades Vitais) */}
-            <div className="flex items-center">
-              <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-[10px] sm:text-[11px] uppercase tracking-tighter sm:tracking-[0.15em] text-on-surface-variant sticky left-0 z-20 truncate" title="Garante que há profissionais com Primeiros Socorros no dia">
-                Habilidades Vitais
-              </div>
-
-              <div className="flex gap-0.5 p-2 bg-surface-container-low border-b border-outline-variant/10">
-                {dayMeta.map((meta) => {
-                  const hasVital = vitalSkillsCoverageByDay.get(meta.day);
-                  const count = coverageByDay.get(meta.day) || 0;
-                  const isWorkingDay = count > 0;
-
-                  let heatClass = 'bg-surface-container-lowest text-outline-variant/30 border-outline-variant/20';
-                  let icon = 'horizontal_rule';
-                  let tooltip = 'Sem operação (fechado)';
-
-                  if (isWorkingDay && !hasVital) {
-                    heatClass = 'bg-orange-100 text-orange-800 border-orange-300';
-                    icon = 'health_and_safety';
-                    tooltip = 'Alerta: Nenhum profissional com Primeiros Socorros escalado!';
-                  } else if (isWorkingDay && hasVital) {
-                    heatClass = 'bg-emerald-50 text-emerald-600 border-emerald-200';
-                    icon = 'verified_user';
-                    tooltip = 'Cobertura vital garantida (Primeiros Socorros)';
-                  }
-
-                  return (
-                    <div
-                      key={`vital-${meta.day}`}
-                      className={`w-12 h-7 flex items-center justify-center text-[11px] font-bold rounded-lg border transition-colors ${heatClass} ${meta.isWeekend ? 'ring-1 ring-inset ring-outline-variant/20' : ''}`}
-                      title={tooltip}
-                    >
-                      <span className={`material-symbols-outlined text-[14px]`}>{icon}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
             {/* Dias do mês */}
             <div className="flex items-center">
               <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-[10px] sm:text-[11px] uppercase tracking-tighter sm:tracking-[0.15em] text-on-surface-variant sticky left-0 z-20 truncate">
@@ -575,16 +510,18 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
                             )}
                           </button>
 
-                          {/* Replicate handle (right-bottom small area) */}
+                          {/* Replicar até o fim do mês: botão de verdade (teclado e leitor de tela); a tela pede confirmação */}
                           {isEditable && (
-                            <div
-                              onMouseDown={(event) => {
-                                event.preventDefault();
+                            <button
+                              type="button"
+                              onClick={(event) => {
                                 event.stopPropagation();
                                 onReplicate?.(emp.id, meta.day, daysInMonth, dia?.tipo);
                               }}
+                              aria-label={`Replicar o dia ${meta.day} de ${emp.name} até o fim do mês`}
+                              title="Replicar este dia até o fim do mês"
                               data-replicate-end={meta.day}
-                              className="absolute right-0.5 bottom-0.5 w-2.5 h-2.5 rounded-sm bg-outline-variant/40 hover:bg-primary/70 cursor-grab z-10 opacity-0 group-hover:opacity-100 transition-opacity"
+                              className="absolute right-0.5 bottom-0.5 w-3.5 h-3.5 rounded-sm bg-outline-variant/40 hover:bg-primary/70 z-10 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-primary transition-opacity"
                             />
                           )}
                         </div>

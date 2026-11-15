@@ -182,7 +182,9 @@ export function CalendarioEscala({
           <div className="flex items-center justify-between gap-2 text-xs">
             <span className="font-medium text-on-surface-variant flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[16px]">schedule</span>
-              {formatarHoras(clt.horasMes)} no mês
+              <span title="Horas de trabalho no mês, já descontado o intervalo mínimo da CLT (1h nos turnos acima de 6h)">
+                {formatarHoras(clt.horasMes)} de trabalho no mês
+              </span>
             </span>
             <span className={`font-semibold tabular-nums ${clt.carga.conforme ? 'text-on-surface' : 'text-error'}`}>
               {tipoEscala === '12x36' ? 'Média' : 'Maior semana'}: {formatarHoras(clt.carga.cargaTotal)} (limite CLT {CARGA_SEMANAL_MAXIMA_HORAS}h)

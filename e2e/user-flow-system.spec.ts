@@ -201,7 +201,7 @@ test.describe('User flow, system and final-user simulation', () => {
         }
 
         try {
-          await expect(page.getByText(/Agendamento salvo na sua agenda/i)).toBeVisible({ timeout: 6_000 });
+          await expect(page.getByText(/Agendamento salvo/i)).toBeVisible({ timeout: 6_000 });
           saved = true;
           break;
         } catch {

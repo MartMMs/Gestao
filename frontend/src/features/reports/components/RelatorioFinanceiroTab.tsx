@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
+import { formatarReais } from '../../../utils/formatters';
 import { motion } from 'motion/react';
 import { isApiError, useAtendimentosDoRelatorio, useAuditoria, useRelatorioFinanceiro, type RelatorioFinanceiro } from '../../../api';
 import { useAuth } from '../../../AuthContext';
 import { periodoRapido } from '../../../utils/periodos';
 import { AcessosHistoricoClientes } from './AcessosHistoricoClientes';
 
-const reais = (valor: number) => valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBr = (iso: string) => iso.split('-').reverse().join('/');
 
 // CSV com ponto e vírgula e vírgula decimal: abre direto no Excel em português
@@ -55,7 +55,7 @@ const valorLegivel = (campo: string, v: unknown) => {
   if (v === true) return 'sim';
   if (v === false) return 'não';
   if (v === null || v === undefined) return '—';
-  if ((campo === 'preco' || campo === 'valorTotal' || campo === 'valorComissao') && typeof v === 'number') return reais(v);
+  if ((campo === 'preco' || campo === 'valorTotal' || campo === 'valorComissao') && typeof v === 'number') return formatarReais(v);
   if (campo === 'status') return v === 'scheduled' ? 'Agendado' : STATUS_ROTULO[String(v)] ?? String(v);
   return String(v);
 };
@@ -95,8 +95,8 @@ function DetalheProfissional({ colaboradorId, de, ate, usarComissao }: { colabor
               {STATUS_ROTULO[a.status] ?? a.status}
               {a.status === 'sem_baixa' && <span className="block text-[11px] text-on-surface-variant">Conclua ou marque falta na agenda</span>}
             </td>
-            <td className="py-2 px-3 text-right tabular-nums">{reais(a.valor)}</td>
-            {usarComissao && <td className="py-2 px-3 text-right tabular-nums">{reais(a.comissao)}</td>}
+            <td className="py-2 px-3 text-right tabular-nums">{formatarReais(a.valor)}</td>
+            {usarComissao && <td className="py-2 px-3 text-right tabular-nums">{formatarReais(a.comissao)}</td>}
           </tr>
         ))}
       </tbody>
@@ -149,10 +149,10 @@ export function RelatorioFinanceiroTab() {
   const maiorFaturamento = useMemo(() => Math.max(1, ...(data?.profissionais.map((p) => p.faturamento) ?? [])), [data]);
 
   const cartoes = data ? [
-    { rotulo: 'Faturamento', valor: reais(data.totais.faturamento), icone: 'payments' },
+    { rotulo: 'Faturamento', valor: formatarReais(data.totais.faturamento), icone: 'payments' },
     ...(data.usarComissao ? [
-      { rotulo: 'Comissões', valor: reais(data.totais.comissao), icone: 'percent' },
-      { rotulo: 'Líquido (após comissões)', valor: reais(data.totais.liquido), icone: 'account_balance_wallet' },
+      { rotulo: 'Comissões', valor: formatarReais(data.totais.comissao), icone: 'percent' },
+      { rotulo: 'Líquido (após comissões)', valor: formatarReais(data.totais.liquido), icone: 'account_balance_wallet' },
     ] : []),
     { rotulo: 'Atendimentos concluídos', valor: String(data.totais.concluidos), icone: 'task_alt' },
     { rotulo: 'Faltas', valor: String(data.totais.faltas), icone: 'person_off' },
@@ -276,11 +276,11 @@ export function RelatorioFinanceiroTab() {
                     <td className="py-3 px-4 min-w-48">
                       <div className="flex items-center gap-2">
                         <div className="h-2 rounded-full bg-primary/70" style={{ width: `${Math.max(2, (p.faturamento / maiorFaturamento) * 100)}%`, maxWidth: '8rem' }} />
-                        <span className="tabular-nums">{reais(p.faturamento)}</span>
+                        <span className="tabular-nums">{formatarReais(p.faturamento)}</span>
                       </div>
                     </td>
-                    {data.usarComissao && <td className="py-3 px-4 text-right tabular-nums">{reais(p.comissao)}</td>}
-                    <td className="py-3 px-4 text-right tabular-nums">{reais(p.ticketMedio)}</td>
+                    {data.usarComissao && <td className="py-3 px-4 text-right tabular-nums">{formatarReais(p.comissao)}</td>}
+                    <td className="py-3 px-4 text-right tabular-nums">{formatarReais(p.ticketMedio)}</td>
                     <td className="py-3 px-4 text-right tabular-nums">{p.faltas}</td>
                     <td className={`py-3 px-4 text-right tabular-nums ${p.semBaixa > 0 ? 'font-bold text-amber-700 dark:text-amber-300' : ''}`}>{p.semBaixa}</td>
                     <td className="py-3 px-4 text-right tabular-nums">{p.cancelados}</td>
@@ -305,7 +305,7 @@ export function RelatorioFinanceiroTab() {
                 {data.servicos.slice(0, 10).map((s) => (
                   <li key={s.nome} className="flex justify-between gap-3 text-sm">
                     <span className="text-on-surface truncate">{s.nome} <span className="text-on-surface-variant">· {s.quantidade}x</span></span>
-                    <span className="tabular-nums text-on-surface">{reais(s.faturamento)}</span>
+                    <span className="tabular-nums text-on-surface">{formatarReais(s.faturamento)}</span>
                   </li>
                 ))}
               </ul>

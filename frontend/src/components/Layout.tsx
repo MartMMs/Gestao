@@ -20,6 +20,15 @@ interface LayoutProps {
   companyIcon?: string;
 }
 
+// Telas que cada papel pode abrir pelo seletor do topo
+const VISOES_POR_PAPEL: Record<Role, Array<[Role | 'tv' | 'autoatendimento', string]>> = {
+  admin: [['admin', 'Painel Administrador'], ['supervisor', 'Visão Operacional (Supervisor)'], ['collaborator', 'Portal do Colaborador'], ['tv', 'Painel de TV (Recepção)'], ['autoatendimento', 'Autoatendimento (Totem)']],
+  supervisor: [['supervisor', 'Portal do Supervisor'], ['collaborator', 'Portal do Colaborador'], ['tv', 'Painel de TV (Recepção)'], ['autoatendimento', 'Autoatendimento (Totem)']],
+  // Recepção e profissional não trocam de tela pelo seletor (App só deixa admin e supervisão trocar)
+  receptionist: [['receptionist', 'Portal da Recepção']],
+  collaborator: [['collaborator', 'Portal do Colaborador']],
+};
+
 export function Layout({ children, userName, userRole, activeView, onViewChange, onOpenUpcomingAppointments, upcomingAppointmentsCount = 0, cltAlertsCount = 0, onOpenCltAlerts, onLogout, isDarkMode, toggleTheme, companyName, companyIcon }: LayoutProps) {
   const [showSettings, setShowSettings] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -44,61 +53,34 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
 
   // Função simples para manipular variáveis CSS caso você as use no Tailwind/CSS nativo
   const changePrimaryColor = (colorHex: string) => {
-    // Caso não tenha mapeado variáveis customizadas, você pode fazer ajustes no seu index.css
-    // adicionando :root { --color-primary: #006a5a; }
-    document.documentElement.style.setProperty('--color-primary', colorHex);
-    document.documentElement.style.setProperty('--color-primary-dim', colorHex + 'cc');
+    // Só a cor da marca: o index.css deriva os demais tons (claro e escuro) a partir dela
+    document.documentElement.style.setProperty('--brand', colorHex);
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-surface text-on-surface font-body antialiased transition-colors duration-300">
+    <div translate="no" className="notranslate min-h-screen flex flex-col bg-surface text-on-surface font-body antialiased transition-colors duration-300">
       {/* TopAppBar */}
-      <header className="bg-surface/80 backdrop-blur-md font-headline text-on-surface sticky top-0 z-50 shadow-sm flex justify-between items-center w-full px-4 sm:px-8 py-3 sm:py-4 max-w-full">
+      <header className="bg-surface/80 backdrop-blur-md font-headline text-on-surface sticky top-0 z-50 shadow-sm flex flex-wrap justify-between items-center gap-2 w-full px-4 sm:px-8 py-3 sm:py-4 max-w-full">
         <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
           {/* Espaço para a sua Logo */}
           <div className="w-10 h-10 sm:w-11 sm:h-11 bg-primary-container rounded-xl flex items-center justify-center overflow-hidden border border-primary/20 shrink-0 shadow-sm">
             <span className="material-symbols-outlined text-primary text-2xl">{companyIcon || 'storefront'}</span>
           </div>
-          <span className="text-base sm:text-2xl font-serif italic text-primary truncate max-w-[150px] sm:max-w-none">
+          <span className="hidden md:block text-2xl font-serif italic text-primary">
             {companyName || 'OmniGestão'}
           </span>
         </div>
-        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-4 min-w-0">
           <div className="hidden lg:flex items-center gap-2 px-4 py-1 bg-surface-container rounded-full border border-outline-variant/30">
             <span className="material-symbols-outlined text-primary scale-75">badge</span>
-            {userRole === 'admin' ? (
-              <select 
-                value={activeView} 
-                onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
-                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-wide font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
-              >
-                <option value="admin">Painel Administrador</option>
-                <option value="supervisor">Visão Operacional (Supervisor)</option>
-                <option value="collaborator">Portal do Colaborador</option>
-                <option value="tv">Painel de TV (Recepção)</option>
-                <option value="autoatendimento">Autoatendimento (Totem)</option>
-              </select>
-            ) : userRole === 'supervisor' ? (
-              <select 
-                value={activeView} 
-                onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
-                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-wide font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
-              >
-                <option value="supervisor">Portal do Supervisor</option>
-                <option value="collaborator">Portal do Colaborador</option>
-                <option value="tv">Painel de TV (Recepção)</option>
-                <option value="autoatendimento">Autoatendimento (Totem)</option>
-              </select>
-            ) : (
-              <select 
-                value={activeView} 
-                onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
-                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-wide font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
-              >
-                <option value="collaborator">Portal do Colaborador</option>
-                <option value="autoatendimento">Autoatendimento (Totem)</option>
-              </select>
-            )}
+            <select
+              aria-label="Portal"
+              value={activeView}
+              onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
+              className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-wide font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
+            >
+              {VISOES_POR_PAPEL[userRole].map(([valor, rotulo]) => <option key={valor} value={valor}>{rotulo}</option>)}
+            </select>
           </div>
           {activeView === 'supervisor' && onOpenUpcomingAppointments && (
             <button
@@ -180,7 +162,7 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="bg-surface-container-low border-b border-outline-variant/20 px-8 py-5 flex flex-col sm:flex-row items-center gap-4 justify-between overflow-hidden"
+            className="bg-surface-container-low border-b border-outline-variant/20 px-4 sm:px-8 py-5 flex flex-col sm:flex-row sm:flex-wrap items-center gap-4 justify-between overflow-hidden"
           >
             <div className="text-left">
               <h4 className="text-sm font-bold text-primary uppercase tracking-widest">Estilo da Clínica</h4>

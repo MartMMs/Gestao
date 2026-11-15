@@ -134,7 +134,8 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
   const [configDeFora, setConfigDeFora] = useState<ConfiguracaoEmpresa | null>(null);
 
   useEffect(() => {
-    if (!config) return;
+    // Mesma config já aplicada (StrictMode roda o efeito 2x): sem isso o aviso de conflito aparecia ao abrir
+    if (!config || config === baseRef.current) return;
     const editado = baseRef.current !== null && JSON.stringify(formRef.current) !== JSON.stringify(baseRef.current);
     baseRef.current = config;
     if (editado && JSON.stringify(formRef.current) !== JSON.stringify(config)) {

@@ -70,6 +70,8 @@
 }
 
 @layer base {
+  /* Modal nunca passa da altura da tela (celular): rola por dentro. Utilitários max-h-* do próprio modal têm prioridade */
+  [role="dialog"] { max-height: calc(100dvh - 2rem); overflow-y: auto; }
   body {
     font-family: var(--font-body);
     background-color: var(--color-background);
@@ -118,3 +120,21 @@
 ::-webkit-scrollbar-track { background: var(--color-surface-container-low); border-radius: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--color-outline-variant); border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-outline); }
+
+/* Paleta escolhida pelo supervisor (--brand no <html>): deriva todos os tons de "primary", inclusive no modo escuro */
+:root[style*="--brand"] {
+  --color-primary: var(--brand);
+  --color-primary-dim: color-mix(in oklab, var(--brand) 80%, black);
+  --color-primary-container: color-mix(in oklab, var(--brand) 20%, white);
+  --color-primary-fixed: color-mix(in oklab, var(--brand) 20%, white);
+  --color-primary-fixed-dim: color-mix(in oklab, var(--brand) 40%, white);
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: color-mix(in oklab, var(--brand) 35%, black);
+  --color-surface-tint: var(--brand);
+}
+:root.dark[style*="--brand"] {
+  --color-primary: color-mix(in oklab, var(--brand) 55%, white);
+  --color-on-primary: color-mix(in oklab, var(--brand) 30%, black);
+  --color-primary-container: color-mix(in oklab, var(--brand) 45%, black);
+  --color-on-primary-container: color-mix(in oklab, var(--brand) 20%, white);
+}

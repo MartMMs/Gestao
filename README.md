@@ -55,6 +55,15 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
   horario o servidor avisa (409) e so grava com confirmacao. A grade cresce para mostrar esses atendimentos.
   Folga de dia inteiro passa a ser gravada como 00:00-23:59 (a migration converte as que cobriam 09:00-21:00), para
   continuar valendo quando o horario muda.
+- **Modulo RH:** abas "Escalas & Alocacao" (Grade de Escalas), "Espelho de Ponto & Banco de Horas" (horas previstas
+  pela escala, normais ate 44h por semana e extras acima disso) e "Ferias & Afastamentos" (registra o periodo como
+  folga com o motivo; protegido contra clique duplo e avisa se o periodo ficar gravado pela metade). Painel
+  "Verificar Conformidade CLT" lista quem tem alerta no mes e "Propor folgas na grade" (proposta, so grava ao confirmar).
+  Supervisores tambem entram na escala; admin e recepcao ficam fora.
+- **Agenda da casa na recepcao:** a recepcao ve a agenda de todos os profissionais (dia, semana e mes), realoca e
+  muda status; nao exclui (cancela, o atendimento fica no historico) e nao cria bloqueio. O servidor confere: DELETE
+  so para supervisao (403) e a troca de profissional fica na auditoria (`agendamento.realocado`).
+- **Painel da TV em subdominio:** `tv.<seu-dominio>` (ou o host de `VITE_TV_HOST`) abre direto no painel de chamada.
 - **Auditoria LGPD:** relatorio "Acessos ao historico de clientes" (quem abriu o historico de qual cliente, IP e quando).
 - **Pagamento e WhatsApp pre-prontos:** adapters HTTP genericos, desligados por padrao (ver "Integracoes" abaixo).
 
@@ -136,6 +145,8 @@ Veja `.env.example`. Principais:
 - `E2E_PASSWORD` / `SEED_PASSWORD` (senhas dos usuarios de teste e de demonstracao)
 - `VITE_API_URL` / `VITE_SOCKET_URL` opcionais (aplicadas no build do frontend)
 - `VITE_AUTOATENDIMENTO_HOST` opcional: host(s) do totem, separados por virgula (vazio = qualquer host que comece com `autoatendimento.`)
+- `VITE_TV_HOST` opcional: host(s) do painel de TV, separados por virgula (vazio = qualquer host que comece com `tv.`); nele o portal abre direto na TV
+- `VITE_ATALHO_CAMINHOS=1` opcional: `/totem` e `/painel` abrem pelo caminho no build de producao (teste pelo IP). Fica na mesma origem do portal, sem isolamento de sessao; em producao use os subdominios. No `npm run dev` os caminhos sempre funcionam
 - `VITE_AUTOATENDIMENTO_URL`: endereco do totem usado pelo botao da tela de login (sem ela, o totem abre dentro do portal, sem isolamento)
 
 ## Migrations do banco
@@ -159,6 +170,18 @@ add_header X-Content-Type-Options nosniff always;
 
 Defina `VITE_API_URL` no build de producao: sem ela, a CSP libera a porta 3333 de qualquer host.
 
+## HTTPS / TLS (producao)
+
+O TLS fica no nginx; o Node escuta so em `127.0.0.1:3333`. Modelo pronto em
+[docs/nginx-https.conf.example](docs/nginx-https.conf.example) (nginx 1.25.1+: TLS 1.2/1.3, HTTP vira HTTPS, HSTS, CSP,
+Referrer-Policy, Permissions-Policy, WebSocket, host desconhecido sem resposta). Teste a CSP antes com
+`Content-Security-Policy-Report-Only` e preencha `VITE_AUTOATENDIMENTO_HOST` e `VITE_TV_HOST` com os hosts exatos.
+
+1. Gere o certificado: `sudo certbot certonly --nginx -d app.suaempresa.com -d autoatendimento.suaempresa.com -d tv.suaempresa.com -d api.suaempresa.com`.
+2. Backend com `NODE_ENV=production` (cookie de sessao `Secure` e HSTS) e `TRUST_PROXY=1`.
+3. Use `https://` em `CORS_ORIGINS`, `VITE_API_URL`, `VITE_SOCKET_URL` e `VITE_AUTOATENDIMENTO_URL`.
+4. O certbot renova sozinho; confira com `sudo certbot renew --dry-run`.
+
 ## Totem em subdominio (producao)
 
 1. Aponte o DNS de `autoatendimento.<seu-dominio>` para o mesmo servidor do portal e sirva o mesmo build do frontend.
@@ -180,17 +203,6 @@ com os cabecalhos `x-webhook-timestamp` (segundos) e `x-webhook-signature` (HMAC
 `PAYMENT_WEBHOOK_SECRET`). Chamadas com mais de 5 minutos ou com valor menor que o cobrado sao recusadas. Um pagamento que chega depois de a
 reserva expirar marca o agendamento como `pago_apos_expirar` e avisa a equipe, para devolucao ou remarcacao.
 
-## Validacao rapida
-
-```bash
-npm run lint        # TypeScript estrito no frontend, backend e shared
-npm run build
-npm run test:unit
-```
-
-Testes E2E (precisam do banco e de `E2E_PASSWORD` no `.env`):
-
-```bash
 ## Integracoes (pagamento e WhatsApp)
 
 Nenhum SDK de terceiro: os dois pontos de extensao sao adapters HTTP genericos, desligados enquanto a URL estiver vazia.
@@ -212,6 +224,25 @@ Para ligar um provedor real, aponte a URL para ele ou para um servico intermedia
 - As mensagens levam so o primeiro nome, dia, hora e o codigo da reserva: nada de servico, profissional ou sala.
 - Antes de ligar: definir o formato do telefone que o provedor exige (ex.: `+55`) e o consentimento/opt-out (LGPD).
 
+## Validacao rapida
+
+```bash
+npm run lint        # TypeScript estrito no frontend, backend e shared
+npm run build
+npm run test:unit   # Vitest + testes dos scripts (node --test scripts/*.test.mjs)
+```
+
+Checklist de lancamento de uma URL publicada (HTTPS, certificado, cabecalhos, metatags, PageSpeed) e lista do que
+testar a mao:
+
+```bash
+npm run check:site -- https://app.suaempresa.com            # PSI_API_KEY=... opcional
+npm run check:site -- https://homologacao.suaempresa.com --sem-psi   # nao envia a URL ao PageSpeed do Google
+```
+
+Testes E2E (precisam do banco e de `E2E_PASSWORD` no `.env`):
+
+```bash
 npm --prefix backend run seed:ci   # cria admin@serenidade.com, helena e ana com a senha E2E_PASSWORD
 npm run test:e2e
 ```

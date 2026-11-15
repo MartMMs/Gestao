@@ -6,7 +6,7 @@ import { CONTAS, E2E_PASSWORD, apiBase, apagarClienteDeTeste, loginPelaTela, nom
 test.describe.configure({ mode: 'serial' });
 
 test.describe('Autoatendimento - Modo Admin, Agendamento Sem Pagamento & Mobile', () => {
-  test('Supervisor acessa aba Totem & Autoatendimento, altera configurações e visualiza simulador mobile', async ({ page }) => {
+  test('Supervisor acessa aba Totem & Autoatendimento, e altera configurações', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/');
 
@@ -25,16 +25,6 @@ test.describe('Autoatendimento - Modo Admin, Agendamento Sem Pagamento & Mobile'
     // Tira screenshot do Painel Admin
     await page.screenshot({ path: test.info().outputPath('09_admin_autoatendimento_config.png') });
 
-    // Clica no botão "Simulador Mobile"
-    const btnSimulador = page.getByRole('button', { name: /Simulador Mobile/i });
-    await expect(btnSimulador).toBeVisible();
-    await btnSimulador.click();
-
-    // Valida que a moldura do smartphone apareceu
-    await expect(page.getByText(/Simulador de Acessibilidade Mobile/i)).toBeVisible();
-    await expect(page.getByText(/Touch Target Seguro/i)).toBeVisible();
-    await page.waitForTimeout(1000);
-    await page.screenshot({ path: test.info().outputPath('10_admin_simulador_mobile.png') });
 
     // Supervisor vê a cobrança em texto, sem poder alterá-la (decisão do administrador)
     await expect(page.getByText(/alterado só pelo administrador/i)).toBeVisible();

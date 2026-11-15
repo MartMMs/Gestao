@@ -59,6 +59,7 @@ export function AppointmentScheduleFields({
           <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Data</label>
           <input
             required
+            aria-label="Data"
             type="date"
             value={date}
             onChange={(e) => onDateChange(e.target.value)}
@@ -70,6 +71,7 @@ export function AppointmentScheduleFields({
           <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Horário</label>
           <input
             required
+            aria-label="Horário"
             type="time"
             min={funcionamento.abertura}
             max={funcionamento.limite ?? funcionamento.fechamento}
@@ -83,6 +85,7 @@ export function AppointmentScheduleFields({
           <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Profissional</label>
           <select
             required
+            aria-label="Profissional"
             value={employeeId}
             onChange={(e) => onEmployeeChange(e.target.value)}
             disabled={disabled}

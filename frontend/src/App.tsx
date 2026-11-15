@@ -29,9 +29,12 @@ import {
 } from './api'; // Importando os novos hooks
 
 const AdminViewLazy = lazy(() => import('./components/AdminView').then((module) => ({ default: module.AdminView })));
-import { isTeamMember } from './utils/formatters';
-import { getAutoatendimentoUrl } from './config/hosts';
+import { atendeNaAgenda } from './utils/formatters';
+import { getAutoatendimentoUrl, isTvHost, noCaminho } from './config/hosts';
 import { DEPENDENCIAS_ESCOPO, ESCOPOS_MUDANCA, ehEscopoMudanca } from '@shared/escopos';
+
+// Aparelho da TV (subdomínio tv. ou /painel no desenvolvimento): o endereço não muda depois de carregar
+const ABRIR_NA_TV = isTvHost() || noCaminho('/painel');
 const SupervisorViewLazy = lazy(() => import('./components/SupervisorView').then((module) => ({ default: module.SupervisorView })));
 const CollaboratorViewLazy = lazy(() => import('./components/CollaboratorView').then((module) => ({ default: module.CollaboratorView })));
 const TVPanelViewLazy = lazy(() => import('./components/TVPanelView').then((module) => ({ default: module.TVPanelView })));
@@ -159,8 +162,8 @@ export default function App() {
   const { currentUser, token, loginError, handleLogin, handleLogout, concluirTrocaDeSenha } = useAuth();
   const queryClient = useQueryClient();
   const { data: companyConfig } = useCompanyConfig(token);
-  const [activeRoleView, setActiveRoleView] = useState<Role | 'tv' | 'autoatendimento'>(() => currentUser?.role ?? 'collaborator');
-  const [isPublicTVMode, setIsPublicTVMode] = useState(false);
+  const [activeRoleView, setActiveRoleView] = useState<Role | 'tv' | 'autoatendimento'>(() => (ABRIR_NA_TV ? 'tv' : currentUser?.role ?? 'collaborator'));
+  const [isPublicTVMode, setIsPublicTVMode] = useState(ABRIR_NA_TV);
   const [isPublicAutoatendimentoMode, setIsPublicAutoatendimentoMode] = useState(false);
   const shouldLoadSupervisorDatasets = Boolean(token) && (currentUser?.role === 'supervisor' || currentUser?.role === 'admin') && (activeRoleView === 'supervisor' || activeRoleView === 'admin');
 
@@ -196,7 +199,7 @@ export default function App() {
   }, [employeesError, appointmentsError, servicesError, clientsError]);
 
   // Atualiza a View de segurança baseada no cargo toda vez que o currentUser mudar
-  useEffect(() => { if (currentUser) setActiveRoleView(currentUser.role); }, [currentUser]);
+  useEffect(() => { if (currentUser) setActiveRoleView(ABRIR_NA_TV ? 'tv' : currentUser.role); }, [currentUser]);
 
   // Estado do Tema (Modo Escuro/Claro) com persistência no navegador
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -330,7 +333,7 @@ export default function App() {
         completedCounts.set(app.assignedEmployeeId, (completedCounts.get(app.assignedEmployeeId) || 0) + 1);
       }
     }
-    return employees.filter(e => isTeamMember(e)).map(emp => ({
+    return employees.filter(e => atendeNaAgenda(e)).map(emp => ({
       ...emp,
       completedServices: completedCounts.get(emp.id) || 0
     }));
@@ -338,7 +341,7 @@ export default function App() {
 
   // Calcula alertas CLT globais para o sino no header
   // Os alertas só dependem da equipe e da escala: não recalcula a cada agendamento novo (como "staff" faria)
-  const teamMembers = useMemo(() => employees.filter((e) => isTeamMember(e)), [employees]);
+  const teamMembers = useMemo(() => employees.filter((e) => atendeNaAgenda(e)), [employees]);
   const cltRealtimeAlerts = useMemo(() => {
     if (currentUser?.role !== 'supervisor' && currentUser?.role !== 'admin') return [];
 
@@ -681,6 +684,8 @@ export default function App() {
             onEditClient={handleEditClient}
             onCompleteAppointment={handleComplete}
             onSubmitTurnoSwapRequest={handleAddTurnoSwapRequest}
+            onAlterarStatus={currentUser.role === 'receptionist' ? handleAlterarStatus : undefined}
+            onReassignAppointment={currentUser.role === 'receptionist' ? handleReassign : undefined}
           />
         )}
       </Suspense>

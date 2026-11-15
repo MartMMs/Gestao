@@ -12,13 +12,13 @@ import { SupervisorDashboardTab } from '../features/dashboard/components';
 import { SupervisorClientesTab } from '../features/clients/components';
 import { SupervisorEquipeTab } from '../features/team/components';
 import { SupervisorEscalaTab } from '../features/scale/components';
-import { SupervisorPlanejamentoTab } from '../features/planning/components';
+import { ModuloRH, SupervisorPlanejamentoTab } from '../features/planning/components';
 import { usePlanejamentoEscala, type ScaleOverridePayload } from '../features/planning/hooks/usePlanejamentoEscala';
 import { SupervisorServicosTab } from '../features/services/components';
 import { AutoatendimentoAdminTab } from '../features/autoatendimento/components';
 import { RelatorioFinanceiroTab } from '../features/reports/components';
 import { type DiaEscala } from '../utils/escalaCalculator';
-import { isTeamMember } from '../utils/formatters';
+import { atendeNaAgenda, formatarReais } from '../utils/formatters';
 
 type ServicePayload = {
   nome: string;
@@ -179,7 +179,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
 
   // Estado e regras da Grade de Escalas
   const planejamento = usePlanejamentoEscala({
-    employees,
+    employees: todasAsContas, // a escala inclui supervisores; o hook tira admin e recepção
     scaleOverrides,
     turnoSwapRequests,
     onEditEmployee,
@@ -352,7 +352,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
     .sort((a, b) => a.localeCompare(b)), [employees]);
 
   const availableProfessionals = useMemo(() => Array.from(new Set(employees
-    .filter((emp) => isTeamMember(emp))
+    .filter((emp) => atendeNaAgenda(emp))
     .map((employee) => (employee.name || '').trim())
     .filter(Boolean)))
     .sort((a, b) => a.localeCompare(b)), [employees]);
@@ -435,6 +435,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
       {activeTab === 'escala' && (
         <div className="space-y-8">
           <SupervisorEscalaTab
+            papel="supervisor"
             employees={employees}
             appointments={appointments}
             services={services}
@@ -457,15 +458,20 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
       )}
 
       {activeTab === 'planejamento' && (
-        <SupervisorPlanejamentoTab
-          {...planejamento}
-          employees={employees}
-          appointments={appointments}
+        <ModuloRH
+          planejamento={planejamento}
           onSaveScaleOverride={onSaveScaleOverride}
-          onSwapScaleDays={onSwapScaleDays}
           onReplicateScaleDays={onReplicateScaleDays}
-          setToastMessage={setToastMessage}
-        />
+        >
+          <SupervisorPlanejamentoTab
+            {...planejamento}
+            employees={planejamento.activeNonAdminEmployees}
+            appointments={appointments}
+            onSaveScaleOverride={onSaveScaleOverride}
+            onSwapScaleDays={onSwapScaleDays}
+            onReplicateScaleDays={onReplicateScaleDays}
+          />
+        </ModuloRH>
       )}
 
       {activeTab === 'equipe' && (
@@ -655,8 +661,8 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                  </div>
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
                    <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Faturamento</p>
-                   <p className="text-2xl font-headline text-primary truncate" title={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingEmployeeRevenue)}>
-                     {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingEmployeeRevenue)}
+                   <p className="text-2xl font-headline text-primary truncate" title={formatarReais(viewingEmployeeRevenue)}>
+                     {formatarReais(viewingEmployeeRevenue)}
                    </p>
                  </div>
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">

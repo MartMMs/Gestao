@@ -4,7 +4,7 @@ import { shiftDateString } from '../utils/appointmentCore';
 import { bloqueioDiaInteiro, FOLGA_FIM, FOLGA_INICIO, horarioParaMinutos } from '@shared/agenda';
 import { motion } from 'motion/react';
 import { Appointment, Bloqueio, Employee } from '../../../types';
-import { isTeamMember } from '../../../utils/formatters';
+import { atendeNaAgenda } from '../../../utils/formatters';
 import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
 
 export interface BlockModalProps {
@@ -46,7 +46,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
 
   const suggestedEmployees = useMemo(() => {
     const candidates = employees.filter((emp) => {
-      if (emp.id === bookEmp || !isTeamMember(emp)) return false;
+      if (emp.id === bookEmp || !atendeNaAgenda(emp)) return false;
       if (emp.diasTrabalho && !emp.diasTrabalho.split(',').includes(String(dayOfWeek))) return false;
       return true;
     });

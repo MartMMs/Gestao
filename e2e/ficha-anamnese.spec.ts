@@ -256,7 +256,7 @@ test.describe('Ficha: recepção no balcão e abusos de tela', () => {
     try {
       await page.goto('/');
       await loginPelaTela(page, CONTAS.recepcao);
-      await page.getByRole('button', { name: /Agendar/i }).first().click();
+      await page.getByRole('button', { name: /Nova Reserva/i }).click();
       const modal = page.getByRole('dialog', { name: /Novo Agendamento/i });
       await modal.getByPlaceholder('Digite nome, telefone ou CPF').fill(nome);
       await modal.getByRole('button', { name: new RegExp(nome) }).first().click();

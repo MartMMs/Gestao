@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Service, ConfiguracaoEmpresa } from '../../../types';
-import { formatarReais } from '../utils/moeda';
+import { formatarReais } from '../../../utils/formatters';
 
 interface StepCatalogProps {
   services: Service[];

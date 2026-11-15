@@ -101,7 +101,7 @@ export function PlanningEmployeeSidebar({ employees, selectedEmployeeId, onSelec
                     <span className={`text-xs font-semibold truncate ${selecionado ? 'text-primary' : 'text-on-surface'}`}>{employee.name}</span>
                     <span
                       className="text-[11px] font-semibold tabular-nums shrink-0 text-on-surface-variant"
-                      title={diasSemTurno > 0 ? `${diasSemTurno} dia(s) de trabalho sem turno definido não entram nas horas` : 'Horas de turno no mês'}
+                      title={diasSemTurno > 0 ? `${diasSemTurno} dia(s) de trabalho sem turno definido não entram nas horas` : 'Horas de trabalho no mês, já descontado o intervalo mínimo da CLT'}
                     >
                       {horasMes > 0 ? formatarHoras(horasMes) : '—'}{diasSemTurno > 0 ? '*' : ''}
                     </span>

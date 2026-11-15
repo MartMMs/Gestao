@@ -8,7 +8,7 @@ import { isApiError, useAddTurno, useDeleteTurno, useServices, useTurnos } from 
 import { useSearch } from '../../../hooks/useSearch';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
-import { isTeamMember, gerarSenhaProvisoria } from '../../../utils/formatters';
+import { atendeNaAgenda, gerarSenhaProvisoria } from '../../../utils/formatters';
 import { MENSAGEM_USUARIO_INVALIDO, USUARIO_REGEX } from '@shared/validadores';
 
 interface SupervisorEquipeTabProps {
@@ -88,7 +88,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
     ...(servicos ?? []).flatMap((s) => s.habilidadesPermitidas ?? []),
     ...employees.flatMap((e) => e.habilidades ?? []),
   ].map((h) => h.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [servicos, employees]);
-  const selectableEmployees = useMemo(() => employees.filter(isTeamMember), [employees]);
+  const selectableEmployees = useMemo(() => employees.filter(atendeNaAgenda), [employees]);
 
   // --- ESTADOS DA GESTÃO DE TURNOS ---
   const [activeSubTab, setActiveSubTab] = useState<'profissionais' | 'gestao'>('profissionais');
@@ -506,21 +506,21 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                     className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full"
                     title="Montar escala"
                   >
-                    <span className="material-symbols-outlined text-[20px]">schedule</span>
+                    <span className="material-symbols-outlined text-[20px]" aria-hidden="true">schedule</span>
                   </button>
                   {podeRedefinirSenha(emp) && <button
                     onClick={() => setEmployeeToResetPassword(emp)}
                     className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full"
                     title="Redefinir senha"
                   >
-                    <span className="material-symbols-outlined text-[20px]">lock_reset</span>
+                    <span className="material-symbols-outlined text-[20px]" aria-hidden="true">lock_reset</span>
                   </button>}
                   {onViewEmployee && <button
                     onClick={() => onViewEmployee(emp)}
                     className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full"
                     title="Perfil (RH)"
                   >
-                    <span className="material-symbols-outlined text-[20px]">badge</span>
+                    <span className="material-symbols-outlined text-[20px]" aria-hidden="true">badge</span>
                   </button>}
                   {(podeGerenciarConta(emp) || emp.id === currentUser?.id) && <button
                     onClick={() => {
@@ -530,14 +530,14 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                     className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full"
                     title="Editar"
                   >
-                    <span className="material-symbols-outlined text-[20px]">edit</span>
+                    <span className="material-symbols-outlined text-[20px]" aria-hidden="true">edit</span>
                   </button>}
                   {podeGerenciarConta(emp) && emp.id !== currentUser?.id && <button
                     onClick={() => setEmployeeToDelete(emp.id)}
                     className="p-2 text-on-surface-variant hover:bg-error-container/20 hover:text-error rounded-full"
                     title="Excluir"
                   >
-                    <span className="material-symbols-outlined text-[20px]">delete</span>
+                    <span className="material-symbols-outlined text-[20px]" aria-hidden="true">delete</span>
                   </button>}
                 </div>
               </div>

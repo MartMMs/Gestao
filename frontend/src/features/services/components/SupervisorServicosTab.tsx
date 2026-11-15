@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { formatarReais } from '../../../utils/formatters';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { motion } from 'motion/react';
 import { Service, ServiceEligibilityMode } from '../../../types';
@@ -250,7 +251,7 @@ export function SupervisorServicosTab({
                         {srv.tempoHigienizacaoMin ? <span className="text-[11px] opacity-70 ml-1">+ {srv.tempoHigienizacaoMin}m prep</span> : ''}
                       </span>
                       <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-1 rounded-lg text-xs">
-                        <span className="material-symbols-outlined text-[14px]">payments</span> R$ {Number(srv.preco).toFixed(2)}
+                        <span className="material-symbols-outlined text-[14px]">payments</span> {formatarReais(Number(srv.preco))}
                       </span>
                       {usarComissao && Boolean(srv.comissaoPercentual) && Number(srv.comissaoPercentual) > 0 && (
                         <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-1 rounded-lg text-xs text-secondary">

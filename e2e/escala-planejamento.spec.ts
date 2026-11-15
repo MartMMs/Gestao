@@ -288,3 +288,113 @@ test.describe('Grade de Escalas: Timeline em modo edição', () => {
     }
   });
 });
+
+test.describe('Grade de Escalas: replicar na Timeline', () => {
+  const ultimoDia = new Date(Date.UTC(ano, mesAtual + 1, 0, 12)).getUTCDate(); // último dia do mês que vem
+  const abrirTimelineEditando = async (page: Page, nome: string) => {
+    await abrirGrade(page, nome);
+    await page.getByRole('button', { name: 'view_timeline Timeline' }).click();
+    await page.getByRole('button', { name: /Editar Grade/ }).click();
+  };
+  const replicar = async (page: Page, nome: string, n: number) => {
+    const celula = page.getByTitle(new RegExp(`^${nome} \\| ${String(n).padStart(2, '0')}/`));
+    await celula.scrollIntoViewIfNeeded();
+    await celula.hover();
+    await page.getByRole('button', { name: `Replicar o dia ${n} de ${nome} até o fim do mês` }).click();
+  };
+
+  test('pede confirmação; cancelar não grava; confirmar grava até o fim do mês com o turno da origem', async ({ page, request }) => {
+    const nome = `Escala Replicar ${sufixo()}`;
+    const id = await criarColaborador(request, nome);
+    const admin = await authHeaders(request, CONTAS.admin);
+    try {
+      const r = await request.post(`${apiBase()}/escala/override`, { headers: admin, data: { colaboradorId: id, data: data(20), tipo: 'trabalho', turno: '09:00-15:00' } });
+      expect(r.ok(), await r.text()).toBeTruthy();
+      await abrirTimelineEditando(page, nome);
+
+      await replicar(page, nome, 20);
+      const dialogo = page.getByRole('dialog').filter({ hasText: 'Replicar este dia?' });
+      await expect(dialogo).toContainText('09:00 às 15:00');
+      await dialogo.getByRole('button', { name: 'Cancelar' }).click();
+      expect(await ajustesSalvos(request, id)).toHaveLength(1);
+
+      await replicar(page, nome, 20);
+      await page.getByRole('button', { name: 'Replicar', exact: true }).click();
+      await expect.poll(async () => (await ajustesSalvos(request, id)).length).toBe(ultimoDia - 20 + 1);
+      const salvos = await ajustesSalvos(request, id);
+      expect(salvos.every((a) => a.tipo === 'trabalho' && a.turno === '09:00-15:00')).toBe(true);
+    } finally {
+      await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: admin });
+    }
+  });
+
+  test('atendimento no meio (409): nada é gravado e a tela volta ao que era', async ({ page, request }) => {
+    const nome = `Escala Replicar409 ${sufixo()}`;
+    const id = await criarColaborador(request, nome);
+    const admin = await authHeaders(request, CONTAS.admin);
+    let agendamento: { id: string; clienteId: string } | null = null;
+    try {
+      const folga = await request.post(`${apiBase()}/escala/override`, { headers: admin, data: { colaboradorId: id, data: data(20), tipo: 'folga' } });
+      expect(folga.ok(), await folga.text()).toBeTruthy();
+      await trabalharNos(request, id, [25]);
+      const a = await request.post(`${apiBase()}/agendamentos`, {
+        headers: admin, data: { collaboratorId: id, date: data(25), time: '10:00', serviceNames: ['E2E Massagem'], clientName: `Escala Cliente ${sufixo()}` },
+      });
+      expect(a.status(), await a.text()).toBe(201);
+      agendamento = await a.json();
+
+      await abrirTimelineEditando(page, nome);
+      const celula25 = page.getByTitle(new RegExp(`^${nome} \\| 25/`));
+      const antes = await celula25.getAttribute('title');
+      await replicar(page, nome, 20);
+      await page.getByRole('button', { name: 'Replicar', exact: true }).click();
+      await expect(page.getByRole('alertdialog')).toContainText('Realoque-os antes de marcar folga');
+      await expect(celula25).toHaveAttribute('title', antes!);
+      expect((await ajustesSalvos(request, id)).map((s) => s.tipo).sort()).toEqual(['folga', 'trabalho']);
+    } finally {
+      if (agendamento) {
+        await request.delete(`${apiBase()}/agendamentos/${agendamento.id}`, { headers: admin });
+        await request.delete(`${apiBase()}/clientes/${agendamento.clienteId}`, { headers: admin });
+      }
+      await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: admin });
+    }
+  });
+
+  test('dia que ainda é proposta não é replicado', async ({ page, request }) => {
+    const nome = `Escala ReplicarProposta ${sufixo()}`;
+    const id = await criarColaborador(request, nome);
+    try {
+      await abrirGrade(page, nome);
+      await page.getByRole('button', { name: /Padrão 12x36/ }).click();
+      await page.getByRole('button', { name: 'Montar proposta' }).click();
+      await page.getByRole('button', { name: 'view_timeline Timeline' }).click();
+      await page.getByRole('button', { name: /Editar Grade/ }).click();
+      await replicar(page, nome, 3);
+      await expect(page.getByText(/ainda é uma proposta não gravada/)).toBeVisible();
+      await expect(page.getByRole('dialog').filter({ hasText: 'Replicar este dia?' })).toHaveCount(0);
+      expect(await ajustesSalvos(request, id)).toHaveLength(0);
+    } finally {
+      await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: await authHeaders(request, CONTAS.admin) });
+    }
+  });
+});
+
+test('API: a semana que comporta 45h de trabalho gera alerta da CLT ao gravar', async ({ request }) => {
+  const id = await criarColaborador(request, `Escala Alerta ${sufixo()}`);
+  const admin = await authHeaders(request, CONTAS.admin);
+  try {
+    let segunda = 8;
+    while (new Date(`${data(segunda)}T12:00:00Z`).getUTCDay() !== 1) segunda += 1;
+    let resposta: { alertasClt?: string[] } = {};
+    for (let n = segunda; n < segunda + 6; n += 1) {
+      const r = await request.post(`${apiBase()}/escala/override`, {
+        headers: admin, data: { colaboradorId: id, data: data(n), tipo: 'trabalho', turno: n < segunda + 3 ? '08:00-18:00' : '08:00-14:30' },
+      });
+      expect(r.ok(), await r.text()).toBeTruthy();
+      resposta = await r.json();
+    }
+    expect((resposta.alertasClt || []).some((a) => /45h/.test(a)), JSON.stringify(resposta.alertasClt)).toBe(true);
+  } finally {
+    await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: admin });
+  }
+});

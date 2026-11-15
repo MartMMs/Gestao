@@ -12,7 +12,7 @@ import { FichaAnamneseModal } from '../../../components/FichaAnamneseModal';
 import { AvisoCliente } from '../../../components/AvisoCliente';
 import { MENSAGEM_ANAMNESE_OBRIGATORIA } from '@shared/anamnese';
 import { useAuth } from '../../../AuthContext';
-import { formatPhone, formatCpf, isTeamMember } from '../../../utils/formatters';
+import { formatPhone, formatCpf, atendeNaAgenda } from '../../../utils/formatters';
 import { useFormDraft } from '../../../hooks/useFormDraft';
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
 import { isApiError, useCompanyConfig } from '../../../api';
@@ -131,9 +131,9 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   const [bookTime, setBookTime] = useState(() => draft.bookTime || initialTime);
   const [bookEmp, setBookEmp] = useState(() => {
     const restoredBookEmp = draft.bookEmp || initialEmpId;
-    const isRestoredEmpValid = employees.some((employee) => employee.id === restoredBookEmp && isTeamMember(employee));
-    const fallbackEmployeeId = employees.find((employee) => employee.id === initialEmpId && isTeamMember(employee))?.id
-      || employees.find((employee) => isTeamMember(employee))?.id
+    const isRestoredEmpValid = employees.some((employee) => employee.id === restoredBookEmp && atendeNaAgenda(employee));
+    const fallbackEmployeeId = employees.find((employee) => employee.id === initialEmpId && atendeNaAgenda(employee))?.id
+      || employees.find((employee) => atendeNaAgenda(employee))?.id
       || '';
     return isRestoredEmpValid ? restoredBookEmp : fallbackEmployeeId;
   });
@@ -155,6 +155,8 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   const [bookDetails, setBookDetails] = useState(() => draft.bookDetails || '');
   const [bookClientObservation, setBookClientObservation] = useState(() => draft.bookClientObservation || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Trava síncrona: o estado só muda na próxima renderização e o clique duplo passava as duas vezes
+  const enviandoRef = useRef(false);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const [showAnamnese, setShowAnamnese] = useState(() => Boolean(draft.showAnamnese));
   const [anamneseData, setAnamneseData] = useState<AnamneseData>(() => draft.anamneseData ?? initialAnamnese);
@@ -254,7 +256,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     });
   }, [serviceSearchTerm, services]);
 
-  const teamEmployees = useMemo(() => employees.filter((employee) => isTeamMember(employee)), [employees]);
+  const teamEmployees = useMemo(() => employees.filter((employee) => atendeNaAgenda(employee)), [employees]);
 
   const selectedServiceDefinitions = useMemo(() => {
     if (bookService.length === 0) return [] as Service[];
@@ -405,11 +407,14 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
   const handleQuickBook = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (bookingBusy) return;
+    if (bookingBusy || enviandoRef.current) return;
     setConflictMessage(null);
     if (clientMode === 'search' && !selectedClientId) {
       setErrorMessage('Selecione um cliente na busca para continuar.');
       return;
+    }
+    if (!bookName.trim()) {
+      setErrorMessage('Informe o nome do cliente.'); return;
     }
     if (bookService.length === 0) {
       setErrorMessage('Por favor, selecione pelo menos um serviço.'); return;
@@ -467,6 +472,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       ? clients.find(c => c.id === selectedClientId)
       : undefined;
 
+    enviandoRef.current = true;
     setIsSubmitting(true);
     try {
       const success = await onAddAppointment({
@@ -482,7 +488,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       if (success !== false) {
         clearDraft();
         onClose();
-        setToastMessage('Agendamento salvo na sua agenda!');
+        setToastMessage(bookEmp === currentUser?.id ? 'Agendamento salvo na sua agenda!' : `Agendamento salvo na agenda de ${selectedEmployee?.name.split(' ')[0] ?? 'profissional'}!`);
       }
     } catch (error) {
       if (isApiError(error) && error.status === 409) {
@@ -497,6 +503,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
       setErrorMessage(error instanceof Error ? error.message : 'Não foi possível salvar o agendamento.');
     } finally {
+      enviandoRef.current = false;
       setIsSubmitting(false);
     }
   };

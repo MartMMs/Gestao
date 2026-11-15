@@ -3,7 +3,7 @@ import {createRoot} from 'react-dom/client';
 import * as Sentry from '@sentry/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './AuthContext';
-import { isAutoatendimentoHost } from './config/hosts';
+import { isAutoatendimentoHost, noCaminho } from './config/hosts';
 import './index.css';
 
 const SENTRY_DSN = "SUA_DSN_DO_SENTRY_AQUI"; // Insira a chave fornecida pelo painel do Sentry
@@ -105,7 +105,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        {isAutoatendimentoHost() ? (
+        {isAutoatendimentoHost() || noCaminho('/totem') ? (
           <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm opacity-70">Carregando Totem de Autoatendimento...</div>}>
             <AutoatendimentoStandalone />
           </Suspense>

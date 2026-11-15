@@ -1,6 +1,7 @@
 import type { ScaleOverridePayload } from '../../../api';
 import { gerarEscalaComRegras, type DiaEscala } from '../../../utils/escalaCalculator';
 import { turnoDoDia } from './turnos';
+import { CARGA_SEMANAL_MAXIMA_HORAS, analisarInterjornadaEscala, analisarSetimoDiaConsecutivo, horasDoDia, horasPorSemana, inicioDaSemana } from '../../../utils/cltValidator';
 
 // Modelos rápidos da Grade de Escalas. Devolvem só os dias que mudam; quem chama propõe e o supervisor confirma
 
@@ -53,4 +54,37 @@ export function preencher12x36(colaboradorId: string, atual: DiaEscala[]): Scale
     if (!plantao || !mudou(dia, plantao)) return [];
     return [comoAjuste(colaboradorId, dia.data, plantao, plantao.tipo === 'trabalho' ? 'Plantão 12x36' : 'Descanso 12x36')];
   });
+}
+
+
+// Primeiro dia do mês que precisa virar folga: quebra de interjornada, 7º dia seguido ou semana acima de 44h
+function proximaViolacao(escala: DiaEscala[], prefixoMes: string, tipoEscala?: string): string | null {
+  const interjornada = analisarInterjornadaEscala(escala).violacoes.find((v) => v.dataTurnoAtual.startsWith(prefixoMes));
+  if (interjornada) return interjornada.dataTurnoAtual;
+  const setimo = analisarSetimoDiaConsecutivo(escala).violacoes.find((v) => v.data.startsWith(prefixoMes));
+  if (setimo) return setimo.data;
+  if (tipoEscala === '12x36') return null; // 12x36 é medida pela média (art. 59-A): tirar um plantão não é a correção certa
+  const porSemana = horasPorSemana(escala);
+  const ultimoDaSemanaEstourada = escala
+    .filter((dia) => dia.data.startsWith(prefixoMes) && horasDoDia(dia) > 0 && (porSemana.get(inicioDaSemana(dia.data)) ?? 0) > CARGA_SEMANAL_MAXIMA_HORAS)
+    .map((dia) => dia.data)
+    .sort()
+    .pop();
+  return ultimoDaSemanaEstourada ?? null;
+}
+
+/**
+ * "Propor folgas na grade" do painel de conformidade: põe folga no dia de cada violação da CLT do mês, uma por vez, até a
+ * escala (com os meses vizinhos) ficar conforme. Devolve só os dias que mudam; o supervisor confirma a proposta.
+ */
+export function corrigirViolacoesClt(colaboradorId: string, escala: DiaEscala[], prefixoMes: string, tipoEscala?: string): ScaleOverridePayload[] {
+  let atual = escala;
+  const folgas = new Set<string>();
+  for (let passo = 0; passo < 31; passo += 1) {
+    const data = proximaViolacao(atual, prefixoMes, tipoEscala);
+    if (!data || folgas.has(data)) break;
+    folgas.add(data);
+    atual = atual.map((dia) => (dia.data === data ? { ...dia, tipo: 'folga', turno: undefined, horaInicio: undefined, horaFim: undefined } : dia));
+  }
+  return [...folgas].sort().map((data) => ({ colaboradorId, data, tipo: 'folga', descricao: 'Correção CLT sugerida' }));
 }

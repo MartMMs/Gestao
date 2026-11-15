@@ -1,5 +1,5 @@
 import { test, expect, request as playwrightRequest, type APIRequestContext } from '@playwright/test';
-import { CONTAS, E2E_PASSWORD, loginPelaTela, postLogin } from './credenciais';
+import { CONTAS, E2E_PASSWORD, authHeaders, loginPelaTela, postLogin } from './credenciais';
 
 const apiBase = () => process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:3333/api';
 const PREFIXO_CLIENTE = 'E2E Versão';
@@ -133,6 +133,11 @@ test.describe('API — versão do agendamento e registros encerrados', () => {
         });
         expect(realocado.status(), await realocado.text()).toBe(200);
         expect((await realocado.json()).colaboradorId).toBe(ctx.ana.id);
+        // Troca de profissional muda o dono da comissão: fica no histórico de alterações do admin
+        const auditoria = (await (await request.get(`${apiBase()}/auditoria`, { headers: await authHeaders(request, CONTAS.admin) })).json()) as Array<{ acao: string; alvo: string }>;
+        expect(auditoria.some((r) => r.acao === 'agendamento.realocado')).toBe(true);
+        // Id de destino que não é UUID é recusado antes de tocar no banco
+        expect((await request.patch(`${apiBase()}/agendamentos/${ag.id}/reassign`, { headers: ctx.auth, data: { newEmployeeId: 'x', version: 'y' } })).status()).toBe(400);
       }
 
       // Status igual ao atual devolve o agendamento só com o necessário do profissional

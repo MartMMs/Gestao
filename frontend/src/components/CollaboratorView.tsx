@@ -13,6 +13,7 @@ import { UpcomingAppointmentsModal } from './UpcomingAppointmentsModal';
 import { useScheduleModals } from '../features/appointments/hooks';
 import { ScheduleRulerGrid } from './ScheduleRulerGrid';
 import { SolicitarTroca, type TrocaTurnoPayload } from './SolicitarTroca';
+import { SupervisorEscalaTab } from '../features/scale/components';
 
 const { HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
 
@@ -29,6 +30,9 @@ interface CollaboratorViewProps {
   onDeleteAppointment?: (id: string, version?: string) => Promise<boolean | void> | void;
   onEditClient?: (id: string, clientData: Partial<Client>) => Promise<boolean | void> | void;
   onSubmitTurnoSwapRequest?: (payload: TrocaTurnoPayload) => Promise<boolean | void> | boolean | void;
+  /** Recepção: com estes dois, a aba Agenda mostra a agenda da casa (todos os profissionais) */
+  onAlterarStatus?: (appointment: Appointment, status: 'completed' | 'no_show' | 'scheduled') => Promise<unknown>;
+  onReassignAppointment?: (appointmentId: string, newEmployeeId: string, version?: string) => Promise<unknown> | void;
 }
 
 export function CollaboratorView({
@@ -44,7 +48,10 @@ export function CollaboratorView({
   onDeleteAppointment,
   onEditClient,
   onSubmitTurnoSwapRequest,
+  onAlterarStatus,
+  onReassignAppointment,
 }: CollaboratorViewProps) {
+  const agendaDaCasa = currentUser.role === 'receptionist' && !!onAlterarStatus && !!onEditAppointment && !!onDeleteAppointment;
   const funcionamento = useFuncionamento();
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
   const intervalosDoDia = useMemo(() => appointments
@@ -197,10 +204,10 @@ export function CollaboratorView({
   useModal(!!errorMessage, () => setErrorMessage(null));
 
   return (
-    <div className="w-full max-w-4xl mx-auto">
+    <div className={`w-full ${agendaDaCasa ? 'max-w-6xl' : 'max-w-4xl'} mx-auto`}>
       <div className="mb-12">
-        <h1 className="text-4xl font-headline text-primary mb-2">Portal do <span className="italic">Colaborador</span>.</h1>
-        <p className="text-on-surface-variant font-body">Bem-vindo(a), {currentUser.name.split(' ')[0]}. Acompanhe sua agenda e seus clientes.</p>
+        <h1 className="text-4xl font-headline text-primary mb-2">Portal {agendaDaCasa ? <>da <span className="italic">Recepção</span></> : <>do <span className="italic">Colaborador</span></>}.</h1>
+        <p className="text-on-surface-variant font-body">Bem-vindo(a), {currentUser.name.split(' ')[0]}. {agendaDaCasa ? 'Acompanhe a agenda da casa e os clientes.' : 'Acompanhe sua agenda e seus clientes.'}</p>
       </div>
 
       <div className="flex bg-surface-container-low p-1 rounded-full border border-outline-variant/20 overflow-x-auto max-w-full mb-8">
@@ -218,6 +225,8 @@ export function CollaboratorView({
         </button>
       </div>
 
+      {/* Agenda pessoal (profissional); a recepção usa a agenda da casa logo abaixo */}
+      {!agendaDaCasa && (<>
       {/* Cards de Estatísticas */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8 ${activeTab === 'agenda' ? '' : 'hidden'}`}>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
@@ -396,6 +405,28 @@ export function CollaboratorView({
           </div>
         </div>
       </motion.div>
+
+      </>)}
+
+      {agendaDaCasa && activeTab === 'agenda' && onAlterarStatus && onEditAppointment && onDeleteAppointment && (
+          <SupervisorEscalaTab
+            employees={employees}
+            appointments={appointments}
+            services={services}
+            clients={clients}
+            onReassignAppointment={onReassignAppointment}
+            onAddAppointment={onAddAppointment}
+            isAddingAppointment={isAddingAppointment}
+            onDeleteAppointment={onDeleteAppointment}
+            onEditAppointment={onEditAppointment}
+            onAlterarStatus={onAlterarStatus}
+            onEditClient={onEditClient}
+            setToastMessage={setToastMessage}
+            setErrorMessage={setErrorMessage}
+            onOpenUpcomingAppointments={() => setShowUpcomingAppointments(true)}
+            papel="recepcao"
+          />
+      )}
 
       {showNewBookingModal && (
         <BookingModal

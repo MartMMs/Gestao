@@ -91,6 +91,12 @@ Esforço agregado estimado para roadmap P2 (BLG-008 a BLG-013): 70h a 110h.
 
 ## P2 - Evolutivo (Roadmap)
 
+- [ ] BLG-016 - Quebrar SupervisorPlanejamentoTab (1.211 linhas) e usePlanejamentoEscala (774 linhas).
+  - Responsável: Frontend
+  - Critério de aceite: modais e barras de ação em componentes próprios; hook dividido em consulta, ajustes e validação CLT;
+    SupervisorEscalaTab renomeado para AgendaDaCasa (já recebe `papel`). Sem mudança de comportamento (e2e de escala verdes).
+  - Fonte: banca de revisão 15 (2026-11-15), achado do revisor sênior.
+
 - [ ] BLG-008 - Integração com calendário externo (Google Calendar).
   - Responsável: Backend
   - Co-responsável: Frontend

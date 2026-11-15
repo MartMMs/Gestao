@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { instanteNoFuso } from '@shared/agenda';
 import { semBaixaVencido } from '@shared/statusAgendamento';
+import { inicioDaSemana } from '@shared/clt';
 import type { Appointment, Employee, Service } from '../../../types';
 import { getDuration } from '../../appointments/utils/appointmentCore';
 
@@ -26,7 +27,6 @@ const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julh
 const somarDias = (data: string, dias: number) =>
   new Date(Date.parse(`${data}T12:00:00Z`) + dias * 86_400_000).toISOString().slice(0, 10);
 const diaDaSemanaSegunda = (data: string) => (new Date(`${data}T12:00:00Z`).getUTCDay() + 6) % 7;
-const inicioDaSemana = (data: string) => somarDias(data, -diaDaSemanaSegunda(data));
 
 type EstadoPeriodo = 'concluido' | 'falta' | 'sem_baixa' | 'totem' | 'agendado';
 

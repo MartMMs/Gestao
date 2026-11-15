@@ -65,8 +65,8 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
     let mounted = true;
     Promise.all([
       fetchAutoatendimentoServicos(),
-      fetchAutoatendimentoConfig().catch(() => null),
-      fetchAutoatendimentoEmpresa().catch(() => null),
+      fetchAutoatendimentoConfig(), // sem a config a tela mostraria as etapas de pagamento erradas
+      fetchAutoatendimentoEmpresa().catch(() => null), // só nome e ícone: o padrão serve
     ])
       .then(([servicosData, configData, empresaData]) => {
         if (mounted) {
@@ -92,7 +92,7 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
       if (Array.isArray(escopos) && escopos.length > 0 && !escopos.some((e) => e === 'services' || e === 'employees')) return;
       fetchAutoatendimentoServicos().then((servicosData) => {
         if (mounted) setServices(servicosData || []);
-      });
+      }).catch(() => { /* mantém o catálogo atual; o próximo evento tenta de novo */ });
     });
 
     socket.on('autoatendimento:config_atualizada', (newConfig) => {

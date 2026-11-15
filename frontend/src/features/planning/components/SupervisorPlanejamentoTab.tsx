@@ -6,14 +6,14 @@ import { aplicarAjusteEscala, type DiaEscala } from '../../../utils/escalaCalcul
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { CalendarioEscala } from './CalendarioEscala';
 import { PlanningDayPopover, type AlteracaoDias } from './PlanningDayPopover';
-import { trabalhoAntesDeFolga, turnoDoDia } from '../utils/turnos';
+import { analisarMes, trabalhoAntesDeFolga, turnoDoDia, visualDoDia } from '../utils/turnos';
+import { diaMesBR } from '@shared/agenda';
 import { folgaAcimaDoLimite, mensagemFolgaAcimaDoLimite } from '@shared/escala';
 import { preencher12x36, repetirMesAnterior } from '../utils/modelosEscala';
 import { PlanningEmployeeSidebar } from './PlanningEmployeeSidebar';
 import { TimelineGantt } from './TimelineGantt';
 import { FolgasDoDia } from './FolgasDoDia';
 import { TurnoSelect } from './TurnoSelect';
-import { isTeamMember } from '../../../utils/formatters';
 import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
 import type { usePlanejamentoEscala } from '../hooks/usePlanejamentoEscala';
 import type { SupervisorViewProps } from '../../../components/SupervisorView';
@@ -22,7 +22,14 @@ type Setter<T> = React.Dispatch<React.SetStateAction<T>>;
 type AlertaClt = { id: string; nome: string; conforme: boolean; resumo: string[] };
 type TrocaDias = { fromEmp: string; fromDate: string; toEmp: string; toDate: string };
 // Ação da grade que grava na hora: só roda depois do "sim" no ConfirmDialog
-type AcaoPendente = { titulo: string; descricao: string; confirmLabel: string; executar: () => void };
+type AcaoPendente = {
+  titulo: string;
+  descricao: string;
+  confirmLabel: string;
+  executar: () => void;
+  icone?: string;
+  perigo?: boolean; // muda vários dias de uma vez: o foco começa em "Cancelar"
+};
 type Modelo = { titulo: string; descricao: string; aviso?: string; ajustes: ScaleOverridePayload[] };
 
 const mesVizinho = (mes: string, delta: number) => {
@@ -30,7 +37,7 @@ const mesVizinho = (mes: string, delta: number) => {
   const data = new Date(ano, m - 1 + delta, 1);
   return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
 };
-const dataBR = (data: string) => data.split('-').reverse().slice(0, 2).join('/');
+const MENSAGEM_PROPOSTA = 'Esse dia ainda é uma proposta não gravada. Confirme ou descarte a proposta antes de alterá-lo.';
 
 // Estado e ações vêm do hook usePlanejamentoEscala (via SupervisorView), mais as ações da API
 type EstadoPlanejamento = ReturnType<typeof usePlanejamentoEscala>;
@@ -83,11 +90,11 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
     handleTogglePlanningEditMode,
     isPlanningEditMode,
     handleOpenScaleGenerator,
-    handleSuggestAutomaticScale,
     suggestedPlanningKeys,
     handleConfirmSuggestedScale,
     handleDiscardSuggestedScale,
     proporAjustes,
+    aplicarComReversao,
     setSuggestedPlanningKeys,
     ajustesSalvos,
     planningScaleType,
@@ -238,7 +245,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
       } catch (error) {
         const motivo = error instanceof Error ? error.message : 'Falha ao salvar.';
         throw new Error(ajustes.length > 1
-          ? `Salvos ${salvos} de ${ajustes.length} dias. ${dataBR(ajuste.data)} não foi salvo: ${motivo}${salvos + 1 < ajustes.length ? ' Os dias seguintes não foram enviados.' : ''}`
+          ? `Salvos ${salvos} de ${ajustes.length} dias. ${diaMesBR(ajuste.data)} não foi salvo: ${motivo}${salvos + 1 < ajustes.length ? ' Os dias seguintes não foram enviados.' : ''}`
           : motivo);
       }
       salvos += 1;
@@ -253,153 +260,126 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
     employeeId === selectedScaleEmployee?.id ? selectedScaleCalendar.dias : buildScaleForEmployee(employeeId);
   const nomeDe = (employeeId: string) => (employees as Employee[]).find((e) => e.id === employeeId)?.name || 'colaborador';
 
-  // Pede confirmação; dia ainda só na proposta não troca (a API gravaria um valor que ninguém confirmou)
-  const pedirTroca = (troca: TrocaDias) => {
-    if (troca.fromEmp === troca.toEmp && troca.fromDate === troca.toDate) return;
-    if (troca.fromDate < todayStr || troca.toDate < todayStr) {
-      setToastMessage('Dia que já passou não pode ser trocado.');
-      return;
+  // Uma regra (e uma frase) para tudo que grava na hora: dia passado a API recusa; dia que ainda é proposta gravaria um
+  // valor que ninguém confirmou. Devolve true quando pode seguir
+  const podeAlterarNaHora = (dias: Array<{ employeeId: string; data: string }>) => {
+    if (dias.some((d) => d.data < todayStr)) {
+      setToastMessage('Dia que já passou não pode ser alterado.');
+      return false;
     }
-    if ([`${troca.fromEmp}:${troca.fromDate}`, `${troca.toEmp}:${troca.toDate}`].some((k) => suggestedPlanningKeys.includes(k))) {
-      setErrorMessage('Esse dia ainda é uma proposta não gravada. Confirme ou descarte a proposta antes de trocar.');
-      return;
+    if (dias.some((d) => suggestedPlanningKeys.includes(`${d.employeeId}:${d.data}`))) {
+      setErrorMessage(MENSAGEM_PROPOSTA);
+      return false;
     }
-    setAcaoPendente({ titulo: 'Trocar os dois dias?', descricao: descricaoTroca(troca), confirmLabel: 'Trocar', executar: () => trocarDias(troca) });
+    return true;
   };
 
-  const ehProposta = (employeeId: string, data: string) => suggestedPlanningKeys.includes(`${employeeId}:${data}`);
+  // Retrato do dia para gravar: turno legível e a observação gravada (não o texto que o sistema gera, como "Feriado: ...")
+  const retrato = (employeeId: string, dia: DiaEscala) => ({
+    tipo: dia.tipo,
+    turno: dia.tipo === 'trabalho' ? turnoDoDia(dia) : undefined,
+    descricao: ajustesSalvos.get(`${employeeId}:${dia.data}`)?.descricao,
+  });
+
+  const pedirTroca = (troca: TrocaDias) => {
+    if (troca.fromEmp === troca.toEmp && troca.fromDate === troca.toDate) return;
+    if (!podeAlterarNaHora([{ employeeId: troca.fromEmp, data: troca.fromDate }, { employeeId: troca.toEmp, data: troca.toDate }])) return;
+    // Os dois dias são lidos agora, quando o diálogo descreve a troca, e não quando a pessoa confirma
+    const fromDia = escalaDe(troca.fromEmp).find((d) => d.data === troca.fromDate);
+    const toDia = escalaDe(troca.toEmp).find((d) => d.data === troca.toDate);
+    if (!fromDia || !toDia) return;
+    const deOrigem = retrato(troca.fromEmp, fromDia);
+    const deDestino = retrato(troca.toEmp, toDia);
+    setAcaoPendente({
+      titulo: 'Trocar os dois dias?',
+      descricao: descricaoTroca(troca),
+      confirmLabel: 'Trocar',
+      icone: 'swap_horiz',
+      executar: () => trocarDias(troca, deOrigem, deDestino),
+    });
+  };
 
   // Clique na Timeline em modo edição: alterna trabalho/folga, depois de confirmar
   const pedirAlternarDia = (employeeId: string, data: string, atual?: DiaEscala) => {
-    if (data < todayStr) {
-      setToastMessage('Esse dia já passou: a escala dele não pode ser alterada.');
-      return;
-    }
+    if (!podeAlterarNaHora([{ employeeId, data }])) return;
     const vira = atual?.tipo === 'trabalho' ? 'folga' : 'trabalho';
     setAcaoPendente({
       titulo: vira === 'folga' ? 'Marcar folga?' : 'Marcar dia de trabalho?',
-      descricao: `${nomeDe(employeeId)}, ${dataBR(data)}: passa a ser ${vira}. A mudança é gravada na hora.`,
+      descricao: `${nomeDe(employeeId)}, ${diaMesBR(data)}: passa a ser ${vira}. A mudança é gravada na hora.`,
       confirmLabel: vira === 'folga' ? 'Marcar folga' : 'Marcar trabalho',
       executar: () => handleQuickToggleTimelineDay(employeeId, data, atual),
     });
   };
 
+  // Menu rápido da Timeline (turno padrão ou folga): mesma regra e mesma confirmação do clique
+  const pedirDefinirDia = (employeeId: string, data: string, tipo: DiaEscala['tipo'], turno?: string) => {
+    if (!podeAlterarNaHora([{ employeeId, data }])) return;
+    const comoFica = tipo === 'trabalho' ? `trabalho${turno ? `, ${turno.replace('-', ' às ')}` : ''}` : tipo === 'folga' ? 'folga' : 'FDS';
+    setAcaoPendente({
+      titulo: tipo === 'trabalho' ? 'Definir o turno do dia?' : 'Marcar folga?',
+      descricao: `${nomeDe(employeeId)}, ${diaMesBR(data)}: passa a ser ${comoFica}. A mudança é gravada na hora.`,
+      confirmLabel: tipo === 'trabalho' ? 'Definir turno' : 'Marcar folga',
+      executar: () => handleQuickSetTimelineDay(employeeId, data, tipo, turno),
+    });
+  };
+
   const descricaoTroca = (t: TrocaDias) => (t.fromEmp === t.toEmp
-    ? `${nomeDe(t.fromEmp)}: o dia ${dataBR(t.fromDate)} e o dia ${dataBR(t.toDate)} vão trocar de turno ou folga.`
-    : `O dia ${dataBR(t.fromDate)} de ${nomeDe(t.fromEmp)} troca com o dia ${dataBR(t.toDate)} de ${nomeDe(t.toEmp)}.`)
+    ? `${nomeDe(t.fromEmp)}: o dia ${diaMesBR(t.fromDate)} e o dia ${diaMesBR(t.toDate)} vão trocar de turno ou folga.`
+    : `O dia ${diaMesBR(t.fromDate)} de ${nomeDe(t.fromEmp)} troca com o dia ${diaMesBR(t.toDate)} de ${nomeDe(t.toEmp)}.`)
     + ' A troca é gravada na hora.';
 
   // Troca dois dias (do mesmo colaborador ou de dois): aparece na hora e volta se o servidor recusar
-  const trocarDias = ({ fromEmp, fromDate, toEmp, toDate }: TrocaDias) => {
-    const fromDia = escalaDe(fromEmp).find((d) => d.data === fromDate);
-    const toDia = escalaDe(toEmp).find((d) => d.data === toDate);
-    if (!fromDia || !toDia) return;
-
-    const fromKey = `${fromEmp}:${fromDate}`;
-    const toKey = `${toEmp}:${toDate}`;
-    const retrato = (dia: DiaEscala) => ({ tipo: dia.tipo, turno: dia.tipo === 'trabalho' ? turnoDoDia(dia) : undefined, descricao: dia.descricao });
-    let prevFrom: ScaleOverridePayload | undefined;
-    let prevTo: ScaleOverridePayload | undefined;
-
-    setPlanningOverrides((prev) => {
-      prevFrom = prev[fromKey];
-      prevTo = prev[toKey];
-      return {
-        ...prev,
-        [fromKey]: { colaboradorId: fromEmp, data: fromDate, ...retrato(toDia) },
-        [toKey]: { colaboradorId: toEmp, data: toDate, ...retrato(fromDia) },
-      };
-    });
-
-    const desfazer = () => setPlanningOverrides((prev) => {
-      const next = { ...prev };
-      if (prevFrom) next[fromKey] = prevFrom;
-      else delete next[fromKey];
-      if (prevTo) next[toKey] = prevTo;
-      else delete next[toKey];
-      return next;
-    });
-
-    void (async () => {
-      try {
-        const success = await onSwapScaleDays?.({
-          from: { colaboradorId: fromEmp, data: fromDate, snapshot: retrato(fromDia) },
-          to: { colaboradorId: toEmp, data: toDate, snapshot: retrato(toDia) },
-        });
-        if (success === false) {
-          desfazer();
-          setErrorMessage('Não foi possível sincronizar a troca de dias com o servidor.');
-          return;
-        }
-        setToastMessage(`Troca gravada: ${dataBR(fromDate)} ↔ ${dataBR(toDate)}.`);
-      } catch (error) {
-        desfazer();
-        setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da troca de dias com o servidor.');
-      }
-    })();
+  type Retrato = ReturnType<typeof retrato>;
+  const trocarDias = ({ fromEmp, fromDate, toEmp, toDate }: TrocaDias, deOrigem: Retrato, deDestino: Retrato) => {
+    aplicarComReversao(
+      [{ colaboradorId: fromEmp, data: fromDate, ...deDestino }, { colaboradorId: toEmp, data: toDate, ...deOrigem }],
+      () => onSwapScaleDays?.({
+        from: { colaboradorId: fromEmp, data: fromDate, snapshot: deOrigem },
+        to: { colaboradorId: toEmp, data: toDate, snapshot: deDestino },
+      }),
+      { sucesso: `Troca gravada: ${diaMesBR(fromDate)} ↔ ${diaMesBR(toDate)}.`, falha: 'Não foi possível gravar a troca de dias.' },
+    );
   };
 
   // Alça de replicar da Timeline: copia um dia para os seguintes; pede confirmação e não mexe em dia passado
   const pedirReplicar = (empId: string, fromDay: number, toDay: number) => {
     const fromDate = `${selectedScaleMonth}-${String(fromDay).padStart(2, '0')}`;
-    if (ehProposta(empId, fromDate)) {
-      setErrorMessage('Esse dia ainda é uma proposta não gravada. Confirme ou descarte a proposta antes de replicá-lo.');
-      return;
-    }
     const start = Math.min(fromDay, toDay);
     const end = Math.max(fromDay, toDay);
-    const targetDates = Array.from({ length: end - start + 1 }, (_, idx) => `${selectedScaleMonth}-${String(start + idx).padStart(2, '0')}`)
-      .filter((date) => date !== fromDate && date >= todayStr);
+    const noIntervalo = Array.from({ length: end - start + 1 }, (_, idx) => `${selectedScaleMonth}-${String(start + idx).padStart(2, '0')}`)
+      .filter((date) => date !== fromDate);
+    const targetDates = noIntervalo.filter((date) => date >= todayStr);
+    // Origem e destinos não podem ser proposta pendente; a origem pode ser dia passado (só é copiada)
+    if ([fromDate, ...targetDates].some((data) => suggestedPlanningKeys.includes(`${empId}:${data}`))) {
+      setErrorMessage(MENSAGEM_PROPOSTA);
+      return;
+    }
     const sourceDia = buildScaleForEmployee(empId).find((d) => d.data === fromDate);
     if (!sourceDia || targetDates.length === 0) {
       setToastMessage('Não há dias futuros para replicar.');
       return;
     }
-    const origem = { tipo: sourceDia.tipo, turno: sourceDia.tipo === 'trabalho' ? turnoDoDia(sourceDia) : undefined, descricao: sourceDia.descricao };
+    const origem = retrato(empId, sourceDia);
+    const comoFica = origem.tipo === 'trabalho'
+      ? `trabalho${origem.turno ? `, ${origem.turno.replace('-', ' às ')}` : ', sem turno definido'}`
+      : visualDoDia(sourceDia).rotulo.toLowerCase();
+    const passados = noIntervalo.length - targetDates.length;
     setAcaoPendente({
       titulo: 'Replicar este dia?',
-      descricao: `${nomeDe(empId)}: o dia ${dataBR(fromDate)} (${origem.tipo === 'trabalho' ? `trabalho${origem.turno ? ` ${origem.turno}` : ''}` : origem.tipo}) será copiado para ${targetDates.length} dia(s), de ${dataBR(targetDates[0])} a ${dataBR(targetDates[targetDates.length - 1])}, substituindo o que houver neles. A mudança é gravada na hora.`,
+      descricao: `${nomeDe(empId)}: o dia ${diaMesBR(fromDate)} (${comoFica}) será copiado para ${targetDates.length} dia(s), de ${diaMesBR(targetDates[0])} a ${diaMesBR(targetDates[targetDates.length - 1])}, substituindo o que houver neles.${passados > 0 ? ` ${passados} dia(s) que já passaram ficam como estão.` : ''} A mudança é gravada na hora.`,
       confirmLabel: 'Replicar',
+      icone: 'content_copy',
+      perigo: true,
       executar: () => replicarDia(empId, fromDate, targetDates, origem),
     });
   };
 
-  const replicarDia = (empId: string, fromDate: string, targetDates: string[], origem: Omit<ScaleOverridePayload, 'colaboradorId' | 'data'>) => {
-    let prevSnapshot: Record<string, ScaleOverridePayload> = {};
-    setPlanningOverrides((prev) => {
-      prevSnapshot = prev;
-      const next = { ...prev };
-      targetDates.forEach((targetDate) => {
-        next[`${empId}:${targetDate}`] = { colaboradorId: empId, data: targetDate, ...origem };
-      });
-      return next;
-    });
-
-    void (async () => {
-      const revertReplication = () => {
-        setPlanningOverrides((prev) => {
-          const next = { ...prev };
-          targetDates.forEach((targetDate) => {
-            const key = `${empId}:${targetDate}`;
-            if (prevSnapshot[key]) next[key] = prevSnapshot[key];
-            else delete next[key];
-          });
-          return next;
-        });
-      };
-      try {
-        const success = await onReplicateScaleDays?.({ colaboradorId: empId, data: fromDate, targetDates, source: origem });
-        if (success === false) {
-          revertReplication();
-          setErrorMessage('Não foi possível sincronizar a replicação da escala com o servidor.');
-          return;
-        }
-        setToastMessage(`Replicação gravada em ${targetDates.length} dia(s).`);
-      } catch (error) {
-        revertReplication();
-        setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da replicação com o servidor.');
-      }
-    })();
+  const replicarDia = (empId: string, fromDate: string, targetDates: string[], origem: Retrato) => {
+    aplicarComReversao(
+      targetDates.map((data) => ({ colaboradorId: empId, data, ...origem })),
+      () => onReplicateScaleDays?.({ colaboradorId: empId, data: fromDate, targetDates, source: origem }),
+      { sucesso: `Replicação gravada em ${targetDates.length} dia(s).`, falha: 'Não foi possível gravar a replicação.' },
+    );
   };
 
   const abrirModelo = (tipo: 'mesAnterior' | '12x36') => {
@@ -420,11 +400,19 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
         : `Nada a mudar: o mês anterior de ${selectedScaleEmployee.name} não tem ajustes diferentes do ciclo.`);
       return;
     }
+    // Avisa só o que a proposta de fato viola, pela mesma análise do calendário (com o tipo de escala do cadastro)
+    const porData = new Map(ajustes.map((ajuste) => [ajuste.data, ajuste]));
+    const analise = analisarMes(
+      escalaCalendario.map((dia) => aplicarAjusteEscala(dia, porData.get(dia.data))),
+      `${selectedScaleMonth}-`,
+      planningScaleType,
+    );
     setModeloPendente({
       titulo: tipo === '12x36' ? 'Preencher com plantões 12x36?' : 'Repetir o mês anterior?',
-      aviso: tipo === '12x36' && (selectedScaleEmployee.tipoEscala || '6x1') !== '12x36'
-        ? `O cadastro de ${selectedScaleEmployee.name} continua como ${selectedScaleEmployee.tipoEscala || '6x1'}: a CLT é conferida semana a semana e as semanas de 48h da 12x36 vão aparecer com alerta. Para o regime 12x36 de verdade (média semanal), mude o tipo de escala em "+ Nova Escala".`
-        : undefined,
+      aviso: analise.conforme
+        ? undefined
+        : `Com esta proposta, a escala de ${selectedScaleEmployee.name} fica com alerta da CLT: ${analise.alertas.join(' ')}${
+          tipo === '12x36' && planningScaleType !== '12x36' ? ' O cadastro não é 12x36: a carga é conferida semana a semana, não pela média. Para mudar o regime, use "+ Nova Escala".' : ''}`,
       descricao: `${ajustes.length} dia(s) de ${selectedScaleEmployee.name} em ${selectedScaleMonthLabel} vão mudar, inclusive ajustes feitos à mão nesses dias. Dias passados ficam como estão. Nada é gravado até você clicar em "Confirmar Escala".`,
       ajustes,
     });
@@ -547,7 +535,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                   />
                 </div>
 
-                <div className="flex items-center justify-start lg:justify-end gap-2">
+                <div className="flex flex-wrap items-center justify-start lg:justify-end gap-2">
                   <button
                     onClick={() => setPlanningViewMode('calendario')}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
@@ -570,6 +558,21 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                   >
                     <span className="material-symbols-outlined text-[16px]">view_timeline</span>
                     Timeline
+                  </button>
+
+                  <span className="w-px h-7 bg-outline-variant/30 mx-1" aria-hidden="true" />
+                  <button
+                    type="button"
+                    onClick={handleTogglePlanningEditMode}
+                    aria-pressed={isPlanningEditMode}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all border ${
+                      isPlanningEditMode
+                        ? 'bg-primary text-on-primary border-primary/40 shadow-md'
+                        : 'bg-surface-container-low text-on-surface-variant border-outline-variant/20 hover:text-primary'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[16px]">{isPlanningEditMode ? 'check' : 'edit'}</span>
+                    {isPlanningEditMode ? 'Concluir Edição' : 'Editar Grade'}
                   </button>
                 </div>
               </div>
@@ -601,17 +604,6 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     <option value="folgaHoje">Status: Folga hoje</option>
                   </select>
 
-                  <button
-                    type="button"
-                    onClick={handleTogglePlanningEditMode}
-                    className={`h-11 px-5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all border ${
-                      isPlanningEditMode
-                        ? 'bg-primary text-on-primary border-primary/40 shadow-md'
-                        : 'bg-surface-container-low text-on-surface-variant border-outline-variant/20 hover:text-primary'
-                    }`}
-                  >
-                    {isPlanningEditMode ? 'Concluir Edição' : 'Editar Grade'}
-                  </button>
 
                   <button
                     type="button"
@@ -630,13 +622,6 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     Edição em Lote
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={handleSuggestAutomaticScale}
-                    className="h-11 px-5 rounded-xl bg-secondary-container/35 text-on-surface text-xs font-bold uppercase tracking-wider border border-outline-variant/20 hover:border-primary/40 hover:text-primary transition-colors"
-                  >
-                    Sugerir Escala Automática
-                  </button>
 
                   {/* Modelos rápidos para o colaborador aberto no calendário: viram proposta, gravada em "Confirmar Escala" */}
                   {planningViewMode === 'calendario' && selectedScaleEmployee && (
@@ -734,8 +719,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     className="w-full h-11 bg-surface-container-low border border-outline-variant/20 rounded-xl px-3 text-sm text-on-surface"
                   >
                     <option value="all">Todos</option>
-                    {(employees as Employee[])
-                      .filter((employee) => isTeamMember(employee))
+                    {[...(employees as Employee[])]
                       .sort((a, b) => a.name.localeCompare(b.name))
                       .map((employee) => (
                         <option key={employee.id} value={employee.id}>{employee.name}</option>
@@ -929,7 +913,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     suggestedKeys={suggestedPlanningKeys}
                     overrides={planningOverridesList.filter((override) => override.data.startsWith(`${selectedScaleMonth}-`))}
                     onQuickToggleDay={pedirAlternarDia}
-                    onQuickSetDay={handleQuickSetTimelineDay}
+                    onQuickSetDay={pedirDefinirDia}
                     onClick={(empleoyeeId, day) => {
                       const escala = buildScaleForEmployee(empleoyeeId);
                       const selectedDay = escala.find((d) => d.data === day);
@@ -973,8 +957,8 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
 
           <ConfirmDialog
             open={acaoPendente !== null}
-            tone="primary"
-            icon="edit_calendar"
+            tone={acaoPendente?.perigo ? 'danger' : 'primary'}
+            icon={acaoPendente?.icone || 'edit_calendar'}
             title={acaoPendente?.titulo || ''}
             description={acaoPendente?.descricao}
             confirmLabel={acaoPendente?.confirmLabel}

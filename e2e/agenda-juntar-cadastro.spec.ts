@@ -30,13 +30,15 @@ test('supervisão: passar o atendimento para outro cadastro e renomear pedem con
   // Amanhã (a grade de hoje pode já ter passado do horário), num horário livre
   const dia = new Date(Date.now() + 86_400_000).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
   const criar = async (clientName: string) => {
+    let ultimo = '';
     for (let h = 9; h < 20; h++) {
       const r = await request.post(`${apiBase()}/agendamentos`, {
         headers, data: { collaboratorId: helena!.id, date: dia, time: `${String(h).padStart(2, '0')}:00`, serviceNames: ['E2E Massagem'], clientName },
       });
       if (r.status() === 201) return r.json() as Promise<{ id: string; clienteId: string; atualizadoEm: string }>;
+      ultimo = `${r.status()} ${await r.text()}`;
     }
-    throw new Error('Nenhum horário livre amanhã para a colaboradora de teste.');
+    throw new Error(`Nenhum horário livre amanhã para a colaboradora de teste (última resposta: ${ultimo}).`);
   };
   const ag = await criar(duplicado);
   const outro = await criar(verdadeiro);

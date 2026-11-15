@@ -11,7 +11,7 @@ import { useScheduleModals } from '../../../features/appointments/hooks';
 import { EmployeeScheduleColumn, LegendaEstadosAgenda, ScheduleGridProvider, type AcaoDeStatus, type ScheduleGridActions, type ScheduleGridContext } from '../../../components/ScheduleGridColumn';
 import { AgendaVisaoPeriodo, type VisaoAgenda } from './AgendaVisaoPeriodo';
 import { ScheduleRulerGrid } from '../../../components/ScheduleRulerGrid';
-import { isTeamMember } from '../../../utils/formatters';
+import { atendeNaAgenda, formatarReais } from '../../../utils/formatters';
 import { JANELA_AGENDA_DIAS } from '@shared/agendaJanela';
 import { ListaSemBaixa, useSemBaixa } from './ListaSemBaixa';
 import { bloqueioDiaInteiro, diaDaSemana, horarioParaMinutos, INTERVALO_AGENDAMENTO_MIN, minutoDentroDoBloqueio, minutosParaHorario, validarHorarioAgendamento } from '@shared/agenda';
@@ -52,10 +52,16 @@ interface SupervisorEscalaTabProps {
   setToastMessage: (msg: string | null) => void;
   setErrorMessage: (msg: string | null) => void;
   buildScaleForEmployee?: (employeeId: string) => DiaEscala[];
+  /**
+   * Quem usa a agenda da casa. Recepção: não exclui (cancela, o atendimento fica no histórico) e não cria bloqueio.
+   * O servidor confere as duas coisas de novo; aqui só some o que ela não pode fazer.
+   */
+  papel: 'supervisor' | 'recepcao'; // obrigatório: esquecer a prop não pode abrir no modo de mais poder
 }
 
 
-export function SupervisorEscalaTab({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onOpenUpcomingAppointments, onReassignAppointment, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onAlterarStatus, onEditClient, onAddBloqueio, onDeleteBloqueio, setToastMessage, setErrorMessage, buildScaleForEmployee }: SupervisorEscalaTabProps) {
+export function SupervisorEscalaTab({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onOpenUpcomingAppointments, onReassignAppointment, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onAlterarStatus, onEditClient, onAddBloqueio, onDeleteBloqueio, setToastMessage, setErrorMessage, buildScaleForEmployee, papel }: SupervisorEscalaTabProps) {
+  const ehRecepcao = papel === 'recepcao';
   const funcionamento = useFuncionamento();
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
   const intervalosDoDia = useMemo(() => appointments
@@ -119,7 +125,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   }, [scaleOverrides]);
 
   const getDayCoverage = useCallback((dateStr: string) => {
-    const team = employees.filter((emp) => isTeamMember(emp));
+    const team = employees.filter((emp) => atendeNaAgenda(emp));
     const ideal = Math.max(1, Math.ceil(team.length * 0.7));
     const trabalhando: string[] = [];
     const folgas: string[] = [];
@@ -175,7 +181,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   const dayStatusByEmployee = useMemo(() => {
     const map = new Map<string, EmployeeDayStatus | null>();
     for (const emp of employees) {
-      if (isTeamMember(emp)) map.set(emp.id, getEmployeeDayStatus(emp));
+      if (atendeNaAgenda(emp)) map.set(emp.id, getEmployeeDayStatus(emp));
     }
     return map;
   }, [employees, getEmployeeDayStatus]);
@@ -240,7 +246,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   }, [employees, receptionDate, setErrorMessage, todayStr, dayStatusByEmployee, openBookingModal, horaInicioGrade, funcionamento]);
 
   const activeEmployees = useMemo(() => employees
-    .filter((emp) => isTeamMember(emp))
+    .filter((emp) => atendeNaAgenda(emp))
     .filter((emp) => {
       if (professionalFilter === 'all') return true;
       if (professionalFilter === OFF_DAY_FILTER) return estaDeFolga(dayStatusByEmployee.get(emp.id));
@@ -403,7 +409,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     const { app, acao } = acaoPendente;
     const quando = `${app.date.split('-').reverse().join('/')} às ${app.time}, com ${nomeProfissional(app.assignedEmployeeId)}`;
     if (acao === 'concluir') {
-      const valor = typeof app.valorTotal === 'number' ? ` (${app.valorTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})` : '';
+      const valor = typeof app.valorTotal === 'number' ? ` (${formatarReais(app.valorTotal)})` : '';
       return { titulo: 'Concluir atendimento?', descricao: `${app.clientName}, ${quando}. Ele entra no faturamento${valor} e na comissão.`, botao: 'Concluir' };
     }
     if (acao === 'falta') return { titulo: 'Marcar falta?', descricao: `${app.clientName}, ${quando}. O horário fica registrado como falta do cliente.`, botao: 'Marcar falta' };
@@ -493,7 +499,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
         </div>
         <div className="mt-6 rounded-2xl border border-outline-variant/20 bg-surface-container-low p-3">
           <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Dica operacional</p>
-          <p className="text-xs text-on-surface-variant mt-1">Use os atalhos acima da grade para Nova Reserva, Lista de Hoje e Bloqueios.</p>
+          <p className="text-xs text-on-surface-variant mt-1">Use os atalhos acima da grade para Nova Reserva, Lista de Hoje{onAddBloqueio ? ' e Bloqueios' : ''}.</p>
         </div>
       </div>
 
@@ -518,9 +524,11 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
                 <span className="material-symbols-outlined text-[18px]" aria-hidden="true">pending_actions</span> Sem baixa ({semBaixa.length})
               </button>
             )}
-            <button onClick={() => openBlockModal('', '')} className="px-4 py-3 bg-error/15 text-error rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-error/25 transition-all flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px]">block</span> Bloqueio
-            </button>
+            {onAddBloqueio && !ehRecepcao && (
+              <button onClick={() => openBlockModal('', '')} className="px-4 py-3 bg-error/15 text-error rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-error/25 transition-all flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px]">block</span> Bloqueio
+              </button>
+            )}
           </div>
         </div>
 
@@ -538,7 +546,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
           >
             <option value="all">Profissional: Todos</option>
             <option value={OFF_DAY_FILTER}>Profissional: Somente de folga</option>
-            {employees.filter((employee) => isTeamMember(employee)).map((employee) => (
+            {employees.filter((employee) => atendeNaAgenda(employee)).map((employee) => (
               <option key={employee.id} value={employee.id}>{employee.name}</option>
             ))}
           </select>
@@ -729,7 +737,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
       {appointmentToDelete && (
         <DeleteAppointmentModal
           key={appointmentToDelete}
-          appointmentId={appointmentToDelete} version={appointments.find((a) => a.id === appointmentToDelete)?.version} onClose={closeDeleteAppointmentModal} onDeleteAppointment={onDeleteAppointment} setToastMessage={setToastMessage} setErrorMessage={setErrorMessage}
+          appointmentId={appointmentToDelete} version={appointments.find((a) => a.id === appointmentToDelete)?.version} onClose={closeDeleteAppointmentModal} onDeleteAppointment={onDeleteAppointment} setToastMessage={setToastMessage} setErrorMessage={setErrorMessage} modo={ehRecepcao ? 'cancelar' : 'excluir'}
         />
       )}
     </motion.div>
