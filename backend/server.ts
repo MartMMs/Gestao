@@ -1,3 +1,4 @@
+import './lib/horaNosLogs';
 import { config, validarConfigProducao } from './env';
 import express, { Request, Response, NextFunction } from 'express';
 import cors, { type CorsOptions } from 'cors';
@@ -136,7 +137,10 @@ setInterval(manutencaoAgenda, 5 * 60 * 1000);
 
 // Lembrete de 24h por WhatsApp: pelo número conectado por QR code (aba Totem, Autoatendimento & WhatsApp do admin)
 // ou, sem ele, pelo WHATSAPP_WEBHOOK_URL. Regras em services/lembretesWhatsapp.ts
-setInterval(criarJobLembretes(() => (whatsappQr.ativo ? whatsappQr : whatsapp)), 10 * 60 * 1000);
+const rodadaDeLembretes = criarJobLembretes(() => (whatsappQr.ativo ? whatsappQr : whatsapp));
+setInterval(rodadaDeLembretes, 10 * 60 * 1000);
+// Primeira rodada 1 min depois de subir (tempo de o QR reconectar), sem esperar os primeiros 10 min
+setTimeout(rodadaDeLembretes, 60 * 1000);
 aoReceberMensagemWhatsapp(tratarMensagemRecebida(eventos));
 void retomarWhatsappQr().catch((erro) => console.error('[WHATSAPP] Não foi possível retomar a sessão do QR code:', erro instanceof Error ? erro.message : 'erro desconhecido'));
 

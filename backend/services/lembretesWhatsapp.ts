@@ -44,8 +44,11 @@ export const criarJobLembretes = (escolherProvider: () => WhatsappProvider) => {
   let rodando = false;
   return async () => {
     const provider = escolherProvider();
-    if (rodando || !provider.ativo) return;
+    if (rodando) { console.log('[WHATSAPP] Rodada de lembretes: a anterior ainda está enviando; pulada.'); return; }
+    if (!provider.ativo) { console.log('[WHATSAPP] Rodada de lembretes: WhatsApp não conectado (QR) e webhook desligado; nada enviado.'); return; }
     rodando = true;
+    let naJanela = 0;
+    let jaAvisados = 0;
     try {
       const empresa = await getEmpresaConfig();
       const enviados = await enviarLembretes({
@@ -55,21 +58,24 @@ export const criarJobLembretes = (escolherProvider: () => WhatsappProvider) => {
           mensagens: empresa.mensagensLembrete, pedeConfirmacao: empresa.lembretePedeConfirmacao,
         },
         agora: new Date(),
-        buscar: async (de, ate) => (await prisma.agendamento.findMany({
+        buscar: async (de, ate) => { const lista = (await prisma.agendamento.findMany({
           where: filtroLembretes(de, ate),
           select: { id: true, data: true, cliente: { select: { nome: true, telefone: true } } },
           orderBy: { data: 'asc' },
           take: LIMITE_LEMBRETES_POR_RODADA,
-        })).map((ag) => ({ id: ag.id, data: ag.data, clienteNome: ag.cliente.nome, clienteTelefone: ag.cliente.telefone })),
+        })).map((ag) => ({ id: ag.id, data: ag.data, clienteNome: ag.cliente.nome, clienteTelefone: ag.cliente.telefone }));
+          naJanela = lista.length;
+          return lista; },
         // Marca antes de enviar: na falha, não repete (melhor perder um lembrete que mandar vários). Dura mais que a janela
-        marcarUmaVez: (id) => redisService.acquireLock(`lembrete-24h:${id}`, 2 * 86_400, '1'),
+        marcarUmaVez: async (id) => { const primeira = await redisService.acquireLock(`lembrete-24h:${id}`, 2 * 86_400, '1'); if (!primeira) jaAvisados += 1; return primeira; },
         registrarFalha: (id, erro) => console.error(`[WHATSAPP] Lembrete do agendamento ${id} não enviado:`, mensagemDoErro(erro)),
         podePerguntar: async (ag) => !(await redisService.get(chaveDoCliente(ag.clienteTelefone))),
         aoEnviar: async (ag, perguntou) => {
           if (perguntou) await redisService.set(chaveDoCliente(ag.clienteTelefone), ag.id, PRAZO_RESPOSTA_SEGUNDOS);
         },
       });
-      if (enviados > 0) console.log(`[WHATSAPP] ${enviados} lembrete(s) enviado(s).`);
+      // Resumo de toda rodada: dá para ver no terminal se o job rodou e por que não mandou
+      console.log(`[WHATSAPP] Rodada de lembretes (${provider.recebeRespostas ? 'QR code' : 'webhook'}): ${naJanela} atendimento(s) entre 2h e 24h, ${jaAvisados} já avisado(s), ${enviados} lembrete(s) enviado(s).`);
     } catch (error) {
       console.error('🚨 Erro nos lembretes por WhatsApp:', redactSensitiveData(error));
     } finally {
