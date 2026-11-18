@@ -28,7 +28,7 @@ export function WhatsappLembretesTab({ token }: { token: string | null }) {
   const erro = (acao.error ?? error) as Error | null;
 
   return (
-    <div className="max-w-4xl space-y-6 bg-surface-container-lowest rounded-2xl p-6 shadow-sm">
+    <div className="max-w-6xl mx-auto w-full space-y-6 bg-surface-container-lowest rounded-3xl border border-outline-variant/20 p-6 shadow-sm">
       <div>
         <h2 className="text-lg font-bold text-on-surface">WhatsApp dos lembretes</h2>
         <p className="text-sm text-on-surface-variant mt-1">
