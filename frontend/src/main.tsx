@@ -6,6 +6,13 @@ import { AuthProvider } from './AuthContext';
 import { isAutoatendimentoHost, noCaminho } from './config/hosts';
 import './index.css';
 
+// Cópia rápida da cor do sistema (a fonte é a configuração da empresa, que o App confere e atualiza logo depois):
+// a página já abre com a cor certa em vez de piscar a padrão enquanto a configuração carrega
+try {
+  const cor = localStorage.getItem('gestao:cor-sistema');
+  if (cor && /^#[0-9a-f]{6}$/i.test(cor)) document.documentElement.style.setProperty('--brand', cor);
+} catch { /* navegador sem localStorage: espera a configuração */ }
+
 const SENTRY_DSN = "SUA_DSN_DO_SENTRY_AQUI"; // Insira a chave fornecida pelo painel do Sentry
 
 if (SENTRY_DSN && SENTRY_DSN !== "SUA_DSN_DO_SENTRY_AQUI") {

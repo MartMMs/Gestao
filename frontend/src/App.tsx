@@ -169,10 +169,16 @@ export default function App() {
   useEffect(() => { document.title = companyConfig?.nomeEmpresa || 'Gestão'; }, [companyConfig?.nomeEmpresa]);
   // Cor escolhida pelo admin (Empresa & Segmento) vale para todos. A padrão do banco não troca o tema atual
   useEffect(() => {
-    const cor = companyConfig?.corTemaPrimaria;
-    if (cor && cor !== COR_PADRAO) document.documentElement.style.setProperty('--brand', cor);
+    if (!companyConfig) return; // ainda carregando: fica a cópia rápida do main.tsx
+    const cor = companyConfig.corTemaPrimaria;
+    const escolhida = cor && cor !== COR_PADRAO ? cor : null;
+    if (escolhida) document.documentElement.style.setProperty('--brand', escolhida);
     else document.documentElement.style.removeProperty('--brand');
-  }, [companyConfig?.corTemaPrimaria]);
+    try {
+      if (escolhida) localStorage.setItem('gestao:cor-sistema', escolhida);
+      else localStorage.removeItem('gestao:cor-sistema');
+    } catch { /* sem localStorage: só não guarda a cópia */ }
+  }, [companyConfig]);
   const [activeRoleView, setActiveRoleView] = useState<Role | 'tv' | 'autoatendimento'>(() => (ABRIR_NA_TV ? 'tv' : currentUser?.role ?? 'collaborator'));
   const [isPublicTVMode, setIsPublicTVMode] = useState(ABRIR_NA_TV);
   const [avisosAusencia, setAvisosAusencia] = useState<AvisoAusencia[]>([]);
