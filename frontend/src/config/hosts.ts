@@ -5,18 +5,39 @@
 // Servir o totem num caminho do mesmo host (app.x.com/autoatendimento) não separa o localStorage.
 import { readEnv } from './env';
 
-const PREFIXO_PADRAO = 'autoatendimento.';
+const PREFIXO_TOTEM = 'autoatendimento.';
+const PREFIXO_TV = 'tv.';
 
-export function isAutoatendimentoHost(hostname = typeof window !== 'undefined' ? window.location.hostname : ''): boolean {
+// Host configurado (lista separada por vírgula) ou, sem configuração, qualquer host que comece com o prefixo padrão
+function hostCorresponde(hostname: string, configuracao: string | undefined, prefixoPadrao: string): boolean {
   const host = hostname.toLowerCase();
   if (!host) return false;
-  // Aceita vários hosts separados por vírgula (ex.: "totem.x.com,www.totem.x.com")
-  const configurados = (readEnv().VITE_AUTOATENDIMENTO_HOST || '')
+  const configurados = (configuracao || '')
     .split(',')
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
   if (configurados.length > 0) return configurados.includes(host);
-  return host.startsWith(PREFIXO_PADRAO);
+  return host.startsWith(prefixoPadrao);
+}
+
+const hostAtual = () => (typeof window !== 'undefined' ? window.location.hostname : '');
+
+// Atalho de teste pelo IP (sem subdomínio): /totem e /painel. Mesma origem do portal, então SEM isolamento de sessão:
+// num aparelho onde alguém da equipe entrou, o totem rodaria com o cookie dela. Por isso só vale no desenvolvimento
+// ou com VITE_ATALHO_CAMINHOS=1 no build (teste pelo IP); em produção, use os subdomínios.
+export function noCaminho(caminho: string, pathname = typeof window !== 'undefined' ? window.location.pathname : ''): boolean {
+  const env = readEnv();
+  if (!env.DEV && env.VITE_ATALHO_CAMINHOS !== '1') return false;
+  return pathname === caminho || pathname.startsWith(`${caminho}/`);
+}
+
+export function isAutoatendimentoHost(hostname = hostAtual()): boolean {
+  return hostCorresponde(hostname, readEnv().VITE_AUTOATENDIMENTO_HOST, PREFIXO_TOTEM);
+}
+
+/** Painel de TV da recepção em subdomínio próprio (ex.: tv.suaempresa.com.br): abre direto na TV. */
+export function isTvHost(hostname = hostAtual()): boolean {
+  return hostCorresponde(hostname, readEnv().VITE_TV_HOST, PREFIXO_TV);
 }
 
 /** Endereço do totem para o botão da tela de login; vazio = abre o totem dentro do próprio portal (desenvolvimento). */

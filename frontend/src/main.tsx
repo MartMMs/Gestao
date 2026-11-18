@@ -3,8 +3,15 @@ import {createRoot} from 'react-dom/client';
 import * as Sentry from '@sentry/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './AuthContext';
-import { isAutoatendimentoHost } from './config/hosts';
+import { isAutoatendimentoHost, noCaminho } from './config/hosts';
 import './index.css';
+
+// Cópia rápida da cor do sistema (a fonte é a configuração da empresa, que o App confere e atualiza logo depois):
+// a página já abre com a cor certa em vez de piscar a padrão enquanto a configuração carrega
+try {
+  const cor = localStorage.getItem('gestao:cor-sistema');
+  if (cor && /^#[0-9a-f]{6}$/i.test(cor)) document.documentElement.style.setProperty('--brand', cor);
+} catch { /* navegador sem localStorage: espera a configuração */ }
 
 const SENTRY_DSN = "SUA_DSN_DO_SENTRY_AQUI"; // Insira a chave fornecida pelo painel do Sentry
 
@@ -105,7 +112,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        {isAutoatendimentoHost() ? (
+        {isAutoatendimentoHost() || noCaminho('/totem') ? (
           <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm opacity-70">Carregando Totem de Autoatendimento...</div>}>
             <AutoatendimentoStandalone />
           </Suspense>

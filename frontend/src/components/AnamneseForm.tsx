@@ -1,4 +1,5 @@
 import { useAuth } from '../AuthContext';
+import { declaracaoDoTotem } from '@shared/anamnese';
 import { useCompanyConfig } from '../api';
 import { confirmarSaida, useAlterado, useModal } from '../hooks/useModal';
 import { perguntasDoSegmento } from '@shared/segmento';
@@ -70,6 +71,10 @@ interface Props {
   onCancel?: () => void;
   // Enquanto a ficha é gravada, nada fecha e "Concluir" fica desabilitado
   salvando?: boolean;
+  // Declarações que o cliente escreveu no totem (texto livre, não vira campo): mostradas só para leitura no topo
+  declaracoesTotem?: string[];
+  // Há ficha gravada que quem edita não pode ver (LGPD): avisa por que os campos estão vazios
+  fichaRestrita?: boolean;
 }
 
 function YesNoField({
@@ -101,7 +106,7 @@ function YesNoField({
   );
 }
 
-export function AnamneseForm({ data, onChange, onClose, onCancel, salvando = false }: Props) {
+export function AnamneseForm({ data, onChange, onClose, onCancel, salvando = false, declaracoesTotem = [], fichaRestrita = false }: Props) {
   const alterado = useAlterado(true, data);
   const fechar = () => {
     if (salvando) return;
@@ -164,6 +169,22 @@ export function AnamneseForm({ data, onChange, onClose, onCancel, salvando = fal
 
         <div className="p-6 md:p-8 space-y-8 overflow-y-auto max-h-[75vh] custom-scrollbar">
           
+          {fichaRestrita && (
+            <p role="note" className="text-sm text-on-surface bg-surface-container-low border border-outline-variant/30 rounded-2xl p-4">
+              Este cliente já tem ficha registrada, mas o conteúdo é visível só para a supervisão e para o profissional do atendimento. Por isso os campos aparecem vazios: o que você preencher agora vira a ficha atual do cliente.
+            </p>
+          )}
+
+          {declaracoesTotem.length > 0 && (
+            <div className="bg-surface-container-low border border-outline-variant/30 rounded-2xl p-4 space-y-2">
+              <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Declaração do cliente no totem (não editável)</p>
+              <ul className="space-y-1">
+                {declaracoesTotem.map((linha, i) => <li key={i} className="text-sm text-on-surface">{declaracaoDoTotem(linha)}</li>)}
+              </ul>
+              <p className="text-xs text-on-surface-variant">Ela continua guardada. Os campos abaixo completam a ficha.</p>
+            </div>
+          )}
+
           {/* Termos e Avisos Obrigatórios */}
           <div className="bg-error-container/20 border border-error/30 p-5 rounded-2xl space-y-3">
             <p className="text-sm font-bold text-error uppercase tracking-widest flex items-center gap-2">

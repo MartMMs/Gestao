@@ -4,6 +4,10 @@ import { motion } from 'motion/react';
 import { ConfiguracaoEmpresa } from '../../../types';
 import { useCompanyConfig, useUpdateCompanyConfig } from '../../../api';
 
+/** Cor do banco quando ninguém escolheu (mantém o tema original do sistema) */
+export const COR_PADRAO = '#0f766e';
+const CORES_SISTEMA = ['#006a5a', '#b71c1c', '#0d47a1', '#e65100', '#4a148c', '#424242', '#0ea5e9', '#10b981', '#f43f5e', '#d946ef', '#8b5cf6', '#f59e0b'];
+
 interface PresetConfig {
   id: string;
   nome: string;
@@ -134,7 +138,8 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
   const [configDeFora, setConfigDeFora] = useState<ConfiguracaoEmpresa | null>(null);
 
   useEffect(() => {
-    if (!config) return;
+    // Mesma config já aplicada (StrictMode roda o efeito 2x): sem isso o aviso de conflito aparecia ao abrir
+    if (!config || config === baseRef.current) return;
     const editado = baseRef.current !== null && JSON.stringify(formRef.current) !== JSON.stringify(baseRef.current);
     baseRef.current = config;
     if (editado && JSON.stringify(formRef.current) !== JSON.stringify(config)) {
@@ -163,7 +168,9 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
     e.preventDefault();
     setSaveError(null);
     try {
-      await updateMutation.mutateAsync(form);
+      // O horário de funcionamento tem cartão próprio: este formulário não regrava uma cópia antiga dele
+      const { horaAbertura: _a, horaFechamento: _f, horaLimiteAgendamento: _l, diasFuncionamento: _d, ...dadosEmpresa } = form;
+      await updateMutation.mutateAsync(dadosEmpresa);
       // O que acabou de ser salvo vira a base: a config recarregada entra sem aviso. Não null: salvar sem mudança
       // não recarrega nada, e a próxima config de fora apagaria o que fosse digitado depois
       baseRef.current = form;
@@ -329,6 +336,24 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
                 className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl px-4 py-2.5 text-sm text-on-surface focus:ring-1 focus:ring-primary"
               />
             </div>
+          </div>
+
+          {/* Cor do sistema: gravada na empresa, vale para todos os aparelhos depois de salvar */}
+          <div className="pt-3 border-t border-outline-variant/20">
+            <p className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-2" id="cor-sistema">Cor do sistema</p>
+            <div role="radiogroup" aria-labelledby="cor-sistema" className="flex flex-wrap items-center gap-3">
+              <button type="button" role="radio" aria-checked={!form.corTemaPrimaria || form.corTemaPrimaria === COR_PADRAO} onClick={() => setForm({ ...form, corTemaPrimaria: COR_PADRAO })}
+                className={`h-10 px-3 rounded-full text-xs font-bold border ${!form.corTemaPrimaria || form.corTemaPrimaria === COR_PADRAO ? 'border-primary text-primary ring-2 ring-primary/40' : 'border-outline-variant/30 text-on-surface-variant'}`}>
+                Padrão
+              </button>
+              {CORES_SISTEMA.map((cor) => (
+                <button key={cor} type="button" role="radio" aria-checked={form.corTemaPrimaria === cor} aria-label={`Cor ${cor}`} title={cor}
+                  onClick={() => setForm({ ...form, corTemaPrimaria: cor })}
+                  className={`w-10 h-10 rounded-full border-2 border-surface shadow-sm transition-transform hover:scale-110 ${form.corTemaPrimaria === cor ? 'ring-2 ring-offset-2 ring-on-surface scale-110' : ''}`}
+                  style={{ backgroundColor: cor }} />
+              ))}
+            </div>
+            <p className="text-xs text-on-surface-variant mt-2">Vale para todos depois de salvar.</p>
           </div>
 
           {/* Seletor de Ícone */}

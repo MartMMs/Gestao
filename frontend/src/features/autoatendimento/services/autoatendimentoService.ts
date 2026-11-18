@@ -30,10 +30,12 @@ export async function fetchAutoatendimentoEmpresa(): Promise<ConfiguracaoEmpresa
   return res.json();
 }
 
+const MUITOS_ACESSOS = 'Muitos acessos agora. Aguarde um minuto e toque em Tentar novamente.';
+
 export async function fetchAutoatendimentoConfig(): Promise<AutoatendimentoConfig> {
   const res = await fetchTotem(`${getBaseUrl()}/config`);
   if (!res.ok) {
-    throw new Error('Falha ao carregar configurações de autoatendimento.');
+    throw new Error(res.status === 429 ? MUITOS_ACESSOS : 'Falha ao carregar configurações de autoatendimento.');
   }
   return res.json();
 }
@@ -62,7 +64,7 @@ export async function updateAutoatendimentoConfig(
 export async function fetchAutoatendimentoServicos(): Promise<Service[]> {
   const res = await fetchTotem(`${getBaseUrl()}/servicos`);
   if (!res.ok) {
-    throw new Error('Falha ao carregar catálogo de serviços.');
+    throw new Error(res.status === 429 ? MUITOS_ACESSOS : 'Falha ao carregar catálogo de serviços.');
   }
   return res.json();
 }

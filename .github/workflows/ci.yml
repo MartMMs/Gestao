@@ -65,6 +65,10 @@ jobs:
           echo "::add-mask::$senha"
           echo "JWT_SECRET=$jwt" >> "$GITHUB_ENV"
           echo "E2E_PASSWORD=$senha" >> "$GITHUB_ENV"
+          webhook=$(openssl rand -hex 32)
+          echo "::add-mask::$webhook"
+          # Mesmo segredo na API e no e2e do webhook de pagamento
+          echo "PAYMENT_WEBHOOK_SECRET=$webhook" >> "$GITHUB_ENV"
       - run: npm ci
       - run: npx prisma generate --schema=prisma/schema.prisma
         working-directory: backend

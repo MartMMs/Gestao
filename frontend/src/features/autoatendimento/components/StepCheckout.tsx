@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AutoatendimentoReservaSession, Voucher } from '../../../types';
 import { confirmarPagamentoAutoatendimento, type DadosClienteTotem } from '../services/autoatendimentoService';
-import { formatarReais } from '../utils/moeda';
+import { formatarReais } from '../../../utils/formatters';
 import { mensagemDeErro } from '../utils/erros';
 
 interface StepCheckoutProps {

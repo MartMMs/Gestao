@@ -1,3 +1,4 @@
+import './lib/horaNosLogs';
 import { config, validarConfigProducao } from './env';
 import express, { Request, Response, NextFunction } from 'express';
 import cors, { type CorsOptions } from 'cors';
@@ -11,6 +12,11 @@ import { configurarSocket, criarEventos } from './lib/eventos';
 import { hostDaRequisicao, responderErro } from './lib/http';
 import { redactSensitiveData } from '../shared/redact';
 import { ESCOPOS } from '../shared/escopos';
+import { whatsapp } from './services/communicationService';
+import { aoReceberMensagemWhatsapp, retomarWhatsappQr, whatsappQr } from './services/whatsappQr';
+import { criarJobLembretes, tratarMensagemRecebida } from './services/lembretesWhatsapp';
+import { getEmpresaConfig } from './services/configService';
+import { redisService } from './services/redisService';
 
 // Falha cedo: sem segredo JWT forte qualquer um poderia forjar tokens
 try {
@@ -128,6 +134,15 @@ const manutencaoAgenda = async () => {
   }
 };
 setInterval(manutencaoAgenda, 5 * 60 * 1000);
+
+// Lembrete de 24h por WhatsApp: pelo número conectado por QR code (aba Totem, Autoatendimento & WhatsApp do admin)
+// ou, sem ele, pelo WHATSAPP_WEBHOOK_URL. Regras em services/lembretesWhatsapp.ts
+const rodadaDeLembretes = criarJobLembretes(() => (whatsappQr.ativo ? whatsappQr : whatsapp));
+setInterval(rodadaDeLembretes, 10 * 60 * 1000);
+// Primeira rodada 1 min depois de subir (tempo de o QR reconectar), sem esperar os primeiros 10 min
+setTimeout(rodadaDeLembretes, 60 * 1000);
+aoReceberMensagemWhatsapp(tratarMensagemRecebida(eventos));
+void retomarWhatsappQr().catch((erro) => console.error('[WHATSAPP] Não foi possível retomar a sessão do QR code:', erro instanceof Error ? erro.message : 'erro desconhecido'));
 
 // Porta definida no .env (padrão 3333)
 const PORT = config.porta;

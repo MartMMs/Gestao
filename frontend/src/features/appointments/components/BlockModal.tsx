@@ -1,10 +1,10 @@
+import { useFuncionamento } from '../../../config/funcionamento';
 import React, { useMemo, useState } from 'react';
 import { shiftDateString } from '../utils/appointmentCore';
-import { bloqueioDiaInteiro, horarioParaMinutos } from '@shared/agenda';
+import { bloqueioDiaInteiro, FOLGA_FIM, FOLGA_INICIO, horarioParaMinutos } from '@shared/agenda';
 import { motion } from 'motion/react';
 import { Appointment, Bloqueio, Employee } from '../../../types';
-import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
-import { isTeamMember } from '../../../utils/formatters';
+import { atendeNaAgenda } from '../../../utils/formatters';
 import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
 
 export interface BlockModalProps {
@@ -20,11 +20,10 @@ export interface BlockModalProps {
   setToastMessage: (msg: string | null) => void;
 }
 
-const START_TIME = `${String(SCHEDULE_CONFIG.START_HOUR).padStart(2, '0')}:00`;
-const END_TIME = `${String(SCHEDULE_CONFIG.END_HOUR).padStart(2, '0')}:00`;
 
 
 export function BlockModal({ receptionDate, initialTime, initialEmpId, employees, appointments = [], onClose, onAddBloqueio, onReassignAppointment, setErrorMessage, setToastMessage }: BlockModalProps) {
+  const funcionamento = useFuncionamento();
   const [blockDate, setBlockDate] = useState(receptionDate);
   const [bookTime, setBookTime] = useState(initialTime);
   const [blockEndTime, setBlockEndTime] = useState('');
@@ -47,24 +46,24 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
 
   const suggestedEmployees = useMemo(() => {
     const candidates = employees.filter((emp) => {
-      if (emp.id === bookEmp || !isTeamMember(emp)) return false;
+      if (emp.id === bookEmp || !atendeNaAgenda(emp)) return false;
       if (emp.diasTrabalho && !emp.diasTrabalho.split(',').includes(String(dayOfWeek))) return false;
       return true;
     });
 
     return candidates.sort((a, b) => {
-      const aOnFolga = (a.bloqueios || []).some((bloq) => bloq.data === blockDate && bloqueioDiaInteiro(bloq));
-      const bOnFolga = (b.bloqueios || []).some((bloq) => bloq.data === blockDate && bloqueioDiaInteiro(bloq));
+      const aOnFolga = (a.bloqueios || []).some((bloq) => bloq.data === blockDate && bloqueioDiaInteiro(bloq, funcionamento));
+      const bOnFolga = (b.bloqueios || []).some((bloq) => bloq.data === blockDate && bloqueioDiaInteiro(bloq, funcionamento));
       if (aOnFolga !== bOnFolga) return aOnFolga ? 1 : -1;
 
       const aLoad = appointments.filter((app) => app.assignedEmployeeId === a.id && app.date === blockDate && app.status === 'scheduled').length;
       const bLoad = appointments.filter((app) => app.assignedEmployeeId === b.id && app.date === blockDate && app.status === 'scheduled').length;
       return aLoad - bLoad;
     });
-  }, [appointments, blockDate, bookEmp, dayOfWeek, employees]);
+  }, [appointments, blockDate, bookEmp, dayOfWeek, employees, funcionamento]);
 
-  const effectiveStart = isFolga ? START_TIME : bookTime;
-  const effectiveEnd = isFolga ? END_TIME : blockEndTime;
+  const effectiveStart = isFolga ? FOLGA_INICIO : bookTime;
+  const effectiveEnd = isFolga ? FOLGA_FIM : blockEndTime;
   const effectiveReason = isFolga ? 'Folga' : blockReason;
 
   const getPresetDays = () => {
@@ -209,7 +208,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
               </p>
             </div>
           )}
-          <div className="grid grid-cols-2 gap-4"><div><label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Início</label><input required type="time" min={START_TIME} max={END_TIME} value={effectiveStart} onChange={e => setBookTime(e.target.value)} disabled={isFolga || blockPreset !== 'custom'} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm ${(isFolga || blockPreset !== 'custom') ? 'opacity-50 cursor-not-allowed' : ''}`} /></div><div><label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Fim</label><input required type="time" min={bookTime || START_TIME} max={END_TIME} value={effectiveEnd} onChange={e => setBlockEndTime(e.target.value)} disabled={isFolga || blockPreset !== 'custom'} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm ${(isFolga || blockPreset !== 'custom') ? 'opacity-50 cursor-not-allowed' : ''}`} /></div></div>
+          <div className="grid grid-cols-2 gap-4"><div><label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Início</label><input required type="time" min={funcionamento.abertura} max={funcionamento.fechamento} value={effectiveStart} onChange={e => setBookTime(e.target.value)} disabled={isFolga || blockPreset !== 'custom'} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm ${(isFolga || blockPreset !== 'custom') ? 'opacity-50 cursor-not-allowed' : ''}`} /></div><div><label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Fim</label><input required type="time" min={bookTime || funcionamento.abertura} max={funcionamento.fechamento} value={effectiveEnd} onChange={e => setBlockEndTime(e.target.value)} disabled={isFolga || blockPreset !== 'custom'} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm ${(isFolga || blockPreset !== 'custom') ? 'opacity-50 cursor-not-allowed' : ''}`} /></div></div>
           <div><label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Profissional</label><select required value={bookEmp} onChange={e => setBookEmp(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm">{employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select></div>
           <div><label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Motivo</label><input required type="text" value={effectiveReason} onChange={e => setBlockReason(e.target.value)} disabled={isFolga || blockPreset !== 'custom'} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm ${(isFolga || blockPreset !== 'custom') ? 'opacity-50 cursor-not-allowed' : ''}`} placeholder="Ex: Pausa, Almoço..." /></div>
 
@@ -236,7 +235,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
                     <option value="">Selecione para transferir...</option>
                     {suggestedEmployees.map((emp) => {
                       const load = appointments.filter((app) => app.assignedEmployeeId === emp.id && app.date === blockDate && app.status === 'scheduled').length;
-                      const onFolga = (emp.bloqueios || []).some((b) => b.data === blockDate && bloqueioDiaInteiro(b));
+                      const onFolga = (emp.bloqueios || []).some((b) => b.data === blockDate && bloqueioDiaInteiro(b, funcionamento));
                       return <option key={emp.id} value={emp.id}>{emp.name}{onFolga ? ' - Folga' : ''} ({load} no dia)</option>;
                     })}
                   </select>

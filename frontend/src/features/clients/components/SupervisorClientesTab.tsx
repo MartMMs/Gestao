@@ -4,10 +4,11 @@ import { motion } from 'motion/react';
 import { Appointment, Client, Service } from '../../../types';
 import { AnamneseForm, AnamneseData } from '../../../components/AnamneseForm';
 import { fichaOculta, formatAnamneseStorage, parseClientObservation } from '../../../utils/anamneseUtils';
+import { linhasDoTotem } from '@shared/anamnese';
 import { useSearch } from '../../../hooks/useSearch';
 import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
-import { formatCpf, formatPhone } from '../../../utils/formatters';
+import { formatCpf, formatPhone, formatarReais } from '../../../utils/formatters';
 import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import { useAuth } from '../../../AuthContext';
 import { useClientAppointments, useClients, useCompanyConfig } from '../../../api';
@@ -43,7 +44,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
   const [clientToDelete, setClientToDelete] = useState<string | null>(null);
   // Só o id: a ficha aberta acompanha a lista quando ela recarrega (alteração feita em outro aparelho)
   const [fichaClientId, setFichaClientId] = useState<string | null>(null);
-  const [editingAnamneseClient, setEditingAnamneseClient] = useState<{ id: string; name: string; note: string; data: AnamneseData } | null>(null);
+  const [editingAnamneseClient, setEditingAnamneseClient] = useState<{ id: string; name: string; note: string; data: AnamneseData; restrita?: boolean } | null>(null);
   const [historyClient, setHistoryClient] = useState<Client | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | '7days' | 'month'>('all');
   const [abertoNovo, setAbertoNovo] = useState(false);
@@ -153,8 +154,9 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
       const payload: Partial<Client> = somenteAnamnese
         ? { observacao: finalObservation }
         : ehRecepcao
-          ? { telefone: editingClient.telefone }
+          ? { telefone: editingClient.telefone, naoReceberWhatsapp: editingClient.naoReceberWhatsapp === true }
           : {
+            naoReceberWhatsapp: editingClient.naoReceberWhatsapp === true,
             nome: editingClient.nome,
             telefone: editingClient.telefone,
             cpf: editingClient.cpf,
@@ -232,9 +234,9 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                 <span role="status" className="material-symbols-outlined animate-spin text-[18px] text-on-surface-variant" aria-label="Atualizando lista">progress_activity</span>
               )}
             </h3>
-            <p className="text-sm text-on-surface-variant">Gerencie o cadastro e historico dos seus clientes.</p>
+            <p className="text-sm text-on-surface-variant">Gerencie o cadastro e histórico dos seus clientes.</p>
           </div>
-          <div className="flex w-full md:w-auto flex-col sm:flex-row gap-3">
+          <div className="flex w-full md:w-auto flex-col sm:flex-row sm:flex-wrap gap-3">
             <div className="relative w-full sm:w-72">
               <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline-variant" aria-hidden="true">search</span>
               <input
@@ -270,8 +272,8 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                 <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">CPF</th>
                 <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Telefone</th>
                 <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest hidden lg:table-cell">Perfil Clínico</th>
-                <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest hidden md:table-cell">Observacoes</th>
-                <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest text-right">Acoes</th>
+                <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest hidden md:table-cell">Observações</th>
+                <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest text-right">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -301,7 +303,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                       className="p-2 text-on-surface-variant hover:text-primary rounded-full"
                       title="Histórico de serviços"
                     >
-                      <span className="material-symbols-outlined text-xl">history</span>
+                      <span className="material-symbols-outlined text-xl" aria-hidden="true">history</span>
                     </button>
                     <button
                       type="button"
@@ -310,7 +312,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                       title="Ver ficha de anamnese"
                       aria-label="Ver ficha de anamnese"
                     >
-                      <span className="material-symbols-outlined text-xl">summarize</span>
+                      <span className="material-symbols-outlined text-xl" aria-hidden="true">summarize</span>
                     </button>
                     <button
                       onClick={() => {
@@ -322,15 +324,17 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                       }}
                       disabled={!onEditClient}
                       className="p-2 text-on-surface-variant hover:text-primary rounded-full disabled:opacity-40"
+                      title="Editar cliente"
                     >
-                      <span className="material-symbols-outlined text-xl">edit</span>
+                      <span className="material-symbols-outlined text-xl" aria-hidden="true">edit</span>
                     </button>
                     <button
                       onClick={() => setClientToDelete(client.id)}
                       disabled={!onDeleteClient}
                       className="p-2 text-on-surface-variant hover:text-error rounded-full disabled:opacity-40"
+                      title="Excluir cliente"
                     >
-                      <span className="material-symbols-outlined text-xl">delete</span>
+                      <span className="material-symbols-outlined text-xl" aria-hidden="true">delete</span>
                     </button>
                   </td>
                 </tr>
@@ -433,6 +437,12 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                   />
                 </div>
               )}
+              {!somenteAnamnese && (
+                <label className="flex items-center gap-2 text-sm text-on-surface">
+                  <input type="checkbox" checked={editingClient.naoReceberWhatsapp === true} onChange={(e) => setEditingClient({ ...editingClient, naoReceberWhatsapp: e.target.checked })} className="w-4 h-4 rounded" />
+                  Não quer receber lembretes no WhatsApp
+                </label>
+              )}
               {!ehRecepcao && (
                 <>
                   <div>
@@ -444,7 +454,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                     <input type="text" value={editingClientPreferencias} onChange={e => setEditingClientPreferencias(e.target.value)} placeholder="Ex: Pressão Forte, Chá Verde" className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface" />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Observacoes</label>
+                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Observações</label>
                     <textarea
                       rows={3}
                       value={editingClientNote}
@@ -487,7 +497,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
           // Supervisão/profissional autorizado ou recepção (atualização cega no balcão)
           onEditar={onEditClient && (fichaClient.acessoSaude || ehRecepcao) ? () => {
             const parsed = parseClientObservation(fichaClient.observacao);
-            setEditingAnamneseClient({ id: fichaClient.id, name: fichaClient.nome, note: parsed.note, data: parsed.anamData });
+            setEditingAnamneseClient({ id: fichaClient.id, name: fichaClient.nome, note: parsed.note, data: parsed.anamData, restrita: fichaOculta(fichaClient) });
             setFichaClientId(null);
           } : undefined}
           onClose={() => setFichaClientId(null)}
@@ -501,6 +511,8 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
           onClose={handleSaveAnamnese}
           onCancel={() => setEditingAnamneseClient(null)}
           salvando={isSaving}
+          declaracoesTotem={linhasDoTotem(editingAnamneseClient.note)}
+          fichaRestrita={editingAnamneseClient.restrita}
         />
       )}
 
@@ -593,7 +605,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                     <div className="bg-surface-container-low border border-outline-variant/20 rounded-xl px-4 py-3">
                       <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant truncate">Receita LTV</p>
                       <p className="text-lg font-headline text-primary">
-                        {totalSpent.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        {formatarReais(totalSpent)}
                       </p>
                     </div>
                     <div className="bg-surface-container-low border border-outline-variant/20 rounded-xl px-4 py-3 col-span-2 sm:col-span-1">
@@ -616,7 +628,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                           </div>
                           <p className="text-sm text-on-surface">{appointment.services.join(', ') || 'Sem serviço informado'}</p>
                           <p className="text-xs text-on-surface-variant mt-1">
-                            Valor estimado: {getAppointmentValue(appointment).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            Valor estimado: {formatarReais(getAppointmentValue(appointment))}
                           </p>
                         </div>
                       ))}

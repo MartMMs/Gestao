@@ -66,7 +66,7 @@ test.describe('Ficha: acessoSaude e privacidade por papel (API)', () => {
       expect(rec.every((c) => c.acessoSaude === false), 'recepção').toBe(true);
       const recPerto = rec.find((c) => c.id === cPerto.id) as { telefone?: string; cpf?: string } | undefined;
       // A1: Recepção vê telefone completo para ligar ao cliente, mas CPF segue mascarado
-      expect(recPerto?.telefone).toBe('(11) 98888-7766');
+      expect(recPerto?.telefone).toBe('11988887766'); // a API guarda só dígitos; a tela formata
       expect(recPerto?.cpf).toBe('***.***.***-25');
 
       // A2: Recepção atualiza a ficha no balcão sem ver a nota médica anterior e sem apagá-la

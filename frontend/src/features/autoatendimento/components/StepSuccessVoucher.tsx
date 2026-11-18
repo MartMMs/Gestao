@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Voucher, ConfiguracaoEmpresa } from '../../../types';
-import { formatarReais } from '../utils/moeda';
+import { formatarReais } from '../../../utils/formatters';
 
 interface StepSuccessVoucherProps {
   voucher: Voucher;

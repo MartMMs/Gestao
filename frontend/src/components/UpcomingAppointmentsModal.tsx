@@ -4,7 +4,7 @@ import { horarioParaMinutos } from '@shared/agenda';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Service } from '../types';
 import { getBrazilCurrentMinuteOfDay, getLocalTodayString } from '../features/appointments/utils/appointmentCore';
-import { isTeamMember } from '../utils/formatters';
+import { atendeNaAgenda } from '../utils/formatters';
 import { useModal } from '../hooks/useModal';
 
 interface UpcomingAppointmentsModalProps {
@@ -118,7 +118,7 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
           </button>
         </div>
 
-        <div className="grid gap-3 border-b border-outline-variant/20 bg-surface-container-low px-6 py-4 md:grid-cols-4">
+        <div className="grid gap-3 border-b border-outline-variant/20 bg-surface-container-low px-6 py-4 sm:grid-cols-2">
           <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
             <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Hoje</p>
             <p className="text-2xl font-headline text-primary">{summary.today}</p>
@@ -145,7 +145,7 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
               className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary"
             >
               <option value="all">Todos os profissionais</option>
-              {employees.filter((employee) => isTeamMember(employee)).map((employee) => (
+              {employees.filter((employee) => atendeNaAgenda(employee)).map((employee) => (
                 <option key={employee.id} value={employee.id}>{employee.name}</option>
               ))}
             </select>

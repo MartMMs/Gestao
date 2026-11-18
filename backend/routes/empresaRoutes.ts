@@ -9,6 +9,8 @@ import { redisService } from '../services/redisService';
 import { getEmpresaConfig } from '../services/configService';
 import { obterFeriadosNacionais } from '../../shared/feriadosBR';
 import { EMAIL_REGEX, USUARIO_REGEX } from '../../shared/validadores';
+import { duracaoTotal, horarioValido, partesNoFuso, validarFuncionamento, validarHorarioAgendamento, type Funcionamento } from '../../shared/agenda';
+import { CODIGO_FORA_DO_HORARIO } from '../../shared/codigosErro';
 import { responderErro, ipDoCliente } from '../lib/http';
 import { registrarAuditoria } from '../lib/auditoria';
 import { provaValida, type DesafioLogin } from '../../shared/provaDeTrabalho';
@@ -96,8 +98,33 @@ const CAMPOS_EMPRESA = [
   'termoEspaco', 'termoServico', 'telefoneContato', 'emailContato', 'endereco', 'corTemaPrimaria',
 ] as const;
 
-const validarConfigEmpresa = (body: Record<string, unknown>) => {
-  const dados: Record<string, string | boolean | null> = {};
+// Campos validados do PUT; os do horário com o tipo certo (o PUT monta o horário novo sem conversões)
+type DadosEmpresa = {
+  [campo: string]: string | boolean | number[] | null | undefined;
+  horaAbertura?: string;
+  horaFechamento?: string;
+  horaLimiteAgendamento?: string | null;
+  diasFuncionamento?: number[];
+};
+
+const validarConfigEmpresa = (body: Record<string, unknown>): { erro: string; dados?: undefined } | { dados: DadosEmpresa; erro?: undefined } => {
+  const dados: DadosEmpresa = {};
+  for (const campo of ['horaAbertura', 'horaFechamento'] as const) {
+    if (body[campo] === undefined) continue;
+    if (!horarioValido(body[campo])) return { erro: 'Informe abertura e fechamento no formato HH:MM.' };
+    dados[campo] = body[campo];
+  }
+  if (body.horaLimiteAgendamento !== undefined) {
+    // Vazio ou null = sem limite próprio (vale até o fechamento)
+    const limite = body.horaLimiteAgendamento === '' ? null : body.horaLimiteAgendamento;
+    if (limite !== null && !horarioValido(limite)) return { erro: 'Informe o último horário de agendamento no formato HH:MM.' };
+    dados.horaLimiteAgendamento = limite;
+  }
+  if (body.diasFuncionamento !== undefined) {
+    const dias: unknown = body.diasFuncionamento;
+    if (!Array.isArray(dias) || dias.some((d) => !Number.isInteger(d))) return { erro: 'Dias de funcionamento inválidos.' };
+    dados.diasFuncionamento = [...(dias as number[])].sort((a, b) => a - b);
+  }
   if (body.usarComissao !== undefined) {
     if (typeof body.usarComissao !== 'boolean') return { erro: 'Campo usarComissao inválido.' };
     dados.usarComissao = body.usarComissao;
@@ -122,6 +149,7 @@ const validarConfigEmpresa = (body: Record<string, unknown>) => {
   if (typeof dados.emailContato === 'string' && !EMAIL_REGEX.test(dados.emailContato)) {
     return { erro: 'Informe um e-mail de contato válido.' };
   }
+  if (dados.corTemaPrimaria != null && !/^#[0-9a-f]{6}$/i.test(String(dados.corTemaPrimaria))) return { erro: 'Cor do tema inválida (use o formato #rrggbb).' };
   return { dados };
 };
 
@@ -368,12 +396,48 @@ export function createEmpresaRouter(eventos: Eventos) {
       if (!validacao.dados) return res.status(400).json({ erro: validacao.erro });
       // Ligar/desligar comissão muda o líquido dos relatórios: decisão do administrador
       const atual = await getEmpresaConfig();
+      // Horário confere com o que já está gravado (mudar só o fechamento não pode deixar o limite depois dele)
+      const d = validacao.dados;
+      const novoHorario: Funcionamento = {
+        abertura: d.horaAbertura ?? atual.horaAbertura,
+        fechamento: d.horaFechamento ?? atual.horaFechamento,
+        limite: d.horaLimiteAgendamento !== undefined ? d.horaLimiteAgendamento : atual.horaLimiteAgendamento,
+        dias: d.diasFuncionamento ?? atual.diasFuncionamento,
+      };
+      const erroHorario = validarFuncionamento(novoHorario);
+      if (erroHorario) return res.status(400).json({ erro: erroHorario });
+      const horarioMudou = (['horaAbertura', 'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento'] as const)
+        .some((c) => d[c] !== undefined && JSON.stringify(d[c]) !== JSON.stringify(atual[c]));
+      // Atendimentos marcados que ficariam fora do novo horário continuam marcados: quem muda precisa saber e confirmar
+      if (horarioMudou && req.body?.confirmarForaDoHorario !== true) {
+        const marcados = await prisma.agendamento.findMany({
+          where: { status: { in: ['scheduled', 'aguardando_pagamento'] }, data: { gte: new Date() } },
+          select: { data: true, servicos: { select: { duracao: true, tempoHigienizacaoMin: true } } },
+        });
+        const fora = marcados.filter((ag) => {
+          const { data, horario } = partesNoFuso(ag.data);
+          return validarHorarioAgendamento(data, horario, duracaoTotal(ag.servicos), { funcionamento: novoHorario, intervaloMin: 1 }) !== null;
+        }).length;
+        if (fora > 0) {
+          return res.status(409).json({
+            erro: `${fora} atendimento${fora > 1 ? 's marcados ficam' : ' marcado fica'} fora do novo horário. ${fora > 1 ? 'Eles continuam marcados' : 'Ele continua marcado'}: remarque pela agenda se precisar.`,
+            code: CODIGO_FORA_DO_HORARIO,
+            quantidade: fora,
+          });
+        }
+      }
       if (validacao.dados.usarComissao !== undefined && validacao.dados.usarComissao !== atual.usarComissao && !usuarioEhAdmin(req)) {
         return res.status(403).json({ erro: 'Apenas o administrador pode ligar ou desligar a comissão.' });
       }
+      if (validacao.dados.nomeEmpresa !== undefined && validacao.dados.nomeEmpresa !== atual.nomeEmpresa && !usuarioEhAdmin(req)) {
+        return res.status(403).json({ erro: 'Apenas o administrador pode alterar o nome da empresa.' });
+      }
+      if (validacao.dados.corTemaPrimaria !== undefined && validacao.dados.corTemaPrimaria !== atual.corTemaPrimaria && !usuarioEhAdmin(req)) {
+        return res.status(403).json({ erro: 'Apenas o administrador pode alterar a cor do sistema.' });
+      }
 
       // Nada mudou: responde sem gravar nem avisar as telas (o aviso faz todas recarregarem as listas)
-      const mudou = Object.entries(validacao.dados).some(([campo, valor]) => (atual as Record<string, unknown>)[campo] !== valor);
+      const mudou = Object.entries(validacao.dados).some(([campo, valor]) => JSON.stringify((atual as Record<string, unknown>)[campo]) !== JSON.stringify(valor));
       if (!mudou) return res.json(atual);
 
       const configAtualizada = await prisma.configuracaoEmpresa.update({
@@ -382,6 +446,8 @@ export function createEmpresaRouter(eventos: Eventos) {
       });
 
       await registrarAuditoria(req, { acao: 'empresa.comissao', alvo: 'Comissão da empresa', antes: atual, depois: configAtualizada, campos: ['usarComissao'] });
+      // Horário muda o que a agenda e o totem aceitam: fica no histórico (só registra se mudou)
+      await registrarAuditoria(req, { acao: 'empresa.horario', alvo: 'Horário de funcionamento', antes: atual, depois: configAtualizada, campos: ['horaAbertura', 'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento'] });
       // Ligar ou desligar a ficha obrigatória muda quem consegue agendar: fica no histórico (só registra se mudou)
       await registrarAuditoria(req, { acao: 'empresa.anamnese', alvo: 'Ficha de anamnese obrigatória', antes: atual, depois: configAtualizada, campos: ['exigirAnamnese'] });
       // Só o evento da config: notificarMudanca() sem escopo fazia todas as telas baixarem todas as listas de uma vez

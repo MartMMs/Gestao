@@ -1,3 +1,4 @@
+import { useFuncionamento } from '../../../config/funcionamento';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { normalizarTexto } from '@shared/validadores';
 import { horarioParaMinutos } from '@shared/agenda';
@@ -9,11 +10,10 @@ import { ModalFormulario } from '../../../components/ModalFormulario';
 import { fichaOculta, formatAnamneseStorage, hasAnamnese, parseClientObservation } from '../../../utils/anamneseUtils';
 import { FichaAnamneseModal } from '../../../components/FichaAnamneseModal';
 import { AvisoCliente } from '../../../components/AvisoCliente';
-import { MENSAGEM_ANAMNESE_OBRIGATORIA } from '@shared/anamnese';
+import { MENSAGEM_ANAMNESE_OBRIGATORIA, linhasDoTotem } from '@shared/anamnese';
 import { useAuth } from '../../../AuthContext';
-import { formatPhone, formatCpf, isTeamMember } from '../../../utils/formatters';
+import { formatPhone, formatCpf, atendeNaAgenda } from '../../../utils/formatters';
 import { useFormDraft } from '../../../hooks/useFormDraft';
-import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
 import { isApiError, useCompanyConfig } from '../../../api';
 
@@ -119,6 +119,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   );
 
   const [clientMode, setClientMode] = useState<'search' | 'new'>(() => draft.clientMode || 'search');
+  const funcionamento = useFuncionamento();
   const [bookDate, setBookDate] = useState(() => draft.bookDate || receptionDate);
   const [bookName, setBookName] = useState(() => draft.bookName || '');
   const [clientSearchTerm, setClientSearchTerm] = useState('');
@@ -130,9 +131,9 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   const [bookTime, setBookTime] = useState(() => draft.bookTime || initialTime);
   const [bookEmp, setBookEmp] = useState(() => {
     const restoredBookEmp = draft.bookEmp || initialEmpId;
-    const isRestoredEmpValid = employees.some((employee) => employee.id === restoredBookEmp && isTeamMember(employee));
-    const fallbackEmployeeId = employees.find((employee) => employee.id === initialEmpId && isTeamMember(employee))?.id
-      || employees.find((employee) => isTeamMember(employee))?.id
+    const isRestoredEmpValid = employees.some((employee) => employee.id === restoredBookEmp && atendeNaAgenda(employee));
+    const fallbackEmployeeId = employees.find((employee) => employee.id === initialEmpId && atendeNaAgenda(employee))?.id
+      || employees.find((employee) => atendeNaAgenda(employee))?.id
       || '';
     return isRestoredEmpValid ? restoredBookEmp : fallbackEmployeeId;
   });
@@ -154,6 +155,8 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   const [bookDetails, setBookDetails] = useState(() => draft.bookDetails || '');
   const [bookClientObservation, setBookClientObservation] = useState(() => draft.bookClientObservation || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Trava síncrona: o estado só muda na próxima renderização e o clique duplo passava as duas vezes
+  const enviandoRef = useRef(false);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const [showAnamnese, setShowAnamnese] = useState(() => Boolean(draft.showAnamnese));
   const [anamneseData, setAnamneseData] = useState<AnamneseData>(() => draft.anamneseData ?? initialAnamnese);
@@ -253,7 +256,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     });
   }, [serviceSearchTerm, services]);
 
-  const teamEmployees = useMemo(() => employees.filter((employee) => isTeamMember(employee)), [employees]);
+  const teamEmployees = useMemo(() => employees.filter((employee) => atendeNaAgenda(employee)), [employees]);
 
   const selectedServiceDefinitions = useMemo(() => {
     if (bookService.length === 0) return [] as Service[];
@@ -404,11 +407,14 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
   const handleQuickBook = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (bookingBusy) return;
+    if (bookingBusy || enviandoRef.current) return;
     setConflictMessage(null);
     if (clientMode === 'search' && !selectedClientId) {
       setErrorMessage('Selecione um cliente na busca para continuar.');
       return;
+    }
+    if (!bookName.trim()) {
+      setErrorMessage('Informe o nome do cliente.'); return;
     }
     if (bookService.length === 0) {
       setErrorMessage('Por favor, selecione pelo menos um serviço.'); return;
@@ -426,6 +432,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       serviceNames: bookService,
       appointments,
       services,
+      funcionamento,
     });
 
     if (scheduleValidationError) {
@@ -435,12 +442,6 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
     const startMinutes = horarioParaMinutos(bookTime);
     const durationMinutes = getDuration(bookService, services);
-    const closingMinutes = SCHEDULE_CONFIG.END_HOUR * 60;
-
-    if (startMinutes + durationMinutes > closingMinutes) {
-      setErrorMessage(`Este agendamento ultrapassa o fechamento às ${String(SCHEDULE_CONFIG.END_HOUR).padStart(2, '0')}:00. Reduza os serviços ou escolha um horário mais cedo.`);
-      return;
-    }
 
     const selectedEmployee = employees.find((emp) => emp.id === bookEmp);
     const overlapBlock = (selectedEmployee?.bloqueios || [])
@@ -471,6 +472,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       ? clients.find(c => c.id === selectedClientId)
       : undefined;
 
+    enviandoRef.current = true;
     setIsSubmitting(true);
     try {
       const success = await onAddAppointment({
@@ -486,7 +488,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       if (success !== false) {
         clearDraft();
         onClose();
-        setToastMessage('Agendamento salvo na sua agenda!');
+        setToastMessage(bookEmp === currentUser?.id ? 'Agendamento salvo na sua agenda!' : `Agendamento salvo na agenda de ${selectedEmployee?.name.split(' ')[0] ?? 'profissional'}!`);
       }
     } catch (error) {
       if (isApiError(error) && error.status === 409) {
@@ -501,6 +503,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
       setErrorMessage(error instanceof Error ? error.message : 'Não foi possível salvar o agendamento.');
     } finally {
+      enviandoRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -646,7 +649,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
             <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Cliente Selecionado</p>
-                <p className="text-sm font-bold text-on-surface truncate">{bookName || 'Nenhum cliente selecionado'}{selectedClientId && <AvisoCliente semFicha={!clienteTemFicha} />}</p>
+                <p className="text-sm font-bold text-on-surface break-words">{bookName || 'Nenhum cliente selecionado'}{selectedClientId && <AvisoCliente semFicha={!clienteTemFicha} />}</p>
               </div>
               {clienteEscolhido && (
                 <button type="button" onClick={() => setVerFicha(true)} className="text-[11px] text-primary font-bold uppercase tracking-widest hover:underline whitespace-nowrap">
@@ -724,7 +727,15 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
           onClose={() => setVerFicha(false)}
         />
       )}
-      {showAnamnese && <AnamneseForm data={anamneseData} onChange={setAnamneseData} onClose={() => setShowAnamnese(false)} />}
+      {showAnamnese && (
+        <AnamneseForm
+          data={anamneseData}
+          onChange={setAnamneseData}
+          onClose={() => setShowAnamnese(false)}
+          declaracoesTotem={linhasDoTotem(bookClientObservation)}
+          fichaRestrita={Boolean(clienteEscolhido && fichaOculta(clienteEscolhido)) && !hasAnamnese(anamneseData)}
+        />
+      )}
     </>
   );
 }

@@ -146,16 +146,16 @@ export function TVPanelView({ appointments, employees, onExit, companyName, comp
   }, [firstUpcomingId]);
 
   return (
-    <div className="min-h-screen bg-[#001410] text-white p-8 md:p-16 flex flex-col fixed inset-0 z-200 antialiased">
+    <div className="min-h-screen bg-(--tv-fundo) text-white p-8 md:p-16 flex flex-col fixed inset-0 z-200 antialiased">
       <div className="flex justify-between items-center mb-12 border-b border-white/10 pb-8">
         <div className="flex items-center gap-6">
-          <span className="material-symbols-outlined text-6xl text-[#afefdd]">{companyIcon || 'storefront'}</span>
-          <h1 className="text-5xl font-serif italic text-[#afefdd]">{companyName || 'Painel de Chamada'}</h1>
+          <span className="material-symbols-outlined text-6xl text-(--tv-acento)">{companyIcon || 'storefront'}</span>
+          <h1 className="text-5xl font-serif italic text-(--tv-acento)">{companyName || 'Painel de Chamada'}</h1>
         </div>
         <div className="text-right flex items-center gap-6">
         {weather && (
           <div className="flex items-center gap-3 bg-white/5 p-4 rounded-2xl border border-white/10 shadow-sm mr-4">
-            <span className="material-symbols-outlined text-4xl text-[#afefdd]">{weather.icon}</span>
+            <span className="material-symbols-outlined text-4xl text-(--tv-acento)">{weather.icon}</span>
             <div className="text-left">
               <p className="text-2xl font-bold leading-none">{weather.temp}°C</p>
               <p className="text-[11px] uppercase tracking-widest text-white/60 mt-1">{weather.description}</p>
@@ -168,7 +168,7 @@ export function TVPanelView({ appointments, employees, onExit, companyName, comp
         </div>
       </div>
       
-      <h3 className="text-2xl font-bold uppercase tracking-[0.2em] text-[#afefdd] mb-10">Próximos Atendimentos</h3>
+      <h3 className="text-2xl font-bold uppercase tracking-[0.2em] text-(--tv-acento) mb-10">Próximos Atendimentos</h3>
       
       <div className="grid gap-6">
         <AnimatePresence mode="popLayout">
@@ -183,27 +183,27 @@ export function TVPanelView({ appointments, employees, onExit, companyName, comp
                 exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
                 transition={{ duration: 0.6, type: "spring", bounce: 0.3 }}
                 key={app.id} 
-                className={`relative border p-8 rounded-3xl shadow-2xl overflow-hidden ${isNext ? 'bg-[#afefdd]/10 border-[#afefdd]/30' : 'bg-white/5 border-white/10'}`}
+                className={`relative border p-8 rounded-3xl shadow-2xl overflow-hidden ${isNext ? 'bg-(--tv-acento)/10 border-(--tv-acento)/30' : 'bg-white/5 border-white/10'}`}
               >
                 {isNext && (
                   <div className="absolute top-4 right-6 flex items-center gap-2">
                     <span className="relative flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#afefdd] opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-[#afefdd]"></span>
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-(--tv-acento) opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-(--tv-acento)"></span>
                     </span>
-                    <span className="text-[#afefdd] text-sm font-bold uppercase tracking-widest">Chamando Agora</span>
+                    <span className="text-(--tv-acento) text-sm font-bold uppercase tracking-widest">Chamando Agora</span>
                   </div>
                 )}
                 <div className="grid grid-cols-12 gap-6 items-center">
                   <div className="col-span-3 lg:col-span-2">
-                    <div className={`text-5xl lg:text-6xl font-bold tabular-nums ${isNext ? 'text-white' : 'text-[#afefdd]'}`}>{app.time}</div>
+                    <div className={`text-5xl lg:text-6xl font-bold tabular-nums ${isNext ? 'text-white' : 'text-(--tv-acento)'}`}>{app.time}</div>
                   </div>
                   <div className="col-span-5 lg:col-span-6 border-l border-white/10 pl-6">
                     <h4 className="text-3xl lg:text-4xl font-bold text-white mb-2 truncate">{formatClientName(app.clientName)}</h4>
-                    <p className={`text-xl lg:text-2xl truncate ${isNext ? 'text-[#afefdd]/80' : 'text-white/60'}`}>{app.services.join(', ')}</p>
+                    <p className={`text-xl lg:text-2xl truncate ${isNext ? 'text-(--tv-acento)/80' : 'text-white/60'}`}>{app.services.join(', ')}</p>
                   </div>
                   <div className="col-span-4 text-right border-l border-white/10 pl-6">
-                    <p className="text-xl lg:text-2xl text-[#afefdd] uppercase tracking-widest truncate">{emp?.name?.split(' ')[0] || 'Não atribuído'}</p>
+                    <p className="text-xl lg:text-2xl text-(--tv-acento) uppercase tracking-widest truncate">{emp?.name?.split(' ')[0] || 'Não atribuído'}</p>
                     <p className="text-lg lg:text-xl text-white/50 truncate">{emp?.specialty || 'Profissional'}</p>
                   </div>
                 </div>

@@ -12,6 +12,7 @@ import {
 } from './agendaService';
 import { DURACAO_PADRAO_MIN, duracaoTotal, instanteNoFuso } from '../../shared/agenda';
 import { versaoConsentimentoValida } from '../../shared/consentimento';
+import { PREFIXO_TOTEM } from '../../shared/anamnese';
 import {
   LIMITE_OBSERVACAO,
   MENSAGEM_CPF_INVALIDO,
@@ -230,9 +231,11 @@ export type SessaoReservaTotem = {
   pixCopiaECola?: string;
   pixQrCode?: string;
   cartaoOnlineDisponivel?: boolean;
+  /** Referência enviada ao gateway e devolvida no webhook (não é o sessionToken) */
+  referenciaPagamento?: string;
 };
 
-type SessaoReserva = Pick<SessaoReservaTotem, 'servicoIds' | 'data' | 'horario' | 'terapeutaId' | 'salaId' | 'valorTotal'>;
+type SessaoReserva = Pick<SessaoReservaTotem, 'servicoIds' | 'data' | 'horario' | 'terapeutaId' | 'salaId' | 'valorTotal' | 'referenciaPagamento'>;
 
 /**
  * Cria o agendamento de uma reserva do totem, revalidando o horário no banco (a recepção pode ter usado
@@ -254,7 +257,7 @@ export const criarAgendamentoTotem = async (
   // A declaração do cliente fica numa linha só: é a linha inteira que a regra de forja (shared/anamnese.ts) protege.
   // O \s do JS não cobre o NEL (U+0085), que a regra de linha do shared conta como quebra
   const observacao = cliente.observacoesSaude
-    ? `[Anamnese Autoatendimento ${sessao.data}]: ${cliente.observacoesSaude.replace(/[\s\u0085]+/g, ' ').trim()}`
+    ? `${PREFIXO_TOTEM}${sessao.data}]: ${cliente.observacoesSaude.replace(/[\s\u0085]+/g, ' ').trim()}`
     : null;
 
   return transacaoComTravas(async (tx) => {
@@ -322,6 +325,7 @@ export const criarAgendamentoTotem = async (
         lockExpiresAt: opcoes.cobranca.comPagamentoOnline ? new Date(Date.now() + PRAZO_PAGAMENTO_MINUTOS * 60_000) : null,
         metodoPagamento: opcoes.cobranca.comPagamentoOnline ? opcoes.metodoPagamento : 'presencial_no_local',
         reservaToken: opcoes.sessionToken,
+        referenciaPagamento: sessao.referenciaPagamento ?? null,
         reservaOrigem: ORIGEM_TOTEM,
         consentimentoDadosEm: cliente.consentimentoEm,
         consentimentoVersao: cliente.consentimentoVersao,

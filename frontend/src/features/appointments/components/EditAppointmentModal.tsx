@@ -1,3 +1,4 @@
+import { useFuncionamento } from '../../../config/funcionamento';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Appointment, Employee, Service } from '../../../types';
 import { AppointmentScheduleFields } from '../../../components/AppointmentScheduleFields';
@@ -6,6 +7,7 @@ import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
 import { ehVersaoDesatualizada, isApiError, useCheckinAppointment, useClients } from '../../../api';
 import { normalizarNome } from '@shared/validadores';
+import { codigoReserva } from '@shared/codigoReserva';
 import { CODIGO_FORA_DA_AGENDA, statusFechado } from '@shared/statusAgendamento';
 import { useAuth } from '../../../AuthContext';
 import { formatPhone } from '../../../utils/formatters';
@@ -38,6 +40,7 @@ const camposDiferentes = (a: Appointment, b: Appointment) => (Object.keys({ ...a
   .filter((k) => !CAMPOS_IGNORADOS.has(k) && JSON.stringify(a[k]) !== JSON.stringify(b[k]));
 
 export function EditAppointmentModal({ appointment, employees, services, appointments, onClose, onEditAppointment, setErrorMessage, setToastMessage }: EditAppointmentModalProps) {
+  const funcionamento = useFuncionamento();
   const [original, setOriginal] = useState<Appointment>(() => paraFormulario(appointment));
   // Rascunho por agendamento E versão: se a sessão expirar no meio da edição, o que foi digitado volta ao reabrir;
   // se o agendamento mudou no servidor nesse meio tempo, o rascunho antigo é ignorado (não sobrescreve o novo).
@@ -155,6 +158,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
         services,
         ignoreAppointmentId: editingAppointment.id,
         permitirPassado: editingAppointment.date === appointment.date && editingAppointment.time === appointment.time,
+        funcionamento,
       });
 
       if (scheduleValidationError) {
@@ -219,7 +223,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
   return (<>
     <ModalFormulario
       showSubmitButton={!nadaEditavel}
-      title="Editar Agendamento"
+      title={`Editar Agendamento · ${codigoReserva(editingAppointment.id)}`}
       onClose={closeAndDiscard}
       hasUnsavedChanges={hasUnsavedChanges}
       onSubmit={handleEditSubmit}

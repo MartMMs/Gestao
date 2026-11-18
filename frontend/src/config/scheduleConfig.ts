@@ -1,9 +1,5 @@
-import { HORA_ABERTURA, HORA_FECHAMENTO } from '@shared/agenda';
-
-// Horário de funcionamento vem das regras compartilhadas com o backend
+// Medidas da grade. As horas que ela mostra vêm do horário da empresa (config/funcionamento.ts: horasDaGrade)
 export const SCHEDULE_CONFIG = {
-  START_HOUR: HORA_ABERTURA,
-  END_HOUR: HORA_FECHAMENTO,
   // 1h = 80px: um atendimento de 30 min ainda mostra horário e nome sem cortar
   HOUR_HEIGHT: 80,
   CURRENT_TIME_LINE: {

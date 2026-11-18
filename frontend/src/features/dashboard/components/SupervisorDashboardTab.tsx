@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { formatarReais } from '../../../utils/formatters';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Service } from '../../../types';
 import { getBrazilCurrentTimeString, getLocalTodayString } from '../../../features/appointments/utils/appointmentCore';
@@ -87,8 +88,8 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
             </select>
           </div>
           <div className="flex items-center gap-2 mt-1 w-full">
-            <p className="text-3xl font-headline text-primary font-bold truncate flex-1" title={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalRevenue)}>
-            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalRevenue)}
+            <p className="text-3xl font-headline text-primary font-bold truncate flex-1" title={formatarReais(totalRevenue)}>
+            {formatarReais(totalRevenue)}
           </p>
           <span className="material-symbols-outlined text-primary text-2xl shrink-0 opacity-80 hidden sm:block">payments</span>
         </div>
@@ -99,12 +100,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
           <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Média da Equipe</p>
-          <div className="flex items-center gap-2">
-            <p className="text-4xl font-headline text-primary">
-              {employees.length > 0 ? (employees.reduce((acc, emp) => acc + emp.rating, 0) / employees.length).toFixed(1) : '0.0'}
-            </p>
-            <span className="material-symbols-outlined text-primary star-active text-2xl">star</span>
-          </div>
+          <p className="text-sm text-on-surface-variant mt-3">Sem avaliações</p>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm flex flex-col justify-center">
           <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Destaque do Mês</p>
@@ -152,7 +148,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
                         style={{ height: `${(day.revenue / last7DaysData.maxRev) * 100}%` }}
                       >
                         <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-surface-container-highest text-on-surface text-[11px] font-bold py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap shadow-md">
-                          {day.revenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          {formatarReais(day.revenue)}
                         </div>
                       </div>
                     </div>

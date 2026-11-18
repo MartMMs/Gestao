@@ -36,7 +36,9 @@ export default defineConfig({
     // em paralelo, a chave ligada faria os agendamentos dos outros testes falharem. Atenção: se algum teste do projeto
     // chromium falhar, este projeto é pulado (aparece como "did not run"); para rodá-lo sozinho depois de corrigir:
     // npm run test:e2e:global (usa --no-deps)
-    { name: 'configuracao-global', use: { ...devices['Desktop Chrome'] }, testMatch: /\.global\.spec\.ts$/, dependencies: ['chromium'], fullyParallel: false },
+    { name: 'configuracao-global', use: { ...devices['Desktop Chrome'] }, testMatch: /\.global\.spec\.ts$/, dependencies: ['chromium'], fullyParallel: false,
+      // Um arquivo por vez: fullyParallel só ordena os testes de um arquivo, e os dois specs globais ligam/desligam a mesma chave
+      workers: 1 },
   ],
   webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
     ? undefined

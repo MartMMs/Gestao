@@ -10,6 +10,14 @@ const QUEBRAS = /\r\n?|[\v\f\u0085\u2028\u2029]/g;
 const linhas = (texto: unknown) => (typeof texto === 'string' ? texto.replace(QUEBRAS, '\n').split('\n') : []);
 export const linhasDoTotem = (texto: unknown) => linhas(texto).filter((l) => l.startsWith(PREFIXO_TOTEM));
 
+/** Linha do totem para ler na tela: "[Anamnese Autoatendimento 2026-11-10]: texto" → "2026-11-10: texto" */
+export const declaracaoDoTotem = (linha: string) => {
+  const fim = linha.indexOf(']:', PREFIXO_TOTEM.length);
+  return linha.startsWith(PREFIXO_TOTEM) && fim > 0
+    ? `${linha.slice(PREFIXO_TOTEM.length, fim)}: ${linha.slice(fim + 2).trim()}`
+    : linha;
+};
+
 // Campos de uma ficha interna com algum conteúdo (fonte única: a tela usa a mesma regra)
 export const CAMPOS_TEXTO_ANAMNESE = [
   'profissao', 'queixa', 'proteses', 'cirurgia', 'gravida', 'procedimentoEstetico',

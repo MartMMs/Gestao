@@ -19,6 +19,8 @@ model Colaborador {
   especialidade String
   cargo         String?
   tipoEscala    String?       @default("6x1")
+  // Horário padrão dos dias de trabalho ("HH:MM-HH:MM"); nulo = sem turno (horário da casa). Ajuste do dia tem prioridade
+  turnoPadrao   String?
   folgasDomingoNoMes Int?     @default(2)
   cargaHorariaSemanal Int?    @default(40)
   habilidades   String[]      @default([])
@@ -46,6 +48,8 @@ model Cliente {
   observacao   String?
   // Preenchido quando o cliente é excluído mas tem histórico: os dados pessoais são apagados e os atendimentos ficam
   removidoEm   DateTime?
+  // LGPD: cliente pediu para não receber lembretes no WhatsApp
+  naoReceberWhatsapp Boolean @default(false)
   agendamentos Agendamento[]
 }
 
@@ -102,9 +106,13 @@ model Agendamento {
   lockExpiresAt    DateTime?
   reservaOrigem    String?     @default("interno")
   observacoesSaude String?
+  // Cliente respondeu "Não poderei ir" ao lembrete do WhatsApp (o agendamento continua; a equipe decide)
+  clienteAvisouAusenciaEm DateTime?
   atualizadoEm     DateTime    @default(now()) @updatedAt
   // Reserva do totem que originou o agendamento (garante uma confirmação por reserva)
   reservaToken     String?     @unique
+  // Referência da cobrança no gateway (aleatória): o token da reserva é credencial e não sai do servidor
+  referenciaPagamento String?  @unique
 
   colaborador   Colaborador @relation(fields: [colaboradorId], references: [id])
   cliente       Cliente     @relation(fields: [clienteId], references: [id])
@@ -198,6 +206,15 @@ model ConfiguracaoEmpresa {
   usarComissao         Boolean  @default(true)
   // Ligado: agendar (pela equipe) e cadastrar cliente exigem ficha de anamnese preenchida
   exigirAnamnese       Boolean  @default(false)
+  // Horário de funcionamento: vale para a agenda da equipe, o totem e a grade. Limite = último início aceito (null = até fechar)
+  horaAbertura          String   @default("09:00")
+  horaFechamento        String   @default("21:00")
+  horaLimiteAgendamento String?
+  diasFuncionamento     Int[]    @default([0, 1, 2, 3, 4, 5, 6])
+  // Lembretes de WhatsApp escritos pela casa, com chaves ({nome}, {horario}...). Vazio = mensagem padrão; várias = sorteia
+  mensagensLembrete     String[] @default([])
+  // Lembrete pergunta "1 = Sim, confirmo / 2 = Não poderei ir" (respostas lidas pelo WhatsApp por QR code)
+  lembretePedeConfirmacao Boolean @default(false)
   atualizadoEm         DateTime @updatedAt
 }
 // Trilha de auditoria: cada abertura do histórico (com dados de saúde) de um cliente.

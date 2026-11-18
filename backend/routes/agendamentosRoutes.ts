@@ -25,8 +25,7 @@ import { registrarAuditoria } from '../lib/auditoria';
 import { CODIGO_FORA_DA_AGENDA, CODIGO_VERSAO_AUSENTE, CODIGO_VERSAO_DESATUALIZADA, statusFechado } from '../../shared/statusAgendamento';
 import { LIMITE_HISTORICO_CLIENTE } from '../../shared/agendaJanela';
 import {
-  HORA_FECHAMENTO,
-  HORA_FECHAMENTO_TEXTO,
+  lerFuncionamento,
   dataValida,
   duracaoTotal,
   horarioParaMinutos,
@@ -423,13 +422,15 @@ export function createAgendamentosRouter(notificar: Notificar) {
       const { data, horario } = lerDataHorario(req.body.date, req.body.time);
       const inicio = instanteNoFuso(data, horario);
       const acessoSaude = await clientesComAcessoSaude(req);
-      const { exigirAnamnese } = await getEmpresaConfig();
+      const empresa = await getEmpresaConfig();
+      const { exigirAnamnese } = empresa;
+      const funcionamento = lerFuncionamento(empresa);
 
       const novo = await transacaoComTravas(async (tx) => {
         await travarAgenda(tx, colaboradorId);
 
         const servicos = await buscarServicosPorNome(tx, req.body.serviceNames ?? req.body.services);
-        const erroHorario = validarHorarioAgendamento(data, horario, duracaoTotal(servicos), { agora: new Date() });
+        const erroHorario = validarHorarioAgendamento(data, horario, duracaoTotal(servicos), { agora: new Date(), funcionamento });
         if (erroHorario) throw new HttpError(400, erroHorario);
 
         const indisponivel = await validarDisponibilidadeProfissional(tx, colaboradorId, inicio, servicos);
@@ -475,7 +476,9 @@ export function createAgendamentosRouter(notificar: Notificar) {
         return res.status(403).json({ erro: 'Apenas a recepção ou supervisores podem trocar o profissional do atendimento.' });
       }
 
-      const { exigirAnamnese } = await getEmpresaConfig();
+      const empresa = await getEmpresaConfig();
+      const { exigirAnamnese } = empresa;
+      const funcionamento = lerFuncionamento(empresa);
       const atual = partesNoFuso(antigo.data);
       const mudouHorario = req.body.date !== undefined || req.body.time !== undefined;
       const { data, horario } = mudouHorario
@@ -526,11 +529,11 @@ export function createAgendamentosRouter(notificar: Notificar) {
         if (!encerrado) {
           const duracao = duracaoTotal(servicos);
           if (mudouHorario && inicio.getTime() !== antigo.data.getTime()) {
-            const erroHorario = validarHorarioAgendamento(data, horario, duracao, { agora: new Date() });
+            const erroHorario = validarHorarioAgendamento(data, horario, duracao, { agora: new Date(), funcionamento });
             if (erroHorario) throw new HttpError(400, erroHorario);
-          } else if (horarioParaMinutos(horario) + duracao > HORA_FECHAMENTO * 60) {
+          } else if (horarioParaMinutos(horario) + duracao > horarioParaMinutos(funcionamento.fechamento)) {
             // Mesmo sem mudar o horário, novos serviços não podem empurrar o fim para depois do fechamento
-            throw new HttpError(400, `Com esses serviços o atendimento terminaria depois do fechamento (${HORA_FECHAMENTO_TEXTO}).`);
+            throw new HttpError(400, `Com esses serviços o atendimento terminaria depois do fechamento (${funcionamento.fechamento}).`);
           }
           const indisponivel = await validarDisponibilidadeProfissional(tx, novoColaboradorId, inicio, servicos, { ignorarAgendamentoId: id });
           if (indisponivel) throw new HttpError(indisponivel.status, indisponivel.erro);
@@ -682,7 +685,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
   // Realocar o atendimento para outro profissional (recepção e supervisores)
   const realocar = async (req: Request, id: string, destinoId: unknown, versao: unknown) => {
     if (!gerenciaAgenda(req)) throw new HttpError(403, 'Apenas a recepção ou supervisores podem realocar atendimentos.');
-    if (typeof destinoId !== 'string' || !destinoId) throw new HttpError(400, 'Informe o colaborador de destino.');
+    if (typeof destinoId !== 'string' || !UUID_REGEX.test(destinoId)) throw new HttpError(400, 'Informe o colaborador de destino.');
 
     const versaoEsperada = exigirVersao(versao);
 
@@ -690,7 +693,7 @@ export function createAgendamentosRouter(notificar: Notificar) {
       // Trava do destino antes da linha: a mesma ordem da edição (agenda, depois agendamento), sem impasse entre elas
       await travarAgenda(tx, destinoId);
       await travarAgendamento(tx, id);
-      const agendamento = await tx.agendamento.findUnique({ where: { id }, include: { servicos: true } });
+      const agendamento = await tx.agendamento.findUnique({ where: { id }, include: { servicos: true, cliente: { select: { codigo: true } }, colaborador: { select: { nome: true } } } });
       if (!agendamento) throw new HttpError(404, 'Agendamento não encontrado.');
       conferirVersao(agendamento.atualizadoEm, versaoEsperada);
       // Mesma regra da edição: registro fechado não troca de profissional (mudaria o dono do faturamento e da comissão)
@@ -703,7 +706,10 @@ export function createAgendamentosRouter(notificar: Notificar) {
       const indisponivel = await validarDisponibilidadeProfissional(tx, destinoId, agendamento.data, agendamento.servicos, { ignorarAgendamentoId: id });
       if (indisponivel) throw new HttpError(indisponivel.status, indisponivel.erro);
 
-      return tx.agendamento.update({ where: { id }, data: { colaboradorId: destinoId }, include: INCLUDE_COMPLETO });
+      const realocado = await tx.agendamento.update({ where: { id }, data: { colaboradorId: destinoId }, include: INCLUDE_COMPLETO });
+      // Trocar o profissional muda o dono do faturamento e da comissão: fica registrado quem trocou
+      await registrarAuditoria(req, { acao: 'agendamento.realocado', alvo: alvoDoAtendimento(agendamento), antes: { profissional: agendamento.colaborador?.nome }, depois: { profissional: realocado.colaborador?.nome }, tx });
+      return realocado;
     });
   };
 

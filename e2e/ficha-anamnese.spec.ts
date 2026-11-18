@@ -214,7 +214,9 @@ test.describe('Criar Usuário no Admin', () => {
       await page.getByRole('button', { name: /Criar Usuário/i }).click();
       const dialogo = page.getByRole('dialog', { name: /Criar Usuário/i });
       await dialogo.getByPlaceholder('Nome', { exact: true }).fill('Ab');
-      await dialogo.getByLabel('Usuário de acesso').fill(`banca.${Date.now()}`);
+      // O diálogo de credenciais mostra o login: o usuário de acesso (o e-mail só quando não há usuário)
+      const usuario = `banca.${Date.now()}`;
+      await dialogo.getByLabel('Usuário de acesso').fill(usuario);
       await dialogo.getByPlaceholder('Cargo (ex.: Massagista)').fill('Teste');
       await dialogo.getByRole('button', { name: 'Cadastrar' }).click();
       const alerta = page.getByRole('alert').filter({ hasText: 'Informe o nome completo do colaborador.' });
@@ -224,7 +226,7 @@ test.describe('Criar Usuário no Admin', () => {
       await dialogo.getByPlaceholder('E-mail (opcional)').fill(email);
       await dialogo.getByRole('button', { name: 'Cadastrar' }).click();
       await expect(page.getByText(/Senha provisória/)).toBeVisible();
-      await expect(page.getByText(email).first()).toBeVisible();
+      await expect(page.getByRole('dialog', { name: 'Credenciais' }).getByText(usuario)).toBeVisible();
       await expect(alerta).toHaveCount(0);
     } finally {
       await apagarColaboradorDeTeste(request, email);
@@ -254,7 +256,7 @@ test.describe('Ficha: recepção no balcão e abusos de tela', () => {
     try {
       await page.goto('/');
       await loginPelaTela(page, CONTAS.recepcao);
-      await page.getByRole('button', { name: /Agendar/i }).first().click();
+      await page.getByRole('button', { name: /Nova Reserva/i }).click();
       const modal = page.getByRole('dialog', { name: /Novo Agendamento/i });
       await modal.getByPlaceholder('Digite nome, telefone ou CPF').fill(nome);
       await modal.getByRole('button', { name: new RegExp(nome) }).first().click();

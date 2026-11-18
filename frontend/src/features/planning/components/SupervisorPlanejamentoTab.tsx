@@ -1,21 +1,43 @@
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Employee, TurnoSwapRequest } from '../../../types';
 import type { ScaleOverridePayload } from '../../../api';
-import { type DiaEscala } from '../../../utils/escalaCalculator';
+import { aplicarAjusteEscala, type DiaEscala } from '../../../utils/escalaCalculator';
+import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { CalendarioEscala } from './CalendarioEscala';
-import { DraggableCalendarioEscala } from './DraggableCalendarioEscala';
-import { PlanningDayPopover } from './PlanningDayPopover';
+import { PlanningDayPopover, type AlteracaoDias } from './PlanningDayPopover';
+import { analisarMes, retratoDoDia, trabalhoAntesDeFolga, turnoDoDia, visualDoDia } from '../utils/turnos';
+import { diaMesBR } from '@shared/agenda';
+import { folgaAcimaDoLimite, mensagemFolgaAcimaDoLimite } from '@shared/escala';
+import { preencher12x36, repetirMesAnterior } from '../utils/modelosEscala';
+import { PlanningEmployeeSidebar } from './PlanningEmployeeSidebar';
 import { TimelineGantt } from './TimelineGantt';
 import { FolgasDoDia } from './FolgasDoDia';
 import { TurnoSelect } from './TurnoSelect';
-import { isTeamMember } from '../../../utils/formatters';
 import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
 import type { usePlanejamentoEscala } from '../hooks/usePlanejamentoEscala';
 import type { SupervisorViewProps } from '../../../components/SupervisorView';
 
 type Setter<T> = React.Dispatch<React.SetStateAction<T>>;
 type AlertaClt = { id: string; nome: string; conforme: boolean; resumo: string[] };
+type TrocaDias = { fromEmp: string; fromDate: string; toEmp: string; toDate: string };
+// Ação da grade que grava na hora: só roda depois do "sim" no ConfirmDialog
+type AcaoPendente = {
+  titulo: string;
+  descricao: string;
+  confirmLabel: string;
+  executar: () => void;
+  icone?: string;
+  perigo?: boolean; // muda vários dias de uma vez: o foco começa em "Cancelar"
+};
+type Modelo = { titulo: string; descricao: string; aviso?: string; ajustes: ScaleOverridePayload[] };
+
+const mesVizinho = (mes: string, delta: number) => {
+  const [ano, m] = mes.split('-').map(Number);
+  const data = new Date(ano, m - 1 + delta, 1);
+  return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
+};
+const MENSAGEM_PROPOSTA = 'Esse dia ainda é uma proposta não gravada. Confirme ou descarte a proposta antes de alterá-lo.';
 
 // Estado e ações vêm do hook usePlanejamentoEscala (via SupervisorView), mais as ações da API
 type EstadoPlanejamento = ReturnType<typeof usePlanejamentoEscala>;
@@ -30,8 +52,7 @@ interface SupervisorPlanejamentoTabProps
   selectedScaleCalendar: { year: number; month: number; dias: DiaEscala[] };
   setPlanningOverrides: Setter<Record<string, ScaleOverridePayload>>;
   planningOverridesList: ScaleOverridePayload[];
-  buildScaleForEmployee: (employeeId: string, options?: { tipoEscala?: Employee['tipoEscala']; folgasDomingoNoMes?: number }) => DiaEscala[];
-  setSelectedPlanningDay: Setter<DiaEscala | null>;
+  buildScaleForEmployee: (employeeId: string, options?: { tipoEscala?: Employee['tipoEscala']; folgasDomingoNoMes?: number; mes?: string }) => DiaEscala[];
   filteredScaleGeneratorEmployees: Employee[];
   setScaleGeneratorSundayOffs: Setter<number>;
 }
@@ -69,9 +90,16 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
     handleTogglePlanningEditMode,
     isPlanningEditMode,
     handleOpenScaleGenerator,
-    handleSuggestAutomaticScale,
     suggestedPlanningKeys,
     handleConfirmSuggestedScale,
+    handleDiscardSuggestedScale,
+    proporAjustes,
+    aplicarComReversao,
+    setSuggestedPlanningKeys,
+    ajustesSalvos,
+    planningScaleType,
+    planningSundayOffs,
+    todayStr,
     isSavingPlanning,
     showTopAlerts,
     setShowTopAlerts,
@@ -84,7 +112,6 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
     selectedScaleEmployee,
     selectedScaleCalendar,
     setSelectedPlanningEmployeeId,
-    setSelectedPlanningDay,
     setIsPopoverOpen,
     onSwapScaleDays,
     setPlanningOverrides,
@@ -97,9 +124,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
     onReplicateScaleDays,
     planningCoverageTarget,
     isPopoverOpen,
-    selectedPlanningDay,
     selectedPlanningEmployeeId,
-    splitTurno,
     onSaveScaleOverride,
     isScaleGeneratorOpen,
     setIsScaleGeneratorOpen,
@@ -122,7 +147,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
     setSelectedScaleEmployeeId,
   } = props;
 
-  // Estados da Edição em Lote (Bulk Edit)
+  // Estados da Edição em Lote (Bulk Edit) e Drag-to-Select no Calendário
   const [isBatchEditOpen, setIsBatchEditOpen] = useState(false);
   const [batchSelectedIds, setBatchSelectedIds] = useState<string[]>([]);
   const [batchTargetDate, setBatchTargetDate] = useState<string>('');
@@ -130,6 +155,271 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
   const [batchShiftTurno, setBatchShiftTurno] = useState<string>('08:00-18:00');
   const [batchShiftDescricao, setBatchShiftDescricao] = useState<string>('Edição em lote');
   const [isApplyingBatch, setIsApplyingBatch] = useState(false);
+  const [selectedRangeDays, setSelectedRangeDays] = useState<DiaEscala[]>([]);
+  const [acaoPendente, setAcaoPendente] = useState<AcaoPendente | null>(null);
+  const [modeloPendente, setModeloPendente] = useState<Modelo | null>(null);
+
+  // Escala com os meses vizinhos: as regras da CLT (interjornada, DSR, semana) olham a virada do mês
+  const escalaComVizinhos = useCallback((employeeId: string) => {
+    const opcoes = employeeId === selectedScaleEmployee?.id
+      ? { tipoEscala: planningScaleType, folgasDomingoNoMes: planningSundayOffs }
+      : {};
+    return [-1, 0, 1].flatMap((delta) => buildScaleForEmployee(employeeId, { ...opcoes, mes: mesVizinho(selectedScaleMonth, delta) }));
+  }, [buildScaleForEmployee, planningScaleType, planningSundayOffs, selectedScaleEmployee?.id, selectedScaleMonth]);
+
+  const escalaCalendario = useMemo(
+    () => (selectedScaleEmployee ? escalaComVizinhos(selectedScaleEmployee.id) : []),
+    [escalaComVizinhos, selectedScaleEmployee],
+  );
+
+  // Painel lateral: mesma escala com vizinhos que o calendário analisa (os dois dão o mesmo veredito)
+  const colaboradoresDaLista = useMemo(
+    () => (!selectedScaleEmployee || timelineEmployees.some((e) => e.id === selectedScaleEmployee.id)
+      ? timelineEmployees
+      : [selectedScaleEmployee, ...timelineEmployees]),
+    [selectedScaleEmployee, timelineEmployees],
+  );
+  // shortcut: refaz 3 meses de escala de cada pessoa da lista a cada ajuste; memoizar por colaborador se a equipe passar de centenas
+  const escalasDaLista = useMemo(
+    () => new Map(colaboradoresDaLista.map((emp) => [emp.id, emp.id === selectedScaleEmployee?.id ? escalaCalendario : escalaComVizinhos(emp.id)])),
+    [colaboradoresDaLista, escalaCalendario, escalaComVizinhos, selectedScaleEmployee?.id],
+  );
+  const propostosDoCalendario = useMemo(() => {
+    const prefixo = `${selectedScaleEmployee?.id}:`;
+    return new Set(suggestedPlanningKeys.filter((k) => k.startsWith(prefixo)).map((k) => k.slice(prefixo.length)));
+  }, [selectedScaleEmployee?.id, suggestedPlanningKeys]);
+
+  const popoverEmployeeId = selectedPlanningEmployeeId || selectedScaleEmployee?.id || null;
+  const popoverEmployee = useMemo(
+    () => (employees as Employee[]).find((e) => e.id === popoverEmployeeId) || null,
+    [employees, popoverEmployeeId],
+  );
+  const escalaPopover = useMemo(() => {
+    if (!isPopoverOpen || !popoverEmployeeId) return [];
+    return popoverEmployeeId === selectedScaleEmployee?.id ? escalaCalendario : escalaComVizinhos(popoverEmployeeId);
+  }, [escalaCalendario, escalaComVizinhos, isPopoverOpen, popoverEmployeeId, selectedScaleEmployee?.id]);
+
+  const abrirDias = (employeeId: string, dias: DiaEscala[]) => {
+    if (dias.length === 0) return;
+    setSelectedPlanningEmployeeId(employeeId);
+    setSelectedRangeDays(dias);
+    setIsPopoverOpen(true);
+  };
+
+  const fecharDias = () => {
+    setIsPopoverOpen(false);
+    setSelectedPlanningEmployeeId(null);
+    setSelectedRangeDays([]);
+  };
+
+  // Grava dia a dia; cada dia salvo já aparece na tela. Se um falhar, os anteriores ficam (o servidor já os tem),
+  // os seguintes não são enviados e o modal continua aberto dizendo quantos foram salvos
+  const salvarDias = async (alteracao: AlteracaoDias) => {
+    const employeeId = popoverEmployeeId;
+    if (!employeeId || !onSaveScaleOverride) throw new Error('Não é possível salvar a escala nesta tela.');
+    const ajustes: ScaleOverridePayload[] = selectedRangeDays.map((dia) => {
+      const tipo = alteracao.tipo ?? dia.tipo;
+      return {
+        colaboradorId: employeeId,
+        data: dia.data,
+        tipo,
+        // Sem turno escolhido, o dia fica com o que tinha (inclusive "sem turno": a agenda aceita o horário da casa)
+        turno: tipo === 'trabalho' ? alteracao.turno ?? turnoDoDia(dia) : undefined,
+        // Sem mexer na observação, fica a nota já gravada (não o texto que o sistema gera, como "Feriado: ...")
+        descricao: alteracao.descricao !== undefined ? alteracao.descricao || undefined : ajustesSalvos.get(`${employeeId}:${dia.data}`)?.descricao,
+      };
+    }).sort(trabalhoAntesDeFolga);
+
+    // Mesma regra do servidor (6x1: uma folga por semana), conferida antes de gravar o primeiro dia
+    // O contrato gravado, que é o que o servidor confere (não o tipo escolhido na tela e ainda não salvo)
+    const tipoEscala = (employees as Employee[]).find((e) => e.id === employeeId)?.tipoEscala;
+    const antes = escalaComVizinhos(employeeId);
+    const porData = new Map(ajustes.map((a) => [a.data, a]));
+    const excesso = folgaAcimaDoLimite(tipoEscala, antes, antes.map((dia) => aplicarAjusteEscala(dia, porData.get(dia.data))));
+    if (excesso) throw new Error(mensagemFolgaAcimaDoLimite(tipoEscala!, excesso));
+
+    let salvos = 0;
+    for (const ajuste of ajustes) {
+      try {
+        if ((await onSaveScaleOverride(ajuste)) === false) throw new Error('O servidor não confirmou a gravação.');
+      } catch (error) {
+        const motivo = error instanceof Error ? error.message : 'Falha ao salvar.';
+        throw new Error(ajustes.length > 1
+          ? `Salvos ${salvos} de ${ajustes.length} dias. ${diaMesBR(ajuste.data)} não foi salvo: ${motivo}${salvos + 1 < ajustes.length ? ' Os dias seguintes não foram enviados.' : ''}`
+          : motivo);
+      }
+      salvos += 1;
+      const chave = `${employeeId}:${ajuste.data}`;
+      setPlanningOverrides((prev) => ({ ...prev, [chave]: ajuste }));
+      setSuggestedPlanningKeys((prev) => prev.filter((k) => k !== chave)); // gravado: deixa de ser proposta
+    }
+    setToastMessage(ajustes.length > 1 ? `Escala atualizada em ${ajustes.length} dias.` : 'Dia salvo.');
+  };
+
+  const escalaDe = (employeeId: string) =>
+    employeeId === selectedScaleEmployee?.id ? selectedScaleCalendar.dias : buildScaleForEmployee(employeeId);
+  const nomeDe = (employeeId: string) => (employees as Employee[]).find((e) => e.id === employeeId)?.name || 'colaborador';
+
+  // Uma regra (e uma frase) para tudo que grava na hora: dia passado a API recusa; dia que ainda é proposta gravaria um
+  // valor que ninguém confirmou. Devolve true quando pode seguir
+  const podeAlterarNaHora = (dias: Array<{ employeeId: string; data: string }>) => {
+    if (dias.some((d) => d.data < todayStr)) {
+      setToastMessage('Dia que já passou não pode ser alterado.');
+      return false;
+    }
+    if (dias.some((d) => suggestedPlanningKeys.includes(`${d.employeeId}:${d.data}`))) {
+      setErrorMessage(MENSAGEM_PROPOSTA);
+      return false;
+    }
+    return true;
+  };
+
+  // Retrato do dia para gravar: turno legível e a observação gravada (não o texto que o sistema gera, como "Feriado: ...")
+  const retrato = (employeeId: string, dia: DiaEscala) => retratoDoDia(employeeId, dia, ajustesSalvos);
+
+  const pedirTroca = (troca: TrocaDias) => {
+    if (troca.fromEmp === troca.toEmp && troca.fromDate === troca.toDate) return;
+    if (!podeAlterarNaHora([{ employeeId: troca.fromEmp, data: troca.fromDate }, { employeeId: troca.toEmp, data: troca.toDate }])) return;
+    // Os dois dias são lidos agora, quando o diálogo descreve a troca, e não quando a pessoa confirma
+    const fromDia = escalaDe(troca.fromEmp).find((d) => d.data === troca.fromDate);
+    const toDia = escalaDe(troca.toEmp).find((d) => d.data === troca.toDate);
+    if (!fromDia || !toDia) return;
+    const deOrigem = retrato(troca.fromEmp, fromDia);
+    const deDestino = retrato(troca.toEmp, toDia);
+    setAcaoPendente({
+      titulo: 'Trocar os dois dias?',
+      descricao: descricaoTroca(troca),
+      confirmLabel: 'Trocar',
+      icone: 'swap_horiz',
+      executar: () => trocarDias(troca, deOrigem, deDestino),
+    });
+  };
+
+  // Clique na Timeline em modo edição: alterna trabalho/folga, depois de confirmar
+  const pedirAlternarDia = (employeeId: string, data: string, atual?: DiaEscala) => {
+    if (!podeAlterarNaHora([{ employeeId, data }])) return;
+    const vira = atual?.tipo === 'trabalho' ? 'folga' : 'trabalho';
+    setAcaoPendente({
+      titulo: vira === 'folga' ? 'Marcar folga?' : 'Marcar dia de trabalho?',
+      descricao: `${nomeDe(employeeId)}, ${diaMesBR(data)}: passa a ser ${vira}. A mudança é gravada na hora.`,
+      confirmLabel: vira === 'folga' ? 'Marcar folga' : 'Marcar trabalho',
+      executar: () => handleQuickToggleTimelineDay(employeeId, data, atual),
+    });
+  };
+
+  // Menu rápido da Timeline (turno padrão ou folga): mesma regra e mesma confirmação do clique
+  const pedirDefinirDia = (employeeId: string, data: string, tipo: DiaEscala['tipo'], turno?: string) => {
+    if (!podeAlterarNaHora([{ employeeId, data }])) return;
+    const comoFica = tipo === 'trabalho' ? `trabalho${turno ? `, ${turno.replace('-', ' às ')}` : ''}` : tipo === 'folga' ? 'folga' : 'FDS';
+    setAcaoPendente({
+      titulo: tipo === 'trabalho' ? 'Definir o turno do dia?' : 'Marcar folga?',
+      descricao: `${nomeDe(employeeId)}, ${diaMesBR(data)}: passa a ser ${comoFica}. A mudança é gravada na hora.`,
+      confirmLabel: tipo === 'trabalho' ? 'Definir turno' : 'Marcar folga',
+      executar: () => handleQuickSetTimelineDay(employeeId, data, tipo, turno),
+    });
+  };
+
+  const descricaoTroca = (t: TrocaDias) => (t.fromEmp === t.toEmp
+    ? `${nomeDe(t.fromEmp)}: o dia ${diaMesBR(t.fromDate)} e o dia ${diaMesBR(t.toDate)} vão trocar de turno ou folga.`
+    : `O dia ${diaMesBR(t.fromDate)} de ${nomeDe(t.fromEmp)} troca com o dia ${diaMesBR(t.toDate)} de ${nomeDe(t.toEmp)}.`)
+    + ' A troca é gravada na hora.';
+
+  // Troca dois dias (do mesmo colaborador ou de dois): aparece na hora e volta se o servidor recusar
+  type Retrato = ReturnType<typeof retrato>;
+  const trocarDias = ({ fromEmp, fromDate, toEmp, toDate }: TrocaDias, deOrigem: Retrato, deDestino: Retrato) => {
+    aplicarComReversao(
+      [{ colaboradorId: fromEmp, data: fromDate, ...deDestino }, { colaboradorId: toEmp, data: toDate, ...deOrigem }],
+      () => onSwapScaleDays?.({
+        from: { colaboradorId: fromEmp, data: fromDate, snapshot: deOrigem },
+        to: { colaboradorId: toEmp, data: toDate, snapshot: deDestino },
+      }),
+      { sucesso: `Troca gravada: ${diaMesBR(fromDate)} ↔ ${diaMesBR(toDate)}.`, falha: 'Não foi possível gravar a troca de dias.' },
+    );
+  };
+
+  // Alça de replicar da Timeline: copia um dia para os seguintes; pede confirmação e não mexe em dia passado
+  const pedirReplicar = (empId: string, fromDay: number, toDay: number) => {
+    const fromDate = `${selectedScaleMonth}-${String(fromDay).padStart(2, '0')}`;
+    const start = Math.min(fromDay, toDay);
+    const end = Math.max(fromDay, toDay);
+    const noIntervalo = Array.from({ length: end - start + 1 }, (_, idx) => `${selectedScaleMonth}-${String(start + idx).padStart(2, '0')}`)
+      .filter((date) => date !== fromDate);
+    const targetDates = noIntervalo.filter((date) => date >= todayStr);
+    // Origem e destinos não podem ser proposta pendente; a origem pode ser dia passado (só é copiada)
+    if ([fromDate, ...targetDates].some((data) => suggestedPlanningKeys.includes(`${empId}:${data}`))) {
+      setErrorMessage(MENSAGEM_PROPOSTA);
+      return;
+    }
+    const sourceDia = buildScaleForEmployee(empId).find((d) => d.data === fromDate);
+    if (!sourceDia || targetDates.length === 0) {
+      setToastMessage('Não há dias futuros para replicar.');
+      return;
+    }
+    const origem = retrato(empId, sourceDia);
+    const comoFica = origem.tipo === 'trabalho'
+      ? `trabalho${origem.turno ? `, ${origem.turno.replace('-', ' às ')}` : ', sem turno definido'}`
+      : visualDoDia(sourceDia).rotulo.toLowerCase();
+    const passados = noIntervalo.length - targetDates.length;
+    setAcaoPendente({
+      titulo: 'Replicar este dia?',
+      descricao: `${nomeDe(empId)}: o dia ${diaMesBR(fromDate)} (${comoFica}) será copiado para ${targetDates.length} dia(s), de ${diaMesBR(targetDates[0])} a ${diaMesBR(targetDates[targetDates.length - 1])}, substituindo o que houver neles.${passados > 0 ? ` ${passados} dia(s) que já passaram ficam como estão.` : ''} A mudança é gravada na hora.`,
+      confirmLabel: 'Replicar',
+      icone: 'content_copy',
+      perigo: true,
+      executar: () => replicarDia(empId, fromDate, targetDates, origem),
+    });
+  };
+
+  const replicarDia = (empId: string, fromDate: string, targetDates: string[], origem: Retrato) => {
+    aplicarComReversao(
+      targetDates.map((data) => ({ colaboradorId: empId, data, ...origem })),
+      () => onReplicateScaleDays?.({ colaboradorId: empId, data: fromDate, targetDates, source: origem }),
+      { sucesso: `Replicação gravada em ${targetDates.length} dia(s).`, falha: 'Não foi possível gravar a replicação.' },
+    );
+  };
+
+  const abrirModelo = (tipo: 'mesAnterior' | '12x36') => {
+    if (!selectedScaleEmployee) return;
+    const atual = selectedScaleCalendar.dias;
+    const ajustes = (tipo === '12x36'
+      ? preencher12x36(selectedScaleEmployee.id, atual)
+      : repetirMesAnterior(
+          selectedScaleEmployee.id,
+          buildScaleForEmployee(selectedScaleEmployee.id, { tipoEscala: planningScaleType, folgasDomingoNoMes: planningSundayOffs, mes: mesVizinho(selectedScaleMonth, -1) }),
+          atual,
+          planningScaleType,
+        )
+    ).filter((ajuste) => ajuste.data >= todayStr); // dia passado a API recusa
+    if (ajustes.length === 0) {
+      setToastMessage(tipo === '12x36'
+        ? `Nada a mudar: os próximos dias de ${selectedScaleEmployee.name} já seguem a 12x36.`
+        : `Nada a mudar: o mês anterior de ${selectedScaleEmployee.name} não tem ajustes diferentes do ciclo.`);
+      return;
+    }
+    // Avisa só o que a proposta de fato viola, pela mesma análise do calendário (com o tipo de escala do cadastro)
+    const porData = new Map(ajustes.map((ajuste) => [ajuste.data, ajuste]));
+    const analise = analisarMes(
+      escalaCalendario.map((dia) => aplicarAjusteEscala(dia, porData.get(dia.data))),
+      `${selectedScaleMonth}-`,
+      planningScaleType,
+    );
+    setModeloPendente({
+      titulo: tipo === '12x36' ? 'Preencher com plantões 12x36?' : 'Repetir o mês anterior?',
+      aviso: analise.conforme
+        ? undefined
+        : `Com esta proposta, a escala de ${selectedScaleEmployee.name} fica com alerta da CLT: ${analise.alertas.join(' ')}${
+          tipo === '12x36' && planningScaleType !== '12x36' ? ' O cadastro não é 12x36: a carga é conferida semana a semana, não pela média. Para mudar o regime, use "+ Nova Escala".' : ''}`,
+      descricao: `${ajustes.length} dia(s) de ${selectedScaleEmployee.name} em ${selectedScaleMonthLabel} vão mudar, inclusive ajustes feitos à mão nesses dias. Dias passados ficam como estão. Nada é gravado até você clicar em "Confirmar Escala".`,
+      ajustes,
+    });
+  };
+
+  const confirmarModelo = () => {
+    if (!modeloPendente) return;
+    proporAjustes(modeloPendente.ajustes);
+    setToastMessage(`Proposta pronta em ${modeloPendente.ajustes.length} dia(s). Revise e clique em "Confirmar Escala" para gravar.`);
+    setModeloPendente(null);
+  };
 
   const handleApplyBatch = async () => {
     if (!batchTargetDate || batchSelectedIds.length === 0) return;
@@ -241,7 +531,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                   />
                 </div>
 
-                <div className="flex items-center justify-start lg:justify-end gap-2">
+                <div className="flex flex-wrap items-center justify-start lg:justify-end gap-2">
                   <button
                     onClick={() => setPlanningViewMode('calendario')}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
@@ -264,6 +554,21 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                   >
                     <span className="material-symbols-outlined text-[16px]">view_timeline</span>
                     Timeline
+                  </button>
+
+                  <span className="w-px h-7 bg-outline-variant/30 mx-1" aria-hidden="true" />
+                  <button
+                    type="button"
+                    onClick={handleTogglePlanningEditMode}
+                    aria-pressed={isPlanningEditMode}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all border ${
+                      isPlanningEditMode
+                        ? 'bg-primary text-on-primary border-primary/40 shadow-md'
+                        : 'bg-surface-container-low text-on-surface-variant border-outline-variant/20 hover:text-primary'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[16px]">{isPlanningEditMode ? 'check' : 'edit'}</span>
+                    {isPlanningEditMode ? 'Concluir Edição' : 'Editar Grade'}
                   </button>
                 </div>
               </div>
@@ -295,17 +600,6 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     <option value="folgaHoje">Status: Folga hoje</option>
                   </select>
 
-                  <button
-                    type="button"
-                    onClick={handleTogglePlanningEditMode}
-                    className={`h-11 px-5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all border ${
-                      isPlanningEditMode
-                        ? 'bg-primary text-on-primary border-primary/40 shadow-md'
-                        : 'bg-surface-container-low text-on-surface-variant border-outline-variant/20 hover:text-primary'
-                    }`}
-                  >
-                    {isPlanningEditMode ? 'Salvar Alterações' : 'Editar Grade'}
-                  </button>
 
                   <button
                     type="button"
@@ -324,23 +618,50 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     Edição em Lote
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={handleSuggestAutomaticScale}
-                    className="h-11 px-5 rounded-xl bg-secondary-container/35 text-on-surface text-xs font-bold uppercase tracking-wider border border-outline-variant/20 hover:border-primary/40 hover:text-primary transition-colors"
-                  >
-                    Sugerir Escala Automática
-                  </button>
+
+                  {/* Modelos rápidos para o colaborador aberto no calendário: viram proposta, gravada em "Confirmar Escala" */}
+                  {planningViewMode === 'calendario' && selectedScaleEmployee && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => abrirModelo('mesAnterior')}
+                        className="h-11 px-4 rounded-xl bg-surface-container-low text-on-surface-variant text-xs font-bold uppercase tracking-wider border border-outline-variant/20 hover:border-primary/40 hover:text-primary transition-colors flex items-center gap-1.5"
+                        title={`Repetir o mês anterior de ${selectedScaleEmployee.name}, seguindo o ciclo da escala`}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">content_copy</span>
+                        Repetir Mês Anterior
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => abrirModelo('12x36')}
+                        className="h-11 px-4 rounded-xl bg-surface-container-low text-on-surface-variant text-xs font-bold uppercase tracking-wider border border-outline-variant/20 hover:border-primary/40 hover:text-primary transition-colors flex items-center gap-1.5"
+                        title={`Preencher o mês de ${selectedScaleEmployee.name} com plantões 12x36`}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">repeat</span>
+                        Padrão 12x36
+                      </button>
+                    </>
+                  )}
 
                   {suggestedPlanningKeys.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleConfirmSuggestedScale}
-                      disabled={isSavingPlanning}
-                      className="h-11 px-5 rounded-xl bg-primary text-on-primary text-xs font-bold uppercase tracking-wider hover:bg-primary-dim disabled:opacity-60 transition-colors"
-                    >
-                      {isSavingPlanning ? 'Confirmando...' : 'Confirmar Escala'}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleConfirmSuggestedScale}
+                        disabled={isSavingPlanning}
+                        className="h-11 px-5 rounded-xl bg-primary text-on-primary text-xs font-bold uppercase tracking-wider hover:bg-primary-dim disabled:opacity-60 transition-colors"
+                      >
+                        {isSavingPlanning ? 'Confirmando...' : `Confirmar Escala (${suggestedPlanningKeys.length})`}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDiscardSuggestedScale}
+                        disabled={isSavingPlanning}
+                        className="h-11 px-4 rounded-xl border border-outline-variant/20 bg-surface-container-low text-on-surface-variant text-xs font-bold uppercase tracking-wider hover:text-error disabled:opacity-60 transition-colors"
+                      >
+                        Descartar Proposta
+                      </button>
+                    </>
                   )}
 
                   <button
@@ -394,8 +715,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     className="w-full h-11 bg-surface-container-low border border-outline-variant/20 rounded-xl px-3 text-sm text-on-surface"
                   >
                     <option value="all">Todos</option>
-                    {(employees as Employee[])
-                      .filter((employee) => isTeamMember(employee))
+                    {[...(employees as Employee[])]
                       .sort((a, b) => a.name.localeCompare(b.name))
                       .map((employee) => (
                         <option key={employee.id} value={employee.id}>{employee.name}</option>
@@ -537,119 +857,45 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
             {selectedScaleEmployee ? (
               <>
                 {planningViewMode === 'calendario' && (
-                  isPlanningEditMode ? (
-                    <DraggableCalendarioEscala
-                      escalas={selectedScaleCalendar.dias}
-                      year={selectedScaleCalendar.year}
-                      month={selectedScaleCalendar.month}
-                      dayRange={planningVisibleDayRange}
-                      hideMonthBadge
-                      isDraggable={isPlanningEditMode}
-                      onDayDrop={(from, to, tipo) => {
-                        if (!selectedScaleEmployee || from === to) return;
-
-                        const fromDate = `${selectedScaleMonth}-${String(from).padStart(2, '0')}`;
-                        const toDate = `${selectedScaleMonth}-${String(to).padStart(2, '0')}`;
-                        const fromDia = selectedScaleCalendar.dias.find((d) => d.data === fromDate);
-                        const toDia = selectedScaleCalendar.dias.find((d) => d.data === toDate);
-                        if (!fromDia || !toDia) return;
-
-                        const employeeId = selectedScaleEmployee.id;
-                        const fromKey = `${employeeId}:${fromDate}`;
-                        const toKey = `${employeeId}:${toDate}`;
-                        let prevFrom: ScaleOverridePayload | undefined;
-                        let prevTo: ScaleOverridePayload | undefined;
-
-                        setPlanningOverrides((prev) => {
-                          prevFrom = prev[fromKey];
-                          prevTo = prev[toKey];
-                          return {
-                            ...prev,
-                            [fromKey]: {
-                              colaboradorId: employeeId,
-                              data: fromDate,
-                              tipo: toDia.tipo,
-                              turno: toDia.tipo === 'trabalho' ? toDia.turno : undefined,
-                              descricao: toDia.descricao,
-                            },
-                            [toKey]: {
-                              colaboradorId: employeeId,
-                              data: toDate,
-                              tipo: fromDia.tipo,
-                              turno: fromDia.tipo === 'trabalho' ? fromDia.turno : undefined,
-                              descricao: fromDia.descricao,
-                            },
-                          };
-                        });
-
-                        void (async () => {
-                          const revertSwap = () => {
-                            setPlanningOverrides((prev) => {
-                              const next = { ...prev };
-                              if (prevFrom) next[fromKey] = prevFrom;
-                              else delete next[fromKey];
-                              if (prevTo) next[toKey] = prevTo;
-                              else delete next[toKey];
-                              return next;
-                            });
-                          };
-                          try {
-                            if (onSwapScaleDays) {
-                              const success = await onSwapScaleDays({
-                                from: {
-                                  colaboradorId: employeeId,
-                                  data: fromDate,
-                                  snapshot: {
-                                    tipo: fromDia.tipo,
-                                    turno: fromDia.tipo === 'trabalho' ? fromDia.turno : undefined,
-                                    descricao: fromDia.descricao,
-                                  },
-                                },
-                                to: {
-                                  colaboradorId: employeeId,
-                                  data: toDate,
-                                  snapshot: {
-                                    tipo: toDia.tipo,
-                                    turno: toDia.tipo === 'trabalho' ? toDia.turno : undefined,
-                                    descricao: toDia.descricao,
-                                  },
-                                },
-                              });
-                              if (success === false) {
-                                revertSwap();
-                                setErrorMessage('Não foi possível sincronizar a troca de dias com o servidor.');
-                                return;
-                              }
-                            }
-
-                            setToastMessage(`Dia ${from} trocado com dia ${to}.`);
-                          } catch (error) {
-                            revertSwap();
-                            setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da troca de dias com o servidor.');
-                          }
-                        })();
-                      }}
-                    />
-                  ) : (
-                    <CalendarioEscala
-                      escalas={selectedScaleCalendar.dias}
-                      year={selectedScaleCalendar.year}
-                      month={selectedScaleCalendar.month}
-                      dayRange={planningVisibleDayRange}
-                      hideMonthBadge
-                      onDayClick={(day) => {
-                        const selectedDay = selectedScaleCalendar.dias.find(
-                          (d) => parseInt(d.data.split('-')[2]) === day
-                        );
-                        if (selectedDay) {
-                          setSelectedPlanningEmployeeId(selectedScaleEmployee.id);
-                          setSelectedPlanningDay(selectedDay);
-                          setIsPopoverOpen(true);
+                  <div className="flex flex-col xl:flex-row gap-6 items-start">
+                    <PlanningEmployeeSidebar
+                      employees={colaboradoresDaLista}
+                      selectedEmployeeId={selectedScaleEmployee.id}
+                      onSelectEmployee={(employeeId) => {
+                        setSelectedScaleEmployeeId(employeeId);
+                        if (planningEmployeeFilter !== 'all') {
+                          setPlanningEmployeeFilter(employeeId);
                         }
                       }}
-                      isInteractive={true}
+                      escalas={escalasDaLista}
+                      prefixoMes={`${selectedScaleMonth}-`}
                     />
-                  )
+
+                    <div className="flex-1 w-full min-w-0">
+                      <CalendarioEscala
+                        key={selectedScaleEmployee.id} // trocar de pessoa zera dia escolhido e seleção
+                        propostos={propostosDoCalendario}
+                        escalas={escalaCalendario}
+                        year={selectedScaleCalendar.year}
+                        month={selectedScaleCalendar.month}
+                        hoje={todayStr}
+                        dayRange={planningVisibleDayRange}
+                        tipoEscala={planningScaleType}
+                        cargaHorariaSemanal={selectedScaleEmployee.cargaHorariaSemanal ?? 44}
+                        colaboradorNome={selectedScaleEmployee.name}
+                        colaboradorCargo={selectedScaleEmployee.cargo || selectedScaleEmployee.specialty}
+                        modo={isPlanningEditMode ? 'trocar' : 'editar'}
+                        onDayClick={(dia) => abrirDias(selectedScaleEmployee.id, [dia])}
+                        onRangeSelect={(dias) => abrirDias(selectedScaleEmployee.id, dias)}
+                        onDayDrop={(from, to) => pedirTroca({
+                          fromEmp: selectedScaleEmployee.id,
+                          fromDate: `${selectedScaleMonth}-${String(from).padStart(2, '0')}`,
+                          toEmp: selectedScaleEmployee.id,
+                          toDate: `${selectedScaleMonth}-${String(to).padStart(2, '0')}`,
+                        })}
+                      />
+                    </div>
+                  </div>
                 )}
 
                 {planningViewMode === 'timeline' && (
@@ -662,166 +908,21 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
                     isEditable={isPlanningEditMode}
                     suggestedKeys={suggestedPlanningKeys}
                     overrides={planningOverridesList.filter((override) => override.data.startsWith(`${selectedScaleMonth}-`))}
-                    onQuickToggleDay={handleQuickToggleTimelineDay}
-                    onQuickSetDay={handleQuickSetTimelineDay}
+                    onQuickToggleDay={pedirAlternarDia}
+                    onQuickSetDay={pedirDefinirDia}
                     onClick={(empleoyeeId, day) => {
                       const escala = buildScaleForEmployee(empleoyeeId);
                       const selectedDay = escala.find((d) => d.data === day);
-                      if (selectedDay) {
-                        setSelectedPlanningEmployeeId(empleoyeeId);
-                        setSelectedScaleEmployeeId(empleoyeeId);
-                        setSelectedPlanningDay(selectedDay);
-                        setIsPopoverOpen(true);
+                      if (!selectedDay) return;
+                      if (selectedDay.data < todayStr) {
+                        setToastMessage('Esse dia já passou: a escala dele não pode ser alterada.');
+                        return;
                       }
+                      setSelectedScaleEmployeeId(empleoyeeId);
+                      abrirDias(empleoyeeId, [selectedDay]);
                     }}
-                    onShiftDrop={(fromEmp, fromDay, toEmp, toDay) => {
-                      if (fromEmp === toEmp && fromDay === toDay) return;
-
-                      const fromDia = buildScaleForEmployee(fromEmp).find((d) => d.data === fromDay);
-                      const toDia = buildScaleForEmployee(toEmp).find((d) => d.data === toDay);
-                      if (!fromDia || !toDia) return;
-
-                      const fromKey = `${fromEmp}:${fromDay}`;
-                      const toKey = `${toEmp}:${toDay}`;
-                      let prevFrom: ScaleOverridePayload | undefined;
-                      let prevTo: ScaleOverridePayload | undefined;
-
-                      setPlanningOverrides((prev) => {
-                        prevFrom = prev[fromKey];
-                        prevTo = prev[toKey];
-                        return {
-                          ...prev,
-                          [fromKey]: {
-                            colaboradorId: fromEmp,
-                            data: fromDay,
-                            tipo: toDia.tipo,
-                            turno: toDia.tipo === 'trabalho' ? toDia.turno : undefined,
-                            descricao: toDia.descricao,
-                          },
-                          [toKey]: {
-                            colaboradorId: toEmp,
-                            data: toDay,
-                            tipo: fromDia.tipo,
-                            turno: fromDia.tipo === 'trabalho' ? fromDia.turno : undefined,
-                            descricao: fromDia.descricao,
-                          },
-                        };
-                      });
-
-                      void (async () => {
-                        const revertSwap = () => {
-                          setPlanningOverrides((prev) => {
-                            const next = { ...prev };
-                            if (prevFrom) next[fromKey] = prevFrom;
-                            else delete next[fromKey];
-                            if (prevTo) next[toKey] = prevTo;
-                            else delete next[toKey];
-                            return next;
-                          });
-                        };
-                        try {
-                          if (onSwapScaleDays) {
-                            const success = await onSwapScaleDays({
-                              from: {
-                                colaboradorId: fromEmp,
-                                data: fromDay,
-                                snapshot: {
-                                  tipo: fromDia.tipo,
-                                  turno: fromDia.tipo === 'trabalho' ? fromDia.turno : undefined,
-                                  descricao: fromDia.descricao,
-                                },
-                              },
-                              to: {
-                                colaboradorId: toEmp,
-                                data: toDay,
-                                snapshot: {
-                                  tipo: toDia.tipo,
-                                  turno: toDia.tipo === 'trabalho' ? toDia.turno : undefined,
-                                  descricao: toDia.descricao,
-                                },
-                              },
-                            });
-                            if (success === false) {
-                              revertSwap();
-                              setErrorMessage('Não foi possível sincronizar a transferência de turno com o servidor.');
-                              return;
-                            }
-                          }
-
-                          setToastMessage(`Transferência aplicada: ${fromDay} → ${toDay}`);
-                        } catch (error) {
-                          revertSwap();
-                          setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da transferência com o servidor.');
-                        }
-                      })();
-                    }}
-                    onReplicate={(empId, fromDay, toDay, tipo) => {
-                      const fromDate = `${selectedScaleMonth}-${String(fromDay).padStart(2, '0')}`;
-                      const start = Math.min(fromDay, toDay);
-                      const end = Math.max(fromDay, toDay);
-                      const targetDates = Array.from({ length: end - start + 1 }, (_, idx) => start + idx)
-                        .map((dayNum) => `${selectedScaleMonth}-${String(dayNum).padStart(2, '0')}`)
-                        .filter((date) => date !== fromDate);
-
-                      if (targetDates.length === 0) return;
-
-                      const sourceDia = buildScaleForEmployee(empId).find((d) => d.data === fromDate);
-                      if (!sourceDia) return;
-
-                      let prevSnapshot: Record<string, ScaleOverridePayload> = {};
-                      setPlanningOverrides((prev) => {
-                        prevSnapshot = prev;
-                        const next = { ...prev };
-                        targetDates.forEach((targetDate) => {
-                          next[`${empId}:${targetDate}`] = {
-                            colaboradorId: empId,
-                            data: targetDate,
-                            tipo: sourceDia.tipo,
-                            turno: sourceDia.tipo === 'trabalho' ? sourceDia.turno : undefined,
-                            descricao: sourceDia.descricao,
-                          };
-                        });
-                        return next;
-                      });
-
-                      void (async () => {
-                        const revertReplication = () => {
-                          setPlanningOverrides((prev) => {
-                            const next = { ...prev };
-                            targetDates.forEach((targetDate) => {
-                              const key = `${empId}:${targetDate}`;
-                              if (prevSnapshot[key]) next[key] = prevSnapshot[key];
-                              else delete next[key];
-                            });
-                            return next;
-                          });
-                        };
-                        try {
-                          if (onReplicateScaleDays) {
-                            const success = await onReplicateScaleDays({
-                              colaboradorId: empId,
-                              data: fromDate,
-                              targetDates,
-                              source: {
-                                tipo: sourceDia.tipo,
-                                turno: sourceDia.tipo === 'trabalho' ? sourceDia.turno : undefined,
-                                descricao: sourceDia.descricao,
-                              },
-                            });
-                            if (success === false) {
-                              revertReplication();
-                              setErrorMessage('Não foi possível sincronizar a replicação da escala com o servidor.');
-                              return;
-                            }
-                          }
-
-                          setToastMessage(`Replicação aplicada em ${targetDates.length} dia(s).`);
-                        } catch (error) {
-                          revertReplication();
-                          setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização da replicação com o servidor.');
-                        }
-                      })();
-                    }}
+                    onShiftDrop={(fromEmp, fromDay, toEmp, toDay) => pedirTroca({ fromEmp, fromDate: fromDay, toEmp, toDate: toDay })}
+                    onReplicate={(empId, fromDay, toDay) => pedirReplicar(empId, fromDay, toDay)}
                     minStaffRequired={Math.max(1, planningCoverageTarget)}
                   />
                 )}
@@ -836,85 +937,45 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
             )}
           </div>
 
-          {/* Popover para edição de dia */}
-          <PlanningDayPopover
-            isOpen={isPopoverOpen}
-            dia={selectedPlanningDay}
-            onClose={() => {
-              setIsPopoverOpen(false);
-              setSelectedPlanningEmployeeId(null);
-            }}
-            onSave={async (tipo, turno, descricao) => {
-              if (!selectedPlanningDay) return;
+          {/* Edição de um dia ou de vários (seleção no calendário); a chave recria o estado a cada abertura */}
+          {isPopoverOpen && popoverEmployeeId && selectedRangeDays.length > 0 && (
+            <PlanningDayPopover
+              key={`${popoverEmployeeId}:${selectedRangeDays.map((d) => d.data).join(',')}`}
+              dias={selectedRangeDays}
+              colaborador={popoverEmployee}
+              escalaContexto={escalaPopover}
+              notaSalva={ajustesSalvos.get(`${popoverEmployeeId}:${selectedRangeDays[0].data}`)?.descricao}
+              scaleByEmployee={props.scaleByEmployee}
+              onClose={fecharDias}
+              onSave={salvarDias}
+            />
+          )}
 
-              const data = selectedPlanningDay.data;
-              const employeeId = selectedPlanningEmployeeId || selectedScaleEmployee?.id;
-              if (!employeeId) return;
-              const key = `${employeeId}:${data}`;
-              const previousDayState = selectedPlanningDay;
-              let previousOverride: ScaleOverridePayload | undefined;
-
-              setPlanningOverrides((prev) => {
-                previousOverride = prev[key];
-                return {
-                  ...prev,
-                  [key]: {
-                    colaboradorId: employeeId,
-                    data,
-                    tipo,
-                    turno: tipo === 'trabalho' ? turno : undefined,
-                    descricao,
-                  },
-                };
-              });
-
-              setSelectedPlanningDay((prev) => {
-                if (!prev || prev.data !== data) return prev;
-                const nextTurno = tipo === 'trabalho' ? turno : undefined;
-                const { horaInicio, horaFim } = splitTurno(nextTurno);
-                return {
-                  ...prev,
-                  tipo,
-                  turno: nextTurno,
-                  horaInicio,
-                  horaFim,
-                  descricao,
-                };
-              });
-
-              const revertPopoverChange = () => {
-                setPlanningOverrides((prev) => {
-                  const next = { ...prev };
-                  if (previousOverride) next[key] = previousOverride;
-                  else delete next[key];
-                  return next;
-                });
-                setSelectedPlanningDay(previousDayState);
-              };
-
-              try {
-                if (onSaveScaleOverride) {
-                  const success = await onSaveScaleOverride({
-                    colaboradorId: employeeId,
-                    data,
-                    tipo,
-                    turno: tipo === 'trabalho' ? turno : undefined,
-                    descricao,
-                  });
-                  if (success === false) {
-                    revertPopoverChange();
-                    setErrorMessage('Não foi possível sincronizar a atualização do dia com o servidor.');
-                    return;
-                  }
-                }
-
-                setToastMessage('Dia planejado salvo com sucesso.');
-              } catch (error) {
-                revertPopoverChange();
-                setErrorMessage(error instanceof Error ? error.message : 'Falha na sincronização do dia com o servidor.');
-              }
-            }}
+          <ConfirmDialog
+            open={acaoPendente !== null}
+            tone={acaoPendente?.perigo ? 'danger' : 'primary'}
+            icon={acaoPendente?.icone || 'edit_calendar'}
+            title={acaoPendente?.titulo || ''}
+            description={acaoPendente?.descricao}
+            confirmLabel={acaoPendente?.confirmLabel}
+            onConfirm={() => { acaoPendente?.executar(); setAcaoPendente(null); }}
+            onClose={() => setAcaoPendente(null)}
           />
+
+          <ConfirmDialog
+            open={modeloPendente !== null}
+            tone="primary"
+            icon="edit_calendar"
+            title={modeloPendente?.titulo || ''}
+            description={modeloPendente?.descricao}
+            confirmLabel="Montar proposta"
+            onConfirm={confirmarModelo}
+            onClose={() => setModeloPendente(null)}
+          >
+            {modeloPendente?.aviso && (
+              <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">{modeloPendente.aviso}</p>
+            )}
+          </ConfirmDialog>
 
           {isScaleGeneratorOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

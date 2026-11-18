@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* dark: segue o tema escolhido no app (classe .dark no <html>), não o tema do sistema operacional */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   /* Base & Surface */
   --color-background: #F5F5F4;
@@ -67,6 +70,8 @@
 }
 
 @layer base {
+  /* Modal nunca passa da altura da tela (celular): rola por dentro. Utilitários max-h-* do próprio modal têm prioridade */
+  [role="dialog"] { max-height: calc(100dvh - 2rem); overflow-y: auto; }
   body {
     font-family: var(--font-body);
     background-color: var(--color-background);
@@ -115,3 +120,26 @@
 ::-webkit-scrollbar-track { background: var(--color-surface-container-low); border-radius: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--color-outline-variant); border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-outline); }
+
+/* Destaque do painel da TV (fundo sempre escuro): o verde original, ou um tom claro da cor escolhida pelo admin */
+:root { --tv-acento: #afefdd; --tv-fundo: #001410; }
+
+/* Cor escolhida pelo admin (--brand no <html>): deriva todos os tons de "primary", inclusive no modo escuro */
+:root[style*="--brand"] {
+  --tv-acento: color-mix(in oklab, var(--brand) 40%, white);
+  --tv-fundo: color-mix(in oklab, var(--brand) 12%, #050505);
+  --color-primary: var(--brand);
+  --color-primary-dim: color-mix(in oklab, var(--brand) 80%, black);
+  --color-primary-container: color-mix(in oklab, var(--brand) 20%, white);
+  --color-primary-fixed: color-mix(in oklab, var(--brand) 20%, white);
+  --color-primary-fixed-dim: color-mix(in oklab, var(--brand) 40%, white);
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: color-mix(in oklab, var(--brand) 35%, black);
+  --color-surface-tint: var(--brand);
+}
+:root.dark[style*="--brand"] {
+  --color-primary: color-mix(in oklab, var(--brand) 55%, white);
+  --color-on-primary: color-mix(in oklab, var(--brand) 30%, black);
+  --color-primary-container: color-mix(in oklab, var(--brand) 45%, black);
+  --color-on-primary-container: color-mix(in oklab, var(--brand) 20%, white);
+}

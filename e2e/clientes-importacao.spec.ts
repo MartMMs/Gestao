@@ -6,6 +6,10 @@ import { apagarClienteDeTeste, apiBase, authHeaders, CONTAS, diaFuturo, gerarCpf
  * e gravação tudo-ou-nada.
  */
 
+// Um teste por vez neste arquivo (mesmo worker, em ordem): em paralelo entre si, estes testes de tela pesados
+// disputavam CPU e banco e estouravam o tempo. 'default' em vez de 'serial': uma falha não pula os seguintes
+test.describe.configure({ mode: 'default' });
+
 test.describe('Clientes — cadastro e importação', () => {
   test('API: cadastro manual valida e recusa duplicado; colaborador não cadastra', async ({ request }) => {
     const admin = await authHeaders(request, CONTAS.admin);

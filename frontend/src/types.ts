@@ -21,6 +21,11 @@ export interface ConfiguracaoEmpresa {
   usarComissao?: boolean;
   // Ligado: agendar e cadastrar cliente exigem ficha de anamnese
   exigirAnamnese?: boolean;
+  // Horário de funcionamento (HH:MM) e dias abertos (0 = domingo); limite = último início aceito
+  horaAbertura?: string;
+  horaFechamento?: string;
+  horaLimiteAgendamento?: string | null;
+  diasFuncionamento?: number[];
   atualizadoEm?: string;
 }
 
@@ -43,6 +48,8 @@ export interface Employee {
   specialty: string;
   cargo?: string;
   tipoEscala?: TipoEscala;
+  // Horário padrão dos dias de trabalho ("HH:MM-HH:MM"); sem ele, horário da casa
+  turnoPadrao?: string | null;
   folgasDomingoNoMes?: number;
   cargaHorariaSemanal?: number;
   habilidades?: string[];
@@ -82,6 +89,8 @@ export interface Appointment {
   clientCode?: number;
   // Versão do registro no servidor (detecta edição simultânea)
   version?: string;
+  // Cliente respondeu "Não poderei ir" ao lembrete do WhatsApp
+  clienteAvisouAusencia?: boolean;
 }
 
 export interface Service {
@@ -117,6 +126,8 @@ export interface Client {
   // Calculado pela API: quem está logado vê e grava a ficha de saúde deste cliente
   acessoSaude?: boolean;
   observacao?: string;
+  // LGPD: pediu para não receber lembretes no WhatsApp
+  naoReceberWhatsapp?: boolean;
   alergias?: string[];
   preferencias?: string[];
 }
@@ -146,6 +157,8 @@ export interface AutoatendimentoSlot {
 
 export interface AutoatendimentoDisponibilidadeResponse {
   data: string;
+  // Só sem horários: por que (dia fechado ou sem vaga)
+  mensagem?: string;
   servico: {
     id: string;
     nome: string;

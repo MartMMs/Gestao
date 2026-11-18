@@ -1,3 +1,4 @@
+import { HorarioFuncionamentoCard } from '../features/company/components/HorarioFuncionamentoCard';
 import { valorDoAtendimento } from '../utils/valorAtendimento';
 import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { normalizarTexto } from '@shared/validadores';
@@ -11,13 +12,14 @@ import { SupervisorDashboardTab } from '../features/dashboard/components';
 import { SupervisorClientesTab } from '../features/clients/components';
 import { SupervisorEquipeTab } from '../features/team/components';
 import { SupervisorEscalaTab } from '../features/scale/components';
-import { SupervisorPlanejamentoTab } from '../features/planning/components';
+import { ModuloRH, SupervisorPlanejamentoTab } from '../features/planning/components';
+import { periodosDeAusencia } from '../features/planning/utils/ausencias';
 import { usePlanejamentoEscala, type ScaleOverridePayload } from '../features/planning/hooks/usePlanejamentoEscala';
 import { SupervisorServicosTab } from '../features/services/components';
 import { AutoatendimentoAdminTab } from '../features/autoatendimento/components';
 import { RelatorioFinanceiroTab } from '../features/reports/components';
 import { type DiaEscala } from '../utils/escalaCalculator';
-import { isTeamMember } from '../utils/formatters';
+import { atendeNaAgenda, formatarReais } from '../utils/formatters';
 
 type ServicePayload = {
   nome: string;
@@ -178,7 +180,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
 
   // Estado e regras da Grade de Escalas
   const planejamento = usePlanejamentoEscala({
-    employees,
+    employees: todasAsContas, // a escala inclui supervisores; o hook tira admin e recepção
     scaleOverrides,
     turnoSwapRequests,
     onEditEmployee,
@@ -193,6 +195,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
     setEmployeeSearchTerm,
     planningOverridesList,
     cltRealtimeAlerts,
+    ajustesSalvos,
   } = planejamento;
 
   // Função para formatar minutos em texto legível (ex: 1h 30m)
@@ -351,7 +354,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
     .sort((a, b) => a.localeCompare(b)), [employees]);
 
   const availableProfessionals = useMemo(() => Array.from(new Set(employees
-    .filter((emp) => isTeamMember(emp))
+    .filter((emp) => atendeNaAgenda(emp))
     .map((employee) => (employee.name || '').trim())
     .filter(Boolean)))
     .sort((a, b) => a.localeCompare(b)), [employees]);
@@ -434,6 +437,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
       {activeTab === 'escala' && (
         <div className="space-y-8">
           <SupervisorEscalaTab
+            papel="supervisor"
             employees={employees}
             appointments={appointments}
             services={services}
@@ -456,15 +460,21 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
       )}
 
       {activeTab === 'planejamento' && (
-        <SupervisorPlanejamentoTab
-          {...planejamento}
-          employees={employees}
-          appointments={appointments}
+        <ModuloRH
+          planejamento={planejamento}
           onSaveScaleOverride={onSaveScaleOverride}
-          onSwapScaleDays={onSwapScaleDays}
           onReplicateScaleDays={onReplicateScaleDays}
-          setToastMessage={setToastMessage}
-        />
+          onSwapScaleDays={onSwapScaleDays}
+        >
+          <SupervisorPlanejamentoTab
+            {...planejamento}
+            employees={planejamento.activeNonAdminEmployees}
+            appointments={appointments}
+            onSaveScaleOverride={onSaveScaleOverride}
+            onSwapScaleDays={onSwapScaleDays}
+            onReplicateScaleDays={onReplicateScaleDays}
+          />
+        </ModuloRH>
       )}
 
       {activeTab === 'equipe' && (
@@ -551,7 +561,10 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
       )}
 
       {activeTab === 'autoatendimento' && (
-        <AutoatendimentoAdminTab />
+        <div className="space-y-8">
+          <HorarioFuncionamentoCard />
+          <AutoatendimentoAdminTab />
+        </div>
       )}
 
       {activeTab === 'relatorios' && <RelatorioFinanceiroTab />}
@@ -612,7 +625,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                   <img src={viewingEmployee.avatar} alt={viewingEmployee.name} className="w-16 h-16 rounded-full object-cover border-2 border-primary/20" />
                   <div>
                     <h2 className="text-xl font-headline text-primary mb-1">{viewingEmployee.name}</h2>
-                    <p className="text-xs text-on-surface-variant">{viewingEmployee.specialty} • {viewingEmployee.email}</p>
+                    <p className="text-xs text-on-surface-variant">{[viewingEmployee.specialty, viewingEmployee.usuario, viewingEmployee.email].filter(Boolean).join(' • ')}</p>
                   </div>
                 </div>
                 <button onClick={() => setViewingEmployee(null)} className="p-2 hover:bg-surface-container rounded-full text-on-surface-variant transition-colors">
@@ -645,14 +658,12 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                  </div>
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
                    <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Média de Avaliação</p>
-                   <div className="flex items-center gap-1 text-2xl font-headline text-primary">
-                     {viewingEmployee.rating.toFixed(1)} <span className="material-symbols-outlined star-active text-xl">star</span>
-                   </div>
+                   <p className="text-sm text-on-surface-variant mt-2">Sem avaliações</p>
                  </div>
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
                    <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Faturamento</p>
-                   <p className="text-2xl font-headline text-primary truncate" title={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingEmployeeRevenue)}>
-                     {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingEmployeeRevenue)}
+                   <p className="text-2xl font-headline text-primary truncate" title={formatarReais(viewingEmployeeRevenue)}>
+                     {formatarReais(viewingEmployeeRevenue)}
                    </p>
                  </div>
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
@@ -747,13 +758,17 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
             </div>
           )}
 
-          {viewingEmployeeTab === 'ocorrencias' && (
+          {viewingEmployeeTab === 'ocorrencias' && (() => {
+            // Bloqueios da agenda e férias/atestado/afastamento do Módulo RH (gravados na escala)
+            const ausencias = periodosDeAusencia(ajustesSalvos.values(), new Map([[viewingEmployee.id, viewingEmployee.name]]));
+            const total = (viewingEmployee.bloqueios?.length || 0) + ausencias.length;
+            return (
             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-lg font-headline text-primary">Histórico de Ocorrências</h3>
-                <span className="text-xs text-on-surface-variant bg-surface-container px-3 py-1 rounded-full font-bold uppercase tracking-widest">{viewingEmployee.bloqueios?.length || 0} registros</span>
+                <span className="text-xs text-on-surface-variant bg-surface-container px-3 py-1 rounded-full font-bold uppercase tracking-widest">{total} registros</span>
               </div>
-              {(!viewingEmployee.bloqueios || viewingEmployee.bloqueios.length === 0) ? (
+              {total === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center border border-outline-variant/20 rounded-2xl border-dashed">
                   <span className="material-symbols-outlined text-4xl text-outline-variant mb-2">task_alt</span>
                   <p className="text-sm font-bold text-on-surface-variant">Dossiê Limpo</p>
@@ -761,7 +776,23 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {viewingEmployee.bloqueios.map(bloq => (
+                  {ausencias.map((p) => (
+                    <div key={`${p.motivo}:${p.inicio}`} className="flex items-center justify-between bg-surface-container-lowest p-4 rounded-2xl border border-outline-variant/20 shadow-sm">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center bg-secondary-container text-secondary">
+                          <span className="material-symbols-outlined" aria-hidden="true">beach_access</span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-on-surface">{p.motivo}</p>
+                          <p className="text-xs text-on-surface-variant mt-0.5">Registrado no Módulo RH</p>
+                        </div>
+                      </div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-on-surface text-right">
+                        {p.inicio.split('-').reverse().join('/')}{p.fim !== p.inicio ? ` a ${p.fim.split('-').reverse().join('/')}` : ''}
+                      </p>
+                    </div>
+                  ))}
+                  {(viewingEmployee.bloqueios ?? []).map(bloq => (
                     <div key={bloq.id} className="flex items-center justify-between bg-surface-container-lowest p-4 rounded-2xl border border-outline-variant/20 shadow-sm">
                       <div className="flex items-center gap-4">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center ${bloq.motivo.toLowerCase().includes('falta') ? 'bg-error/10 text-error' : 'bg-secondary-container text-secondary'}`}>
@@ -780,7 +811,8 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                 </div>
               )}
             </div>
-          )}
+            );
+          })()}
             </motion.div>
           </div>
         )}

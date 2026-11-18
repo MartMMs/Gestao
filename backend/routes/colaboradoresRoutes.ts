@@ -12,7 +12,7 @@ import { transacaoComTravas, travarAgenda } from '../lib/transacao';
 import { prepararBloqueio } from '../lib/privacidade';
 import { INVALIDAR_SESSOES, PAPEIS_ATENDIMENTO, validarSenha } from '../lib/usuarios';
 import { validarDisponibilidadeProfissional } from '../services/agendaService';
-import { partesNoFuso } from '../../shared/agenda';
+import { partesNoFuso, TURNO_REGEX } from '../../shared/agenda';
 import { ESCOPOS } from '../../shared/escopos';
 import { EMAIL_REGEX, MENSAGEM_USUARIO_INVALIDO, USUARIO_REGEX, normalizarNome } from '../../shared/validadores';
 
@@ -100,6 +100,13 @@ const lerCamposEscala = (body: Record<string, unknown>) => {
       throw new HttpError(400, `Tipo de escala inválido. Use: ${TIPOS_ESCALA.join(', ')}.`);
     }
     dados.tipoEscala = body.tipoEscala;
+  }
+  if (body.turnoPadrao !== undefined) {
+    // Vazio ou null apaga (volta ao horário da casa)
+    if (body.turnoPadrao === null || body.turnoPadrao === '') dados.turnoPadrao = null;
+    else if (typeof body.turnoPadrao !== 'string' || !TURNO_REGEX.test(body.turnoPadrao) || body.turnoPadrao.slice(0, 5) === body.turnoPadrao.slice(6)) {
+      throw new HttpError(400, 'Horário de trabalho inválido. Informe entrada e saída diferentes, no formato HH:MM.');
+    } else dados.turnoPadrao = body.turnoPadrao;
   }
   if (typeof body.especialidade === 'string') dados.especialidade = body.especialidade.trim().slice(0, LIMITE_ESPECIALIDADE);
   for (const campo of ['folgasDomingoNoMes', 'cargaHorariaSemanal'] as const) {
@@ -276,7 +283,9 @@ export function createColaboradoresRouter(eventos: Eventos) {
           return tx.colaborador.update({ where: { id }, data: dados, omit: { versaoToken: false } });
         })
         : await prisma.colaborador.update({ where: { id }, data: dados, omit: { versaoToken: false } });
-      if (dados.versaoToken) eventos.encerrarSessoesDoUsuario(id);
+      // Papel mudou: o socket reconecta sozinho e entra nas salas do papel novo (senão um supervisor promovido a
+      // admin seguiria recebendo avisos de supervisor, e quem perdeu a recepção seguiria recebendo os dela)
+      if (dados.versaoToken || dados.papel !== undefined) eventos.encerrarSessoesDoUsuario(id);
       const { versaoToken, ...colaboradorPublico } = colaboradorAtualizado;
       // Própria conta com credencial nova: a sessão desta aba é trocada por uma nova (como em /minha-senha), em vez de
       // cair como "sessão expirada"; a antiga e as das outras abas/aparelhos deixam de valer

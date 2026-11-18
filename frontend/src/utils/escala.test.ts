@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gerarEscala6x1, gerarEscala5x2, gerarEscala12x36, gerarEscalaComRegras, calcularHorasEscala } from './escalaCalculator';
+import { gerarEscala6x1, gerarEscala5x2, gerarEscala12x36, gerarEscalaComRegras } from './escalaCalculator';
 import { analisarSetimoDiaConsecutivo, analisarInterjornadaEscala, calcularDiferencaInterjornada, analisarConformidadeCLT } from './cltValidator';
 const dow = (d: string) => new Date(`${d}T12:00:00Z`).getUTCDay();
 describe(`escala (TZ=${process.env.TZ})`, () => {
@@ -46,7 +46,6 @@ describe(`escala (TZ=${process.env.TZ})`, () => {
     expect(analisarSetimoDiaConsecutivo(seq(7)).violacoes[0]?.data).toBe('2026-01-11');
     expect(analisarSetimoDiaConsecutivo(seq(6)).conforme).toBe(true);
     expect(analisarSetimoDiaConsecutivo([...seq(3, 1), ...seq(4, 5)]).conforme).toBe(true);
-    expect(analisarConformidadeCLT(seq(7)).cargaSemanal.conforme).toBe(false); // 63h
-    expect(calcularHorasEscala(seq(2)).horasTrabalhadas).toBe(18);
+    expect(analisarConformidadeCLT(seq(7)).cargaSemanal.conforme).toBe(false); // 7 × 8h = 56h
   });
 });

@@ -1,3 +1,4 @@
+import { codigoReserva } from '@shared/codigoReserva';
 import { Appointment, Service } from '../../../types';
 import { normalizarTexto } from '@shared/validadores';
 import { duracaoTotal, horarioParaMinutos } from '@shared/agenda';
@@ -62,6 +63,7 @@ export const matchesAppointmentSearch = (appointment: Appointment, searchTerm: s
     appointment.contact,
     appointment.observation || '',
     ...(appointment.services || []),
+    codigoReserva(appointment.id),
   ].some(value => normalizeKey(value || '').includes(query));
 };
 

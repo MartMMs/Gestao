@@ -37,9 +37,39 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
   dashboard e relatorio usam o mesmo calculo; falta conta o agendado vencido sem baixa.
 - **Privacidade:** comissao escondida de quem nao e supervisor; ficha de cliente excluida nao recebe atendimento
   nem dados; consentimento versionado no totem; senha provisoria.
+- **Codigo de reserva (`AG-XXXXXX`):** todo agendamento tem um, inclusive os criados pela equipe (aparece no titulo de
+  "Editar Agendamento"). Na Agenda da Recepcao, digite o codigo na busca e tecle Enter: a agenda vai para o dia e abre a reserva.
+- **Sem baixa:** botao "Sem baixa (N)" na Agenda da Recepcao (supervisao e recepcao) lista os atendimentos que ja
+  terminaram e ninguem concluiu nem marcou falta; cada item abre o atendimento para dar baixa.
+- **Folgas por escala:** no 6x1 o servidor aceita uma folga comum por semana (segunda a domingo) ao marcar, trocar ou
+  replicar; so recusa quando a operacao acrescenta folga acima do limite (semana antiga com folga a mais continua
+  editavel). Feriado e ausencias do RH (Ferias, Atestado medico, Afastamento) nao contam. No 5x2 as duas folgas podem
+  cair em quaisquer dias. A Grade avisa antes de gravar.
+- **Horario de trabalho no cadastro:** "Informar horario de trabalho" (entrada e saida) no Criar/Editar Usuario grava
+  `turnoPadrao`; o calendario do RH, a Timeline e a agenda mostram esse horario nos dias de trabalho, sem gravar dia a dia.
+  Sem ele, vale o horario da casa, como antes; um ajuste feito no dia tem prioridade.
+- **Horario de funcionamento configuravel:** cartao "Horario de funcionamento" no Empresa & Segmento (administrador) e
+  no Totem & Autoatendimento (supervisao): abertura, fechamento, ultimo horario para comecar um atendimento e dias de
+  funcionamento. Vale para a agenda da equipe, o totem e a grade da agenda (antes era fixo: 09:00 as 21:00, todos os dias).
+  Alteracoes ficam no historico de auditoria; atendimentos ja marcados nao mudam, mas se algum ficar fora do novo
+  horario o servidor avisa (409) e so grava com confirmacao. A grade cresce para mostrar esses atendimentos.
+  Folga de dia inteiro passa a ser gravada como 00:00-23:59 (a migration converte as que cobriam 09:00-21:00), para
+  continuar valendo quando o horario muda.
+- **Modulo RH:** abas "Escalas & Alocacao" (Grade de Escalas), "Espelho de Ponto & Banco de Horas" (horas previstas
+  pela escala, normais ate 44h por semana e extras acima disso) e "Ferias & Afastamentos" (registra o periodo como
+  folga com o motivo; protegido contra clique duplo e avisa se o periodo ficar gravado pela metade). Painel
+  "Verificar Conformidade CLT" lista quem tem alerta no mes e "Propor folgas na grade" (proposta, so grava ao confirmar).
+  Supervisores tambem entram na escala; admin e recepcao ficam fora.
+- **Agenda da casa na recepcao:** a recepcao ve a agenda de todos os profissionais (dia, semana e mes), realoca e
+  muda status; nao exclui (cancela, o atendimento fica no historico) e nao cria bloqueio. O servidor confere: DELETE
+  so para supervisao (403) e a troca de profissional fica na auditoria (`agendamento.realocado`).
+- **Painel da TV em subdominio:** `tv.<seu-dominio>` (ou o host de `VITE_TV_HOST`) abre direto no painel de chamada.
+- **Auditoria LGPD:** relatorio "Acessos ao historico de clientes" (quem abriu o historico de qual cliente, IP e quando).
+- **Pagamento e WhatsApp pre-prontos:** adapters HTTP genericos, desligados por padrao (ver "Integracoes" abaixo).
 
 > **Antes de subir esta versao:** faca backup do banco e rode `cd backend && npx prisma migrate deploy`
-> (migrations de auditoria, comissao proporcional, troca de senha obrigatoria, consentimento do totem e usuario de acesso).
+> (migrations de auditoria, comissao proporcional, troca de senha obrigatoria, consentimento do totem, usuario de acesso,
+> horario padrao do colaborador `turnoPadrao` referencia de pagamento `referenciaPagamento`, horario de funcionamento da empresa, folga de dia inteiro 00:00-23:59, mensagens de lembrete do WhatsApp `mensagensLembrete` e confirmação/opt-out do WhatsApp `lembretePedeConfirmacao`, `naoReceberWhatsapp`, `clienteAvisouAusenciaEm`).
 > Veja os detalhes completos em [docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md](docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md).
 
 ## Guias detalhados
@@ -108,10 +138,15 @@ Veja `.env.example`. Principais:
 - `CORS_ORIGINS` opcional (origens aceitas, separadas por virgula)
 - `TRUST_PROXY` opcional (atras de nginx/proxy reverso)
 - `PAYMENT_WEBHOOK_SECRET` (segredo HMAC do gateway; sem ele, pagamentos online ficam "aguardando pagamento")
+- `PAYMENT_GATEWAY_URL` / `PAYMENT_GATEWAY_TOKEN` opcionais: adapter HTTP do gateway (vazio = pagamento na recepcao)
+- `WHATSAPP_WEBHOOK_URL` / `WHATSAPP_WEBHOOK_TOKEN` opcionais: envio por WhatsApp (vazio = so log com telefone mascarado).
+  Em producao as URLs precisam ser `https://` e o token e obrigatorio quando a URL existe
 - `LIMPEZA_AGENDAMENTOS_DIAS` (padrao 30): agendamentos nunca concluidos apos esse prazo viram "no_show"; 0 desativa
 - `E2E_PASSWORD` / `SEED_PASSWORD` (senhas dos usuarios de teste e de demonstracao)
 - `VITE_API_URL` / `VITE_SOCKET_URL` opcionais (aplicadas no build do frontend)
 - `VITE_AUTOATENDIMENTO_HOST` opcional: host(s) do totem, separados por virgula (vazio = qualquer host que comece com `autoatendimento.`)
+- `VITE_TV_HOST` opcional: host(s) do painel de TV, separados por virgula (vazio = qualquer host que comece com `tv.`); nele o portal abre direto na TV
+- `VITE_ATALHO_CAMINHOS=1` opcional: `/totem` e `/painel` abrem pelo caminho no build de producao (teste pelo IP). Fica na mesma origem do portal, sem isolamento de sessao; em producao use os subdominios. No `npm run dev` os caminhos sempre funcionam
 - `VITE_AUTOATENDIMENTO_URL`: endereco do totem usado pelo botao da tela de login (sem ela, o totem abre dentro do portal, sem isolamento)
 
 ## Migrations do banco
@@ -135,6 +170,18 @@ add_header X-Content-Type-Options nosniff always;
 
 Defina `VITE_API_URL` no build de producao: sem ela, a CSP libera a porta 3333 de qualquer host.
 
+## HTTPS / TLS (producao)
+
+O TLS fica no nginx; o Node escuta so em `127.0.0.1:3333`. Modelo pronto em
+[docs/nginx-https.conf.example](docs/nginx-https.conf.example) (nginx 1.25.1+: TLS 1.2/1.3, HTTP vira HTTPS, HSTS, CSP,
+Referrer-Policy, Permissions-Policy, WebSocket, host desconhecido sem resposta). Teste a CSP antes com
+`Content-Security-Policy-Report-Only` e preencha `VITE_AUTOATENDIMENTO_HOST` e `VITE_TV_HOST` com os hosts exatos.
+
+1. Gere o certificado: `sudo certbot certonly --nginx -d app.suaempresa.com -d autoatendimento.suaempresa.com -d tv.suaempresa.com -d api.suaempresa.com`.
+2. Backend com `NODE_ENV=production` (cookie de sessao `Secure` e HSTS) e `TRUST_PROXY=1`.
+3. Use `https://` em `CORS_ORIGINS`, `VITE_API_URL`, `VITE_SOCKET_URL` e `VITE_AUTOATENDIMENTO_URL`.
+4. O certbot renova sozinho; confira com `sudo certbot renew --dry-run`.
+
 ## Totem em subdominio (producao)
 
 1. Aponte o DNS de `autoatendimento.<seu-dominio>` para o mesmo servidor do portal e sirva o mesmo build do frontend.
@@ -156,12 +203,50 @@ com os cabecalhos `x-webhook-timestamp` (segundos) e `x-webhook-signature` (HMAC
 `PAYMENT_WEBHOOK_SECRET`). Chamadas com mais de 5 minutos ou com valor menor que o cobrado sao recusadas. Um pagamento que chega depois de a
 reserva expirar marca o agendamento como `pago_apos_expirar` e avisa a equipe, para devolucao ou remarcacao.
 
+## Integracoes (pagamento e WhatsApp)
+
+Nenhum SDK de terceiro: os dois pontos de extensao sao adapters HTTP genericos, desligados enquanto a URL estiver vazia.
+Para ligar um provedor real, aponte a URL para ele ou para um servico intermediario seu que traduza o contrato.
+
+**Gateway de pagamento** (`backend/services/gatewayPagamento.ts`), ativo com `PAYMENT_GATEWAY_URL` e `PAYMENT_WEBHOOK_SECRET`:
+
+- `POST PAYMENT_GATEWAY_URL` com `Authorization: Bearer PAYMENT_GATEWAY_TOKEN` e corpo `{ referencia, valor, descricao }`;
+  resposta `{ pixCopiaECola, pixQrCode?, cartaoOnlineDisponivel? }` (8 s de limite).
+- `referencia` e um id aleatorio da cobranca (gravado em `referenciaPagamento`); nunca o token da reserva do totem, que e credencial.
+  O webhook devolve a mesma `referencia` (ou `agendamentoId`; se vierem os dois, precisam ser do mesmo agendamento).
+- Gateway fora do ar: a reserva e liberada na hora e o totem recebe 503 ("tente de novo").
+
+**WhatsApp** (`backend/services/whatsapp.ts`), ativo com `WHATSAPP_WEBHOOK_URL`:
+
+- `POST WHATSAPP_WEBHOOK_URL` com `Authorization: Bearer WHATSAPP_WEBHOOK_TOKEN` e corpo `{ telefone, mensagem }`.
+- Confirmacao da reserva do totem e lembrete 24 h antes (job a cada 10 min, ate 200 por rodada, uma rodada por vez;
+  cada agendamento recebe no maximo um lembrete, marcado no Redis).
+- As mensagens levam so o primeiro nome, dia, hora e o codigo da reserva: nada de servico, profissional ou sala.
+- Antes de ligar: definir o formato do telefone que o provedor exige (ex.: `+55`) e o consentimento/opt-out (LGPD).
+
+**WhatsApp por QR code** (`backend/services/whatsappQr.ts`), so para os lembretes de 24 h:
+
+- Admin > aba **Totem, Autoatendimento & WhatsApp** > "Gerar QR code" e ler no celular (Aparelhos conectados). Conectado, tem prioridade sobre o webhook nos lembretes; a confirmacao do totem continua pelo webhook/log.
+- Nao e a API oficial (usa o WhatsApp Web, biblioteca Baileys): para nao bloquear o numero, no maximo 40 lembretes por dia, pausa de 30 a 90 s entre eles e so para numeros que tem WhatsApp. Serve para publico pequeno; para volume maior, trocar pela API oficial (outro `WhatsappProvider`).
+- Mensagens do lembrete: na mesma aba, a casa escreve uma ou mais frases com chaves (`{nome}`, `{data}`, `{horario}`, `{dia da semana}`, `{numero da reserva}`, `{nome da empresa}`, `{telefone da empresa}`, `{endereco}`; lista em `shared/mensagemLembrete.ts`). Varias = sorteia uma por envio; nenhuma = mensagem padrao. Vale para o webhook tambem.
+- Opt-out (LGPD): "Não quer receber lembretes no WhatsApp" no cadastro do cliente (recepção ou supervisão); quem marcou fica fora dos lembretes.
+- "Pedir confirmação (Sim ou Não)": o lembrete pelo QR code é seguido de uma enquete de 1 clique ("Sim, confirmo" / "Não poderei ir"); digitar 1 ou 2 também vale. Botões clicáveis não são usados: pelo WhatsApp não oficial eles não chegam de forma confiável (iPhone). O voto é lido com a chave da enquete guardada no Redis no envio (o Baileys 6.7.23 não decodifica votos sozinho); contas "@lid" sem número são reconhecidas pelo mapa @lid → número gravado no envio. Logs `[WhatsApp Webhook]` mostram cada resposta recebida (telefone mascarado). Resposta 1: o cliente recebe uma confirmação e a agenda não muda. Resposta 2: o agendamento mostra "Cliente não pode comparecer" e chega um aviso (socket `cliente_ausente`) só para recepção, supervisão e o profissional do atendimento, nunca para o admin. Outras mensagens não recebem resposta automática.
+- A sessao fica em `backend/.whatsapp-sessao/` (ou `WHATSAPP_QR_PASTA`), fora do git: quem tem essa pasta fala pelo numero. Rode uma instancia so da API com o QR conectado. Ao reiniciar, reconecta sozinho.
+
 ## Validacao rapida
 
 ```bash
 npm run lint        # TypeScript estrito no frontend, backend e shared
 npm run build
-npm run test:unit
+npm run test:unit   # Vitest + testes dos scripts (node --test scripts/*.test.mjs)
+```
+
+Checklist de lancamento de uma URL publicada (HTTPS, certificado, cabecalhos, metatags, PageSpeed) e lista do que
+testar a mao:
+
+```bash
+npm run check:site -- https://app.suaempresa.com            # PSI_API_KEY=... opcional
+npm run check:site -- https://homologacao.suaempresa.com --sem-psi   # nao envia a URL ao PageSpeed do Google
 ```
 
 Testes E2E (precisam do banco e de `E2E_PASSWORD` no `.env`):
@@ -198,14 +283,7 @@ Atalhos locais (`Gestao-*.desktop`, tasks do VS Code) podem ser criados por cada
 - Split frontend/backend concluido.
 - Refatoracao por features em andamento com entregas principais aplicadas.
 - Pendencias de consolidacao:
-   - tela para consultar a trilha de auditoria de acessos ao historico de clientes
-   - filtrar agenda para destacar somente profissionais em folga (regra final de exibicao)
-   - permitir ajuste de horario de trabalho pelo Supervisor com persistencia na listagem
-   - continuar saneamento de `any` residual em `SupervisorView` e `SupervisorPlanejamentoTab` (props ainda genericas)
-   - integrar um gateway de pagamento real ao webhook assinado
-   - finalizar adocao de hooks/contexto compartilhado em todos os fluxos do Supervisor
-   - envio de lembretes por WhatsApp
-   - criacao de bloqueio ainda sem transacao/trava
+   - conectar provedores reais de pagamento e WhatsApp (pontos de extensao prontos e desligados por padrao; ver BLG-014/015)
 
 ## Documentacao relacionada
 
