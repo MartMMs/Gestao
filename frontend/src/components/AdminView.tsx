@@ -8,6 +8,7 @@ import { SupervisorClientesTab } from '../features/clients/components';
 import { SupervisorEquipeTab } from '../features/team/components';
 import { SupervisorServicosTab } from '../features/services/components';
 import { AutoatendimentoAdminTab } from '../features/autoatendimento/components';
+import { WhatsappLembretesTab } from '../features/appointments/components';
 import { CompanySettingsTab } from '../features/company/components/CompanySettingsTab';
 import { RelatorioFinanceiroTab } from '../features/reports/components';
 import { useCompanyConfig } from '../api';
@@ -104,7 +105,7 @@ export function AdminView({
   token,
 }: AdminViewProps) {
   const { data: companyConfig } = useCompanyConfig(token);
-  const [activeTab, setActiveTab] = useState<'empresa' | 'servicos' | 'totem' | 'equipe' | 'dashboard' | 'clientes' | 'relatorios'>('empresa');
+  const [activeTab, setActiveTab] = useState<'empresa' | 'servicos' | 'totem' | 'whatsapp' | 'equipe' | 'dashboard' | 'clientes' | 'relatorios'>('empresa');
 
   // Gestão de Serviços
   const [serviceSearchTerm, setServiceSearchTerm] = useState('');
@@ -309,6 +310,19 @@ export function AdminView({
 
           <button
             type="button"
+            onClick={() => setActiveTab('whatsapp')}
+            className={`px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
+              activeTab === 'whatsapp'
+                ? 'bg-primary text-on-primary shadow-md'
+                : 'bg-surface-container text-on-surface-variant hover:text-primary'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[18px]">chat</span>
+            WhatsApp
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('equipe')}
             className={`px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
               activeTab === 'equipe'
@@ -416,6 +430,8 @@ export function AdminView({
       )}
 
       {activeTab === 'totem' && <AutoatendimentoAdminTab />}
+
+      {activeTab === 'whatsapp' && <WhatsappLembretesTab token={token || null} />}
 
       {activeTab === 'equipe' && (
         <SupervisorEquipeTab

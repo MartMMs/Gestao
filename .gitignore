@@ -43,3 +43,6 @@ install.sh
 
 # Relatórios e snapshots gerados localmente
 generated/
+
+# Sessão do WhatsApp conectado por QR code (equivale a estar logado no número)
+.whatsapp-sessao/

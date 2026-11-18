@@ -32,6 +32,12 @@ describe('WhatsApp', () => {
     expect(montarLembrete('Spa Teste', ag('a'))).toBe('*Spa Teste*\nOlá, Maria! Lembrete do seu horário em 11/12 às 10:30. Se não puder vir, avise a recepção.');
   });
 
+  it('lembrete com mensagem da casa: sorteia uma e troca as chaves', () => {
+    const empresa = { nome: 'Spa Teste', endereco: 'Rua A, 1', mensagens: ['A {nome}', 'Oi {nome}, {dia da semana} {horario}, reserva {numero da reserva} em {endereco}'] };
+    expect(montarLembrete(empresa, ag('abc123'), 0)).toBe('A Maria');
+    expect(montarLembrete(empresa, ag('abc123'), 0.99)).toBe('Oi Maria, sexta-feira 10:30, reserva AG-ABC123 em Rua A, 1');
+  });
+
   it('job: janela de 2h a 24h, pula sem telefone e já enviados, segue depois de uma falha', async () => {
     const enviar = vi.fn(async (telefone: string) => { if (telefone === '000') throw new Error('falhou'); });
     const provider: WhatsappProvider = { ativo: true, enviar };
@@ -52,6 +58,18 @@ describe('WhatsApp', () => {
     enviar.mockClear();
     await enviarLembretes({ provider, empresa: 'Spa', agora: AGORA, buscar, marcarUmaVez: async (id) => (marcados.has(id) ? false : (marcados.add(id), true)) });
     expect(enviar).not.toHaveBeenCalled();
+  });
+
+  it('job: para antes de marcar quando o provider não pode mais enviar (limite diário)', async () => {
+    let restam = 1;
+    const enviar = vi.fn(async () => { restam -= 1; });
+    const marcarUmaVez = vi.fn(async () => true);
+    const enviados = await enviarLembretes({
+      provider: { ativo: true, enviar, podeEnviar: () => restam > 0 },
+      empresa: 'Spa', agora: AGORA, buscar: async () => [ag('a'), ag('b')], marcarUmaVez,
+    });
+    expect(enviados).toBe(1);
+    expect(marcarUmaVez).toHaveBeenCalledTimes(1); // o segundo fica para amanhã, não é perdido
   });
 
   it('filtro do job: só marcados na janela, sem reserva aguardando pagamento, cliente ativo e com telefone', () => {

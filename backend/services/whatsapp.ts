@@ -3,11 +3,15 @@
 //   POST WHATSAPP_WEBHOOK_URL  Authorization: Bearer WHATSAPP_WEBHOOK_TOKEN  corpo: { telefone, mensagem }
 
 import type { Prisma } from '@prisma/client';
+import { codigoReserva } from '../../shared/codigoReserva';
+import { preencherMensagem } from '../../shared/mensagemLembrete';
 
 export interface WhatsappProvider {
   /** false = nada sai de verdade (modo log) */
   ativo: boolean;
   enviar: (telefone: string, mensagem: string) => Promise<void>;
+  /** false = parar a rodada antes de marcar o próximo (ex.: limite diário do WhatsApp por QR) */
+  podeEnviar?: () => boolean;
 }
 
 const TEMPO_LIMITE_MS = 8000;
@@ -45,17 +49,36 @@ export type AgendamentoParaLembrete = { id: string; data: Date; clienteNome: str
 
 const formatar = (data: Date, opcoes: Intl.DateTimeFormatOptions) => data.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', ...opcoes });
 
-// Sem nome de serviço nem dado de saúde: a mensagem pode ser lida por quem pegar o celular
-export const montarLembrete = (empresa: string, ag: AgendamentoParaLembrete) => {
+export type EmpresaDoLembrete = { nome: string; telefone?: string | null; endereco?: string | null; mensagens?: string[] };
+
+// Sem nome de serviço nem dado de saúde: a mensagem pode ser lida por quem pegar o celular. Com mensagens da casa,
+// sorteia uma (variar o texto também ajuda o número a não ser bloqueado)
+export const montarLembrete = (empresa: string | EmpresaDoLembrete, ag: AgendamentoParaLembrete, sorteio = Math.random()) => {
+  const dadosEmpresa = typeof empresa === 'string' ? { nome: empresa } : empresa;
   const primeiroNome = ag.clienteNome.trim().split(/\s+/)[0] || ag.clienteNome;
-  return `*${empresa}*\nOlá, ${primeiroNome}! Lembrete do seu horário em ${formatar(ag.data, { day: '2-digit', month: '2-digit' })} às ${formatar(ag.data, { hour: '2-digit', minute: '2-digit' })}. Se não puder vir, avise a recepção.`;
+  const data = formatar(ag.data, { day: '2-digit', month: '2-digit' });
+  const horario = formatar(ag.data, { hour: '2-digit', minute: '2-digit' });
+  const modelos = dadosEmpresa.mensagens?.filter((m) => m.trim()) ?? [];
+  if (!modelos.length) {
+    return `*${dadosEmpresa.nome}*\nOlá, ${primeiroNome}! Lembrete do seu horário em ${data} às ${horario}. Se não puder vir, avise a recepção.`;
+  }
+  return preencherMensagem(modelos[Math.floor(sorteio * modelos.length) % modelos.length], {
+    nome: primeiroNome,
+    data,
+    horario,
+    'dia da semana': formatar(ag.data, { weekday: 'long' }),
+    'numero da reserva': codigoReserva(ag.id),
+    'nome da empresa': dadosEmpresa.nome,
+    'telefone da empresa': dadosEmpresa.telefone ?? '',
+    endereco: dadosEmpresa.endereco ?? '',
+  });
 };
 
 // Lembretes de 24h: quem começa entre 2h e 24h a partir de agora. `marcarUmaVez` devolve false se já foi enviado
 // (Redis SET NX), então rodar o job de novo, ou em duas instâncias, não manda duas vezes.
 export const enviarLembretes = async (deps: {
   provider: WhatsappProvider;
-  empresa: string;
+  empresa: string | EmpresaDoLembrete;
   agora: Date;
   buscar: (de: Date, ate: Date) => Promise<AgendamentoParaLembrete[]>;
   marcarUmaVez: (agendamentoId: string) => Promise<boolean>;
@@ -66,6 +89,7 @@ export const enviarLembretes = async (deps: {
   let enviados = 0;
   for (const ag of await deps.buscar(de, ate)) {
     if (!ag.clienteTelefone) continue;
+    if (deps.provider.podeEnviar && !deps.provider.podeEnviar()) break;
     if (!(await deps.marcarUmaVez(ag.id))) continue;
     try {
       await deps.provider.enviar(ag.clienteTelefone, montarLembrete(deps.empresa, ag));

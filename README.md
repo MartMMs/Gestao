@@ -69,7 +69,7 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
 
 > **Antes de subir esta versao:** faca backup do banco e rode `cd backend && npx prisma migrate deploy`
 > (migrations de auditoria, comissao proporcional, troca de senha obrigatoria, consentimento do totem, usuario de acesso,
-> horario padrao do colaborador `turnoPadrao` referencia de pagamento `referenciaPagamento`, horario de funcionamento da empresa e folga de dia inteiro 00:00-23:59).
+> horario padrao do colaborador `turnoPadrao` referencia de pagamento `referenciaPagamento`, horario de funcionamento da empresa, folga de dia inteiro 00:00-23:59 e mensagens de lembrete do WhatsApp `mensagensLembrete`).
 > Veja os detalhes completos em [docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md](docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md).
 
 ## Guias detalhados
@@ -223,6 +223,13 @@ Para ligar um provedor real, aponte a URL para ele ou para um servico intermedia
   cada agendamento recebe no maximo um lembrete, marcado no Redis).
 - As mensagens levam so o primeiro nome, dia, hora e o codigo da reserva: nada de servico, profissional ou sala.
 - Antes de ligar: definir o formato do telefone que o provedor exige (ex.: `+55`) e o consentimento/opt-out (LGPD).
+
+**WhatsApp por QR code** (`backend/services/whatsappQr.ts`), so para os lembretes de 24 h:
+
+- Admin > aba **WhatsApp** > "Gerar QR code" e ler no celular (Aparelhos conectados). Conectado, tem prioridade sobre o webhook nos lembretes; a confirmacao do totem continua pelo webhook/log.
+- Nao e a API oficial (usa o WhatsApp Web, biblioteca Baileys): para nao bloquear o numero, no maximo 40 lembretes por dia, pausa de 30 a 90 s entre eles e so para numeros que tem WhatsApp. Serve para publico pequeno; para volume maior, trocar pela API oficial (outro `WhatsappProvider`).
+- Mensagens do lembrete: na mesma aba, a casa escreve uma ou mais frases com chaves (`{nome}`, `{data}`, `{horario}`, `{dia da semana}`, `{numero da reserva}`, `{nome da empresa}`, `{telefone da empresa}`, `{endereco}`; lista em `shared/mensagemLembrete.ts`). Varias = sorteia uma por envio; nenhuma = mensagem padrao. Vale para o webhook tambem.
+- A sessao fica em `backend/.whatsapp-sessao/` (ou `WHATSAPP_QR_PASTA`), fora do git: quem tem essa pasta fala pelo numero. Rode uma instancia so da API com o QR conectado. Ao reiniciar, reconecta sozinho.
 
 ## Validacao rapida
 

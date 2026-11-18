@@ -207,6 +207,8 @@ model ConfiguracaoEmpresa {
   horaFechamento        String   @default("21:00")
   horaLimiteAgendamento String?
   diasFuncionamento     Int[]    @default([0, 1, 2, 3, 4, 5, 6])
+  // Lembretes de WhatsApp escritos pela casa, com chaves ({nome}, {horario}...). Vazio = mensagem padrão; várias = sorteia
+  mensagensLembrete     String[] @default([])
   atualizadoEm         DateTime @updatedAt
 }
 // Trilha de auditoria: cada abertura do histórico (com dados de saúde) de um cliente.

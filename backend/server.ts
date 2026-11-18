@@ -13,6 +13,7 @@ import { redactSensitiveData } from '../shared/redact';
 import { ESCOPOS } from '../shared/escopos';
 import { LIMITE_LEMBRETES_POR_RODADA, enviarLembretes, filtroLembretes } from './services/whatsapp';
 import { whatsapp } from './services/communicationService';
+import { retomarWhatsappQr, whatsappQr } from './services/whatsappQr';
 import { getEmpresaConfig } from './services/configService';
 import { redisService } from './services/redisService';
 
@@ -133,17 +134,19 @@ const manutencaoAgenda = async () => {
 };
 setInterval(manutencaoAgenda, 5 * 60 * 1000);
 
-// Lembrete de 24h por WhatsApp (só com WHATSAPP_WEBHOOK_URL). Marca antes de enviar: na falha, não repete (melhor
+// Lembrete de 24h por WhatsApp: pelo número conectado por QR code (aba WhatsApp do admin) ou, sem ele, pelo
+// WHATSAPP_WEBHOOK_URL. Marca antes de enviar: na falha, não repete (melhor
 // perder um lembrete que mandar vários). A marca dura 2 dias, mais que a janela de 24h.
 let lembretesRodando = false;
 const lembretesWhatsapp = async () => {
   // Provedor lento (8 s por envio) pode passar dos 10 min do intervalo: uma rodada por vez
-  if (lembretesRodando) return;
+  const provider = whatsappQr.ativo ? whatsappQr : whatsapp;
+  if (lembretesRodando || !provider.ativo) return;
   lembretesRodando = true;
   try {
     const enviados = await enviarLembretes({
-      provider: whatsapp,
-      empresa: (await getEmpresaConfig()).nomeEmpresa,
+      provider,
+      empresa: await getEmpresaConfig().then((e) => ({ nome: e.nomeEmpresa, telefone: e.telefoneContato, endereco: e.endereco, mensagens: e.mensagensLembrete })),
       agora: new Date(),
       buscar: async (de, ate) => (await prisma.agendamento.findMany({
         where: filtroLembretes(de, ate),
@@ -161,7 +164,8 @@ const lembretesWhatsapp = async () => {
     lembretesRodando = false;
   }
 };
-if (whatsapp.ativo) setInterval(lembretesWhatsapp, 10 * 60 * 1000);
+setInterval(lembretesWhatsapp, 10 * 60 * 1000);
+void retomarWhatsappQr().catch((erro) => console.error('[WHATSAPP] Não foi possível retomar a sessão do QR code:', erro instanceof Error ? erro.message : 'erro desconhecido'));
 
 // Porta definida no .env (padrão 3333)
 const PORT = config.porta;

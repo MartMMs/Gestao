@@ -9,6 +9,7 @@ import { createServicosRouter } from './routes/servicosRoutes';
 import { createEscalaRouter } from './routes/escalaRoutes';
 import { createTurnosRouter } from './routes/turnosRoutes';
 import { createRelatoriosRouter } from './routes/relatoriosRoutes';
+import { createWhatsappRouter } from './routes/whatsappRoutes';
 
 // Monta a API interna (/api). Cada módulo cuida de um assunto.
 export function createRouter(eventos: Eventos) {
@@ -25,6 +26,7 @@ export function createRouter(eventos: Eventos) {
   router.use(createEscalaRouter(() => eventos.notificarMudanca(ESCOPOS.escala)));
   router.use(createTurnosRouter(() => eventos.notificarMudanca(ESCOPOS.turnos)));
   router.use(createRelatoriosRouter());
+  router.use(createWhatsappRouter());
 
   return router;
 }

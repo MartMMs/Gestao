@@ -1,6 +1,6 @@
 # Backlog Ativo Consolidado
 
-Atualizado em: 09/04/2026
+Atualizado em: 18/11/2026
 Objetivo: manter uma fonte única de pendências abertas, em formato pronto para sprint.
 
 ## Convenções
@@ -18,7 +18,7 @@ Período sugerido: 10/04/2026 a 16/04/2026
 | Item | Objetivo | Responsável | Estimativa |
 |------|----------|-------------|------------|
 | BLG-001 | Regra final de exibição no agendamento para folga (concluído em 12/11/2026) | Produto/Supervisão + Frontend | 3h |
-| BLG-002 | Bloqueio automático/manual para colaborador em folga | Backend + Frontend | 8h |
+| BLG-002 | Bloqueio automático/manual para colaborador em folga (concluído) | Backend + Frontend | 8h |
 | BLG-003 | Feriados automáticos integrados na malha (concluído em 09/04/2026) | Backend + Frontend | 6h |
 
 Total estimado Sprint 01: 17h
@@ -49,10 +49,11 @@ Esforço agregado estimado para roadmap P2 (BLG-008 a BLG-013): 70h a 110h.
   - Critério de aceite: regra documentada e aplicada na tela de agendamento sem divergência de comportamento.
   - Fonte: RESUMO_CONSOLIDADO.md
 
-- [ ] BLG-002 - Definir e aplicar bloqueio automático/manual para colaboradores em folga na data.
+- [x] BLG-002 - Definir e aplicar bloqueio automático/manual para colaboradores em folga na data.
   - Responsável: Backend
   - Co-responsável: Frontend
   - Critério de aceite: criação de agendamento para colaborador em folga bloqueada conforme regra definida; fluxo manual disponível para supervisor quando aplicável.
+  - Evidências: o servidor recusa agendamento em folga/FDS/férias e fora do turno (`backend/services/agendaService.ts`: `mensagemIndisponibilidadeEscala`, `mensagemForaDoTurno`); bloqueio manual pela agenda (BlockModal).
   - Fonte: RESUMO_CONSOLIDADO.md
 
 - [x] BLG-003 - Integrar feriados automaticamente na malha de escalas (além do utilitário isolado).
@@ -81,6 +82,7 @@ Esforço agregado estimado para roadmap P2 (BLG-008 a BLG-013): 70h a 110h.
   - Responsável: Frontend
   - Co-responsável: Backend
   - Critério de aceite: relatórios gerados com filtros mínimos e exportação funcional para PDF e CSV.
+  - Parcial (18/11/2026): CSV do relatório financeiro (`RelatorioFinanceiroTab.tsx`) e faixa "Gargalos" na timeline (`TimelineGantt.tsx`). Falta: relatório próprio de sobrecarga/gargalos e exportação PDF.
   - Fonte: ESCALA_FEATURES.md
 
 - [ ] BLG-007 - Padronizar documentação legada para estrutura atual frontend/backend.
@@ -141,6 +143,7 @@ Esforço agregado estimado para roadmap P2 (BLG-008 a BLG-013): 70h a 110h.
   - Responsável: Backend
   - Co-responsável: Produto/Supervisão (consentimento LGPD/opt-out)
   - Critério de aceite: provedor recebe `POST {telefone, mensagem}` (`backend/services/whatsapp.ts`); confirmação do totem e lembrete 24h entregues. Pré-pronto e desligado por padrão (`WHATSAPP_WEBHOOK_URL` vazio = só log com telefone mascarado). Definir formato do telefone (+55) e opt-out antes de ligar.
+  - Parcial (18/11/2026): conexão por QR code (Baileys) só para lembretes, com limite de 40/dia, pausa de 30 a 90 s, checagem de número com WhatsApp e mensagens personalizadas com chaves (`backend/services/whatsappQr.ts`, `shared/mensagemLembrete.ts`). Falta: opt-out/consentimento do cliente (LGPD) e a API oficial.
 
 ## Itens Encerrados Nesta Consolidação
 
@@ -155,3 +158,4 @@ Esforço agregado estimado para roadmap P2 (BLG-008 a BLG-013): 70h a 110h.
 - Lista "Sem baixa" na Agenda da Recepção (13/11/2026).
 - Regra de folgas por escala no servidor (6x1: uma folga comum por semana; 5x2: dias livres) e horário de trabalho (`turnoPadrao`) no cadastro (13/11/2026).
 - 13ª rodada da banca: APROVADO PRA SUBIR 4/4 (13/11/2026).
+- BLG-002 confirmado como concluído na revisão do backlog (18/11/2026).
