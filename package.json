@@ -33,7 +33,7 @@
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
-    "express": "^4.22.1",
+    "express": "^4.22.3",
     "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.546.0",

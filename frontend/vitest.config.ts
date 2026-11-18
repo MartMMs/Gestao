@@ -12,6 +12,8 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}', '../backend/services/**/*.test.ts', '../backend/lib/**/*.test.ts'],
     clearMocks: true,
   },
+  // Os testes do backend ficam fora de frontend/: o Vite 6.4.6+ só lê arquivos permitidos (correção de segurança)
+  server: { fs: { allow: [path.resolve(__dirname, '..')] } },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
