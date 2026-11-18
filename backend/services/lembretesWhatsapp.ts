@@ -23,8 +23,18 @@ export const filtroMarcarAusencia = (agendamentoId: string, telefone: string): P
   id: agendamentoId,
   status: 'scheduled',
   clienteAvisouAusenciaEm: null,
-  cliente: { removidoEm: null, naoReceberWhatsapp: false, telefone: { in: variantesTelefone(telefone) } },
+  cliente: { removidoEm: null, naoReceberWhatsapp: false, telefone: { in: telefonesDoCliente(telefone) } },
 });
+
+/**
+ * Como o telefone do cliente pode estar gravado: com e sem máscara/DDI e, nos celulares, com e sem o 9 depois do DDD
+ * (cadastros antigos e o WhatsApp de celulares antigos usam os 8 dígitos)
+ */
+export const telefonesDoCliente = (telefone: string) => {
+  const com9 = telefoneParaResposta(telefone);
+  const sem9 = com9.length === 11 && com9[2] === '9' ? `${com9.slice(0, 2)}${com9.slice(3)}` : null;
+  return [...new Set([...variantesTelefone(com9), ...(sem9 ? variantesTelefone(sem9) : [])])];
+};
 
 const chaveDoCliente = (telefone: string | null) => chaveConfirmacao(telefoneParaResposta(telefone));
 const mensagemDoErro = (erro: unknown) => (erro instanceof Error ? erro.message : 'erro desconhecido');
@@ -77,13 +87,14 @@ export const tratarMensagemRecebida = (eventos: Eventos) => async (jid: string, 
     responder,
     agendamentoPendente: (tel) => redisService.get(chaveConfirmacao(tel)),
     esquecer: async (tel) => { await redisService.deleteKey(chaveConfirmacao(tel)); },
-    semPendencia: () => console.log(`[WHATSAPP] Resposta 1/2 de ${mascararTelefone(telefone)} sem lembrete pendente (ignorada).`),
+    semPendencia: () => console.log(`[WhatsApp Webhook] Resposta 1/2 de ${mascararTelefone(telefone)} | Agendamento encontrado: nenhum lembrete pendente (ignorada).`),
     marcarAusencia: async (agendamentoId) => {
       // Grava e lê juntos: o aviso sai com os dados do mesmo agendamento que foi marcado
       const ag = await prisma.$transaction(async (tx) => {
         const { count } = await tx.agendamento.updateMany({ where: filtroMarcarAusencia(agendamentoId, telefone), data: { clienteAvisouAusenciaEm: new Date() } });
         return count === 0 ? null : tx.agendamento.findUnique({ where: { id: agendamentoId }, select: { data: true, colaboradorId: true, cliente: { select: { nome: true } } } });
       });
+      console.log(`[WhatsApp Webhook] Resposta "Não" de ${mascararTelefone(telefone)} | Agendamento encontrado: ${ag ? agendamentoId : 'não (já cancelado, concluído, avisado ou telefone mudou)'}`);
       if (!ag) return false;
       eventos.notificarMudanca(ESCOPOS.agenda);
       eventos.avisarAusencia({ agendamentoId, cliente: ag.cliente.nome, data: diaMesDe(ag.data), horario: horaDe(ag.data), colaboradorId: ag.colaboradorId });

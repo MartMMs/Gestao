@@ -9,8 +9,8 @@ import {
 const CHAVE = ['whatsapp-mensagens'];
 type Configuracao = { mensagens: string[]; pedeConfirmacao?: boolean };
 
-// Prévia da pergunta de confirmação, no jeito de card com dois botões. No celular ela chega como texto com
-// "Responda 1 / 2" (o WhatsApp por QR code não entrega botões de forma confiável, principalmente no iPhone)
+// Prévia da pergunta de confirmação. No celular ela chega como enquete de 1 clique (botões fora da API oficial não
+// aparecem em todo aparelho, principalmente no iPhone); digitar 1 ou 2 também vale
 function CardConfirmacao() {
   return (
     <div className="mt-3 max-w-xs rounded-xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden not-italic">
@@ -104,7 +104,7 @@ export function MensagensLembreteEditor({ token }: { token: string | null }) {
             <input type="checkbox" checked={pedeConfirmacao} onChange={(e) => { salvar.reset(); setPedeConfirmacao(e.target.checked); }} className="mt-0.5 w-4 h-4 rounded" />
             <span className="text-sm text-on-surface">
               <strong>Pedir confirmação (Sim ou Não)</strong>
-              <span className="block text-xs text-on-surface-variant">O cliente responde 1 ({OPCAO_SIM}) ou 2 ({OPCAO_NAO}). Se responder Não, o agendamento mostra "Cliente não pode comparecer" e a recepção, a supervisão e o profissional são avisados. Só funciona com o número conectado por QR code.</span>
+              <span className="block text-xs text-on-surface-variant">Depois do lembrete vai uma enquete de 1 clique ({OPCAO_SIM} / {OPCAO_NAO}); responder digitando 1 ou 2 também vale. Se responder Não, o agendamento mostra "Cliente não pode comparecer" e a recepção, a supervisão e o profissional são avisados. Só funciona com o número conectado por QR code.</span>
             </span>
           </label>
           {mensagens.length === 0 && (

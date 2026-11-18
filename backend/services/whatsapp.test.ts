@@ -41,7 +41,7 @@ describe('WhatsApp', () => {
   it('lembrete com confirmação: acrescenta a pergunta 1/2 no fim', () => {
     const texto = montarLembrete({ nome: 'Spa', mensagens: ['Oi {nome}'], pedeConfirmacao: true }, ag('a'), 0);
     expect(texto.startsWith('Oi Maria\n\n*Confirmação de Agendamento*')).toBe(true);
-    expect(texto).toContain('Responda *2* para: Não poderei ir');
+    expect(texto).toContain('*2* (Não poderei ir)');
     expect(montarLembrete({ nome: 'Spa', mensagens: ['Oi {nome}'] }, ag('a'), 0)).toBe('Oi Maria');
   });
 
@@ -90,8 +90,8 @@ describe('WhatsApp', () => {
       podePerguntar: async (a) => a.id === 'livre',
       aoEnviar,
     });
-    expect(enviadas[0]).toContain('Responda *1*');
-    expect(enviadas[1]).not.toContain('Responda *1*');
+    expect(enviadas[0]).toContain('responda *1*');
+    expect(enviadas[1]).not.toContain('responda *1*');
     expect(aoEnviar.mock.calls.map(([a, perguntou]) => [a.id, perguntou])).toEqual([['livre', true], ['ocupado', false]]);
 
     // Webhook (não recebe respostas): nunca pergunta
@@ -100,7 +100,7 @@ describe('WhatsApp', () => {
       provider: { ativo: true, enviar: async (_t, m) => { enviadas.push(m); } }, empresa: { nome: 'Spa', pedeConfirmacao: true }, agora: AGORA,
       buscar: async () => [ag('x')], marcarUmaVez: async () => true,
     });
-    expect(enviadas[0]).not.toContain('Responda *1*');
+    expect(enviadas[0]).not.toContain('responda *1*');
   });
 
   it('filtro do job: só marcados na janela, sem reserva aguardando pagamento, cliente ativo e com telefone', () => {

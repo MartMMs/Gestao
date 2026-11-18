@@ -5,7 +5,7 @@
 import type { Prisma } from '@prisma/client';
 import { codigoReserva } from '../../shared/codigoReserva';
 import { diaMesDe, formatarBR, horaDe } from '../../shared/datasBR';
-import { MENSAGEM_PADRAO, TEXTO_CONFIRMACAO, preencherMensagem } from '../../shared/mensagemLembrete';
+import { MENSAGEM_PADRAO, OPCAO_NAO, OPCAO_SIM, TEXTO_CONFIRMACAO, TITULO_CONFIRMACAO, preencherMensagem } from '../../shared/mensagemLembrete';
 
 export interface WhatsappProvider {
   /** false = nada sai de verdade (modo log) */
@@ -16,6 +16,8 @@ export interface WhatsappProvider {
   podeEnviar?: () => boolean;
   /** Recebe as respostas dos clientes (só o QR code): só então o lembrete pode perguntar 1/2 */
   recebeRespostas?: boolean;
+  /** Opções clicáveis depois do lembrete (enquete); se falhar, o cliente ainda responde digitando 1 ou 2 */
+  enviarEnquete?: (telefone: string, titulo: string, opcoes: string[]) => Promise<void>;
 }
 
 const TEMPO_LIMITE_MS = 8000;
@@ -104,6 +106,10 @@ export const enviarLembretes = async (deps: {
         && (await deps.podePerguntar?.(ag) ?? true);
       await deps.provider.enviar(ag.clienteTelefone, montarLembrete({ ...deps.empresa, pedeConfirmacao: perguntar }, ag));
       enviados += 1;
+      if (perguntar && deps.provider.enviarEnquete) {
+        await deps.provider.enviarEnquete(ag.clienteTelefone, TITULO_CONFIRMACAO, [OPCAO_SIM, OPCAO_NAO])
+          .catch((erro) => deps.registrarFalha?.(ag.id, erro)); // sem enquete, o texto do lembrete já pede 1 ou 2
+      }
       await deps.aoEnviar?.(ag, perguntar);
     } catch (erro) {
       deps.registrarFalha?.(ag.id, erro);

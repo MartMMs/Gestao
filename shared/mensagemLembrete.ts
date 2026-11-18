@@ -63,11 +63,11 @@ export const validarMensagensLembrete = (mensagens: unknown): string | null => {
 };
 
 // Confirmação no lembrete. Pelo WhatsApp por QR code (não oficial) botões clicáveis não chegam de forma confiável,
-// principalmente no iPhone: a pergunta vai como texto e o cliente responde 1 ou 2 (funciona em qualquer celular)
+// principalmente no iPhone: vai uma enquete de 1 clique (aparece em qualquer celular) e a resposta digitada 1/2 também vale
 export const TITULO_CONFIRMACAO = 'Confirmação de Agendamento';
 export const OPCAO_SIM = 'Sim, confirmo';
 export const OPCAO_NAO = 'Não poderei ir';
-export const TEXTO_CONFIRMACAO = `\n\n*${TITULO_CONFIRMACAO}*\nResponda *1* para: ${OPCAO_SIM}\nResponda *2* para: ${OPCAO_NAO}`;
+export const TEXTO_CONFIRMACAO = `\n\n*${TITULO_CONFIRMACAO}*\nToque numa opção da enquete abaixo ou responda *1* (${OPCAO_SIM}) ou *2* (${OPCAO_NAO}).`;
 export const RESPOSTA_SIM = 'Obrigado! Seu horário está confirmado. Até lá!';
 export const RESPOSTA_NAO = 'Tudo bem, avisamos a equipe. Para remarcar, fale com a recepção.';
 

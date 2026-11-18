@@ -6,11 +6,15 @@
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, useMultiFileAuthState, type WASocket } from 'baileys';
+import { createHash } from 'node:crypto';
+import makeWASocket, { Browsers, DisconnectReason, decryptPollVote, fetchLatestBaileysVersion, getKeyAuthor, jidNormalizedUser, useMultiFileAuthState, type WASocket } from 'baileys';
 import QRCode from 'qrcode';
 import { normalizarTelefone } from '../../shared/validadores';
 import { diaISODe as diaBR } from '../../shared/datasBR';
 import type { WhatsappProvider } from './whatsapp';
+import { redisService } from './redisService';
+import { mascararTelefone } from '../lib/privacidade';
+import { telefoneDoWhatsapp } from '../../shared/mensagemLembrete';
 
 export const LIMITE_POR_DIA = 40;
 const PAUSA_MIN_MS = 30_000;
@@ -42,19 +46,64 @@ export const esperaAteProximo = (ultimoEnvio: number | null, agora: number, sort
 /** 11987654321 → 5511987654321@s.whatsapp.net */
 export const jidDoTelefone = (telefone: string) => `55${normalizarTelefone(telefone)}@s.whatsapp.net`;
 
-type MensagemBaileys = { key: { remoteJid?: string | null; fromMe?: boolean | null; senderPn?: string | null }; message?: { conversation?: string | null; extendedTextMessage?: { text?: string | null } | null } | null };
+type MensagemBaileys = {
+  key: { id?: string | null; remoteJid?: string | null; fromMe?: boolean | null; senderPn?: string | null; participant?: string | null };
+  message?: {
+    conversation?: string | null;
+    extendedTextMessage?: { text?: string | null } | null;
+    buttonsResponseMessage?: { selectedButtonId?: string | null } | null;
+    templateButtonReplyMessage?: { selectedId?: string | null } | null;
+    interactiveResponseMessage?: { nativeFlowResponseMessage?: { paramsJson?: string | null } | null } | null;
+    pollUpdateMessage?: { pollCreationMessageKey?: { id?: string | null } | null; vote?: { encPayload?: Uint8Array | null; encIv?: Uint8Array | null } | null } | null;
+  } | null;
+};
+
+/** Ids dos botões de resposta (se algum aparelho devolver clique de botão): viram a mesma resposta do texto */
+const RESPOSTA_DO_BOTAO: Record<string, string> = { confirmar_sim: '1', confirmar_nao: '2' };
+
+export type MensagemRecebida = {
+  // Para onde responder (o mesmo chat)
+  destino: string;
+  // Número de verdade, se já veio na mensagem (chat normal ou senderPn); null = conta "@lid" sem número: buscar no mapa
+  jid: string | null;
+  lid: string | null;
+  texto: string | null;
+  enquete: { pollId: string; vote: { encPayload: Uint8Array; encIv: Uint8Array } } | null;
+};
 
 /**
- * Mensagem que chegou: só conversa individual de outra pessoa, com texto. Contas novas do WhatsApp chegam com um id
- * "@lid"; o número de verdade vem em senderPn. `destino` é para onde responder (o mesmo chat)
+ * O que chegou numa conversa individual de outra pessoa: texto, clique de botão ou voto da enquete. Contas novas do
+ * WhatsApp chegam com o chat em "@lid"; o número vem em senderPn quando o WhatsApp manda (nem sempre manda)
  */
-export const lerMensagemRecebida = (m: MensagemBaileys): { jid: string; destino: string; texto: string } | null => {
+export const lerMensagemRecebida = (m: MensagemBaileys): MensagemRecebida | null => {
   const destino = m.key.remoteJid;
   if (!destino || m.key.fromMe) return null;
-  const jid = destino.endsWith('@lid') ? m.key.senderPn : destino;
-  if (!jid?.endsWith('@s.whatsapp.net')) return null;
-  const texto = m.message?.conversation ?? m.message?.extendedTextMessage?.text ?? '';
-  return texto ? { jid, destino, texto } : null;
+  const ehLid = destino.endsWith('@lid');
+  if (!ehLid && !destino.endsWith('@s.whatsapp.net')) return null; // grupos, status, canais
+  const jid = ehLid ? (m.key.senderPn?.endsWith('@s.whatsapp.net') ? m.key.senderPn : null) : destino;
+  const msg = m.message;
+  let botao = msg?.buttonsResponseMessage?.selectedButtonId ?? msg?.templateButtonReplyMessage?.selectedId ?? null;
+  const params = msg?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  if (!botao && params) {
+    try { botao = (JSON.parse(params) as { id?: string }).id ?? null; } catch { /* clique ilegível: ignora */ }
+  }
+  const texto = (botao && RESPOSTA_DO_BOTAO[botao]) ?? msg?.conversation ?? msg?.extendedTextMessage?.text ?? null;
+  const voto = msg?.pollUpdateMessage;
+  const enquete = voto?.pollCreationMessageKey?.id && voto.vote?.encPayload && voto.vote.encIv
+    ? { pollId: voto.pollCreationMessageKey.id, vote: { encPayload: voto.vote.encPayload, encIv: voto.vote.encIv } }
+    : null;
+  if (!texto && !enquete) return null;
+  return { destino, jid, lid: ehLid ? destino : null, texto: texto || null, enquete };
+};
+
+/** Opção escolhida na enquete: os votos vêm como sha256 do texto da opção */
+export const opcaoVotada = (selecionadas: Uint8Array[], opcoes: string[]): number | null => {
+  for (const sel of selecionadas) {
+    const hex = Buffer.from(sel).toString('hex');
+    const i = opcoes.findIndex((o) => createHash('sha256').update(o).digest('hex') === hex);
+    if (i >= 0) return i;
+  }
+  return null;
 };
 
 /** Código HTTP do erro de desconexão do Baileys (Boom.output.statusCode), sem confiar no formato */
@@ -97,6 +146,12 @@ export const estadoWhatsappQr = () => ({
 });
 
 let conectando = false;
+const PRAZO_MAPA_SEGUNDOS = 3 * 86_400;
+const chaveLid = (lid: string) => `wa-lid:${lid.split('@')[0].split(':')[0]}`;
+const chaveEnquete = (id: string) => `wa-enquete:${id}`;
+type EnqueteGuardada = { segredo: string; jid: string; opcoes: string[] };
+const log = (texto: string) => console.log(`[WhatsApp Webhook] ${texto}`);
+const mascarar = (jid: string | null) => (jid ? mascararTelefone(telefoneDoWhatsapp(jid)) ?? '?' : 'desconhecido');
 export const conectarWhatsappQr = async () => {
   // Dois cliques seguidos não podem abrir duas conexões no mesmo número
   if (sock || conectando) return;
@@ -125,17 +180,28 @@ export const conectarWhatsappQr = async () => {
   });
   sock = atual;
   atual.ev.on('creds.update', saveCreds);
+  // Ligado a cada socket novo: depois de reconectar, o socket novo recebe o mesmo tratamento
   atual.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify' || !aoReceber) return;
     for (const m of messages) {
-      const recebida = lerMensagemRecebida(m);
+      const recebida = lerMensagemRecebida(m as MensagemBaileys);
       if (!recebida) continue;
-      const { jid, destino, texto } = recebida;
-      await aoReceber(jid, texto, async (resposta) => {
-        // Pausa curta de pessoa digitando antes de responder
-        await new Promise((r) => setTimeout(r, 2000 + Math.random() * 3000));
-        await sock?.sendMessage(destino, { text: resposta });
-      }).catch((erro) => console.error('[WHATSAPP] Falha ao tratar resposta:', erro instanceof Error ? erro.message : 'erro desconhecido'));
+      try {
+        // "@lid" sem número: usa o mapa gravado quando o lembrete foi enviado para esse contato
+        const jid = recebida.jid ?? (recebida.lid ? await redisService.get(chaveLid(recebida.lid)) : null);
+        let texto = recebida.texto;
+        if (recebida.enquete) texto = await lerVoto(atual, m as MensagemBaileys, recebida.enquete, jid);
+        log(`Mensagem recebida de ${mascarar(jid)}${recebida.lid ? ' (conta @lid)' : ''} | Texto extraído: ${texto ? JSON.stringify(texto.slice(0, 40)) : '(nenhum)'}`);
+        if (!jid) { log('Sem número do remetente (conta @lid sem lembrete enviado por este servidor): ignorada.'); continue; }
+        if (!texto) continue;
+        await aoReceber(jid, texto, async (resposta) => {
+          // Pausa curta de pessoa digitando antes de responder
+          await new Promise((r) => setTimeout(r, 2000 + Math.random() * 3000));
+          await sock?.sendMessage(recebida.destino, { text: resposta });
+        });
+      } catch (erro) {
+        console.error('[WhatsApp Webhook] Falha ao tratar resposta:', erro instanceof Error ? erro.message : 'erro desconhecido');
+      }
     }
   });
   atual.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
@@ -177,6 +243,27 @@ export const conectarWhatsappQr = async () => {
   });
 };
 
+// Baileys 6.7.23 não decodifica votos sozinho (o trecho dele está desligado): o segredo da enquete foi guardado no envio
+export async function lerVoto(atual: Pick<WASocket, 'user'>, m: MensagemBaileys, enquete: NonNullable<MensagemRecebida['enquete']>, jid: string | null): Promise<string | null> {
+  const bruto = await redisService.get(chaveEnquete(enquete.pollId));
+  if (!bruto) { log(`Voto numa enquete desconhecida (${enquete.pollId}): ignorado.`); return null; }
+  const guardada = JSON.parse(bruto) as EnqueteGuardada;
+  const eu = [atual.user?.id, (atual.user as { lid?: string } | undefined)?.lid].filter(Boolean).map((j) => jidNormalizedUser(j!));
+  // Quem vota pode estar identificado pelo número ou pelo @lid: tenta as combinações até a chave abrir
+  const votantes = [...new Set([getKeyAuthor(m.key as never, eu[0]), m.key.senderPn, jid, guardada.jid].filter(Boolean) as string[])];
+  for (const criador of eu) {
+    for (const votante of votantes) {
+      try {
+        const voto = decryptPollVote(enquete.vote, { pollEncKey: Buffer.from(guardada.segredo, 'base64'), pollCreatorJid: criador, pollMsgId: enquete.pollId, voterJid: votante });
+        const i = opcaoVotada(voto.selectedOptions ?? [], guardada.opcoes);
+        return i === null ? null : String(i + 1);
+      } catch { /* combinação errada: tenta a próxima */ }
+    }
+  }
+  log('Não foi possível ler o voto da enquete.');
+  return null;
+}
+
 export const desconectarWhatsappQr = async () => {
   const atual = sock;
   sock = null;
@@ -208,5 +295,20 @@ export const whatsappQr: WhatsappProvider = {
     if (!existe?.exists) throw new Error('Número sem WhatsApp.');
     await sock.sendMessage(existe.jid, { text: mensagem });
     contador.registrar();
+    if (typeof existe.lid === 'string' && existe.lid) await redisService.set(chaveLid(existe.lid), existe.jid, PRAZO_MAPA_SEGUNDOS);
+  },
+  // Enquete de 1 clique logo depois do lembrete (aparece em qualquer Android/iPhone, ao contrário de botões fora da API oficial)
+  enviarEnquete: async (telefone, titulo, opcoes) => {
+    if (!sock || status !== 'conectado') throw new Error('WhatsApp desconectado.');
+    const jid = jidDoTelefone(telefone);
+    const existe = (await sock.onWhatsApp(jid))?.[0];
+    if (!existe?.exists) throw new Error('Número sem WhatsApp.');
+    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1500));
+    const enviada = await sock.sendMessage(existe.jid, { poll: { name: titulo, values: opcoes, selectableCount: 1 } });
+    const segredo = enviada?.message?.messageContextInfo?.messageSecret;
+    if (!enviada?.key.id || !segredo) throw new Error('Enquete enviada sem chave para ler o voto.');
+    const guardada: EnqueteGuardada = { segredo: Buffer.from(segredo).toString('base64'), jid: existe.jid, opcoes };
+    await redisService.set(chaveEnquete(enviada.key.id), JSON.stringify(guardada), PRAZO_MAPA_SEGUNDOS);
+    log(`Enquete de confirmação enviada para ${mascarar(existe.jid)}.`);
   },
 };
