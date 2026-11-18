@@ -157,6 +157,7 @@ export const fetchApi = async (url: string, token: string | null, options: Reque
 };
 
 interface BackendAppointment {
+  clienteAvisouAusenciaEm?: string | null;
   id: string | number;
   data?: string;
   date?: string;
@@ -283,6 +284,7 @@ const normalizeAppointment = (appointment: BackendAppointment): Appointment => {
     valorTotal: typeof appointment.valorTotal === 'number' ? appointment.valorTotal : undefined,
     clientCode: typeof appointment.cliente?.codigo === 'number' ? appointment.cliente.codigo : undefined,
     version: appointment.atualizadoEm,
+    clienteAvisouAusencia: Boolean(appointment.clienteAvisouAusenciaEm),
   };
 };
 
@@ -453,7 +455,11 @@ export const useAddAppointment = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: NewAppointmentPayload) => fetchApi('/agendamentos', token, { method: 'POST', body: JSON.stringify(data) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+    // Agendar pode criar o cliente ou gravar a ficha: a lista de clientes não depende só do aviso em tempo real
+    onSuccess: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['appointments'] }),
+      queryClient.invalidateQueries({ queryKey: ['clients'] }),
+    ])
   });
 };
 
@@ -567,7 +573,10 @@ export const useEditAppointment = (token: string | null) => {
   return useMutation({
     mutationFn: (data: EditAppointmentPayload) => fetchApi(`/agendamentos/${data.id}`, token, { method: 'PUT', body: JSON.stringify(data) }),
     // Também no erro: num conflito (409) a agenda passa a mostrar a versão atual, e a próxima tentativa já parte dela
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+    onSettled: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['appointments'] }),
+      queryClient.invalidateQueries({ queryKey: ['clients'] }),
+    ])
   });
 };
 
@@ -859,7 +868,7 @@ export const useClients = (token: string | null) => useQuery<Client[]>({
   enabled: !!token,
 });
 
-export type NovoCliente = { nome: string; telefone?: string; cpf?: string; email?: string; observacao?: string };
+export type NovoCliente = { nome: string; telefone?: string; cpf?: string; email?: string; observacao?: string; naoReceberWhatsapp?: boolean };
 export type PreviaImportacao = { total: number; validos: number; erros: { linha: number; mensagem: string }[]; ignoradas?: number; importados?: number };
 
 export const useCreateClient = (token: string | null) => {

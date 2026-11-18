@@ -181,7 +181,7 @@ export function RelatorioFinanceiroTab() {
             );
           })}
           </div>
-          <div className="flex items-end gap-3 shrink-0 whitespace-nowrap">
+          <div className="flex flex-wrap items-end gap-3">
           <label className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">
             De
             <input type="date" value={periodo.de} max={periodo.ate} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, de: e.target.value }))} className="block mt-1 h-10 bg-surface-container-lowest border border-outline-variant/20 rounded-xl px-2 text-sm normal-case" />

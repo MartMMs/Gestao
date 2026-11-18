@@ -4,14 +4,18 @@
 
 import type { Prisma } from '@prisma/client';
 import { codigoReserva } from '../../shared/codigoReserva';
-import { preencherMensagem } from '../../shared/mensagemLembrete';
+import { diaMesDe, formatarBR, horaDe } from '../../shared/datasBR';
+import { MENSAGEM_PADRAO, TEXTO_CONFIRMACAO, preencherMensagem } from '../../shared/mensagemLembrete';
 
 export interface WhatsappProvider {
   /** false = nada sai de verdade (modo log) */
   ativo: boolean;
+  // Pode demorar: o WhatsApp por QR espera 30 a 90 s desde o envio anterior (anti-bloqueio). Quem chama roda uma rodada por vez
   enviar: (telefone: string, mensagem: string) => Promise<void>;
   /** false = parar a rodada antes de marcar o próximo (ex.: limite diário do WhatsApp por QR) */
   podeEnviar?: () => boolean;
+  /** Recebe as respostas dos clientes (só o QR code): só então o lembrete pode perguntar 1/2 */
+  recebeRespostas?: boolean;
 }
 
 const TEMPO_LIMITE_MS = 8000;
@@ -37,36 +41,35 @@ export const criarWhatsappLog = (mascarar: (telefone: string) => string, log: (t
 /** Por rodada do job: o que passar fica para a próxima (10 min depois), já que os enviados são marcados */
 export const LIMITE_LEMBRETES_POR_RODADA = 200;
 
-/** Quem recebe lembrete: marcado, na janela, sem reserva aguardando pagamento e com cliente não removido (LGPD) */
+/** Quem recebe lembrete: marcado, na janela, sem reserva aguardando pagamento, cliente não removido e sem opt-out (LGPD) */
 export const filtroLembretes = (de: Date, ate: Date): Prisma.AgendamentoWhereInput => ({
   status: 'scheduled',
   data: { gte: de, lte: ate },
   statusPagamento: { not: 'aguardando_pagamento' },
-  cliente: { removidoEm: null, telefone: { not: null } },
+  cliente: { removidoEm: null, telefone: { not: null }, naoReceberWhatsapp: false },
 });
 
 export type AgendamentoParaLembrete = { id: string; data: Date; clienteNome: string; clienteTelefone: string | null };
 
-const formatar = (data: Date, opcoes: Intl.DateTimeFormatOptions) => data.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', ...opcoes });
 
-export type EmpresaDoLembrete = { nome: string; telefone?: string | null; endereco?: string | null; mensagens?: string[] };
+export type EmpresaDoLembrete = { nome: string; telefone?: string | null; endereco?: string | null; mensagens?: string[]; pedeConfirmacao?: boolean };
 
 // Sem nome de serviço nem dado de saúde: a mensagem pode ser lida por quem pegar o celular. Com mensagens da casa,
 // sorteia uma (variar o texto também ajuda o número a não ser bloqueado)
-export const montarLembrete = (empresa: string | EmpresaDoLembrete, ag: AgendamentoParaLembrete, sorteio = Math.random()) => {
-  const dadosEmpresa = typeof empresa === 'string' ? { nome: empresa } : empresa;
+export const montarLembrete = (empresa: EmpresaDoLembrete, ag: AgendamentoParaLembrete, sorteio = Math.random()) =>
+  textoDoLembrete(empresa, ag, sorteio) + (empresa.pedeConfirmacao === true ? TEXTO_CONFIRMACAO : '');
+
+const textoDoLembrete = (dadosEmpresa: EmpresaDoLembrete, ag: AgendamentoParaLembrete, sorteio: number) => {
   const primeiroNome = ag.clienteNome.trim().split(/\s+/)[0] || ag.clienteNome;
-  const data = formatar(ag.data, { day: '2-digit', month: '2-digit' });
-  const horario = formatar(ag.data, { hour: '2-digit', minute: '2-digit' });
-  const modelos = dadosEmpresa.mensagens?.filter((m) => m.trim()) ?? [];
-  if (!modelos.length) {
-    return `*${dadosEmpresa.nome}*\nOlá, ${primeiroNome}! Lembrete do seu horário em ${data} às ${horario}. Se não puder vir, avise a recepção.`;
-  }
+  const data = diaMesDe(ag.data);
+  const horario = horaDe(ag.data);
+  const escritas = dadosEmpresa.mensagens?.filter((m) => m.trim()) ?? [];
+  const modelos = escritas.length ? escritas : [MENSAGEM_PADRAO];
   return preencherMensagem(modelos[Math.floor(sorteio * modelos.length) % modelos.length], {
     nome: primeiroNome,
     data,
     horario,
-    'dia da semana': formatar(ag.data, { weekday: 'long' }),
+    'dia da semana': formatarBR(ag.data, { weekday: 'long' }),
     'numero da reserva': codigoReserva(ag.id),
     'nome da empresa': dadosEmpresa.nome,
     'telefone da empresa': dadosEmpresa.telefone ?? '',
@@ -78,11 +81,16 @@ export const montarLembrete = (empresa: string | EmpresaDoLembrete, ag: Agendame
 // (Redis SET NX), então rodar o job de novo, ou em duas instâncias, não manda duas vezes.
 export const enviarLembretes = async (deps: {
   provider: WhatsappProvider;
-  empresa: string | EmpresaDoLembrete;
+  empresa: EmpresaDoLembrete;
   agora: Date;
   buscar: (de: Date, ate: Date) => Promise<AgendamentoParaLembrete[]>;
   marcarUmaVez: (agendamentoId: string) => Promise<boolean>;
   registrarFalha?: (agendamentoId: string, erro: unknown) => void;
+  // Com a confirmação ligada (empresa.pedeConfirmacao): se ESTE lembrete leva a pergunta 1/2 (ex.: não, quando o
+  // número já espera resposta de outro atendimento: um "2" não pode valer para dois)
+  podePerguntar?: (ag: AgendamentoParaLembrete) => Promise<boolean>;
+  // Lembrete entregue; `perguntou` = foi com a pergunta 1/2 (guardar o número para ligar a resposta ao agendamento)
+  aoEnviar?: (ag: AgendamentoParaLembrete, perguntou: boolean) => Promise<void>;
 }) => {
   const de = new Date(deps.agora.getTime() + 2 * 3_600_000);
   const ate = new Date(deps.agora.getTime() + 24 * 3_600_000);
@@ -92,8 +100,11 @@ export const enviarLembretes = async (deps: {
     if (deps.provider.podeEnviar && !deps.provider.podeEnviar()) break;
     if (!(await deps.marcarUmaVez(ag.id))) continue;
     try {
-      await deps.provider.enviar(ag.clienteTelefone, montarLembrete(deps.empresa, ag));
+      const perguntar = deps.empresa.pedeConfirmacao === true && deps.provider.recebeRespostas === true
+        && (await deps.podePerguntar?.(ag) ?? true);
+      await deps.provider.enviar(ag.clienteTelefone, montarLembrete({ ...deps.empresa, pedeConfirmacao: perguntar }, ag));
       enviados += 1;
+      await deps.aoEnviar?.(ag, perguntar);
     } catch (erro) {
       deps.registrarFalha?.(ag.id, erro);
     }

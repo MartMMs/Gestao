@@ -10,7 +10,7 @@ import { ModalFormulario } from '../../../components/ModalFormulario';
 import { fichaOculta, formatAnamneseStorage, hasAnamnese, parseClientObservation } from '../../../utils/anamneseUtils';
 import { FichaAnamneseModal } from '../../../components/FichaAnamneseModal';
 import { AvisoCliente } from '../../../components/AvisoCliente';
-import { MENSAGEM_ANAMNESE_OBRIGATORIA } from '@shared/anamnese';
+import { MENSAGEM_ANAMNESE_OBRIGATORIA, linhasDoTotem } from '@shared/anamnese';
 import { useAuth } from '../../../AuthContext';
 import { formatPhone, formatCpf, atendeNaAgenda } from '../../../utils/formatters';
 import { useFormDraft } from '../../../hooks/useFormDraft';
@@ -727,7 +727,15 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
           onClose={() => setVerFicha(false)}
         />
       )}
-      {showAnamnese && <AnamneseForm data={anamneseData} onChange={setAnamneseData} onClose={() => setShowAnamnese(false)} />}
+      {showAnamnese && (
+        <AnamneseForm
+          data={anamneseData}
+          onChange={setAnamneseData}
+          onClose={() => setShowAnamnese(false)}
+          declaracoesTotem={linhasDoTotem(bookClientObservation)}
+          fichaRestrita={Boolean(clienteEscolhido && fichaOculta(clienteEscolhido)) && !hasAnamnese(anamneseData)}
+        />
+      )}
     </>
   );
 }

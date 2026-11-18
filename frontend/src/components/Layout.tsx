@@ -30,32 +30,7 @@ const VISOES_POR_PAPEL: Record<Role, Array<[Role | 'tv' | 'autoatendimento', str
 };
 
 export function Layout({ children, userName, userRole, activeView, onViewChange, onOpenUpcomingAppointments, upcomingAppointmentsCount = 0, cltAlertsCount = 0, onOpenCltAlerts, onLogout, isDarkMode, toggleTheme, companyName, companyIcon }: LayoutProps) {
-  const [showSettings, setShowSettings] = useState(false);
-  const settingsRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
   const hasCltAlerts = cltAlertsCount > 0;
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      // Se o menu estiver aberto e o clique não foi no menu nem no botão que o abre, fecha o menu
-      if (
-        showSettings &&
-        settingsRef.current && !settingsRef.current.contains(event.target as Node) &&
-        buttonRef.current && !buttonRef.current.contains(event.target as Node)
-      ) {
-        setShowSettings(false);
-      }
-    }
-    
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showSettings]);
-
-  // Função simples para manipular variáveis CSS caso você as use no Tailwind/CSS nativo
-  const changePrimaryColor = (colorHex: string) => {
-    // Só a cor da marca: o index.css deriva os demais tons (claro e escuro) a partir dela
-    document.documentElement.style.setProperty('--brand', colorHex);
-  };
 
   return (
     <div translate="no" className="notranslate min-h-screen flex flex-col bg-surface text-on-surface font-body antialiased transition-colors duration-300">
@@ -114,17 +89,6 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
                 </AnimatePresence>
               </button>
             )}
-            {/* Exibe a paleta de cores APENAS se o usuário for Supervisor */}
-            {userRole === 'supervisor' && (
-              <button 
-                ref={buttonRef}
-                onClick={() => setShowSettings(!showSettings)} 
-                className="text-on-surface-variant hover:bg-surface-container hover:text-primary w-10 h-10 flex items-center justify-center rounded-full transition-all" 
-                title="Estilo e Cores"
-              >
-                <span className="material-symbols-outlined">palette</span>
-              </button>
-            )}
             {userRole === 'supervisor' && activeView === 'supervisor' && onOpenCltAlerts && (
               <button
                 onClick={onOpenCltAlerts}
@@ -155,33 +119,6 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
         </div>
       </header>
 
-      <AnimatePresence>
-        {showSettings && (
-          <motion.div 
-            ref={settingsRef}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="bg-surface-container-low border-b border-outline-variant/20 px-4 sm:px-8 py-5 flex flex-col sm:flex-row sm:flex-wrap items-center gap-4 justify-between overflow-hidden"
-          >
-            <div className="text-left">
-              <h4 className="text-sm font-bold text-primary uppercase tracking-widest">Estilo da Clínica</h4>
-              <p className="text-xs text-on-surface-variant">Selecione o tom principal da sua marca.</p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              {['#006a5a', '#b71c1c', '#0d47a1', '#e65100', '#4a148c', '#424242', '#0ea5e9', '#10b981', '#f43f5e', '#d946ef', '#8b5cf6', '#f59e0b'].map(color => (
-                <button
-                  key={color}
-                  onClick={() => changePrimaryColor(color)}
-                  className="w-10 h-10 rounded-full border-2 border-surface shadow-sm transition-transform hover:scale-110 focus:ring-2 focus:ring-offset-2"
-                  style={{ backgroundColor: color }}
-                  title={color}
-                ></button>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <main className="grow flex flex-col items-center px-4 py-12 md:py-16">
         {children}

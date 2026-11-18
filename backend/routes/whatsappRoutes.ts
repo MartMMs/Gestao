@@ -1,6 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { usuarioEhAdmin, verificarSupervisorToken } from '../auth';
 import { registrarAuditoria } from '../lib/auditoria';
+import { responderErro } from '../lib/http';
 import { prisma } from '../db';
 import { getEmpresaConfig } from '../services/configService';
 import { validarMensagensLembrete } from '../../shared/mensagemLembrete';
@@ -27,23 +28,41 @@ export function createWhatsappRouter() {
   });
 
   router.post('/whatsapp/qr/desconectar', verificarSupervisorToken, apenasAdmin, async (req, res) => {
-    await desconectarWhatsappQr();
-    await registrarAuditoria(req, { acao: 'whatsapp.desconectar', alvo: 'WhatsApp', antes: { conectado: true }, depois: { conectado: false } });
-    res.json(estadoWhatsappQr());
+    try {
+      await desconectarWhatsappQr();
+      await registrarAuditoria(req, { acao: 'whatsapp.desconectar', alvo: 'WhatsApp', antes: { conectado: true }, depois: { conectado: false } });
+      res.json(estadoWhatsappQr());
+    } catch (error) {
+      responderErro(res, error, 'Não foi possível desconectar o WhatsApp. Tente de novo.');
+    }
   });
 
   router.get('/whatsapp/mensagens', verificarSupervisorToken, apenasAdmin, async (_req, res) => {
-    res.json({ mensagens: (await getEmpresaConfig()).mensagensLembrete });
+    try {
+      const empresa = await getEmpresaConfig();
+      res.json({ mensagens: empresa.mensagensLembrete, pedeConfirmacao: empresa.lembretePedeConfirmacao });
+    } catch (error) {
+      responderErro(res, error, 'Erro ao buscar as mensagens do lembrete');
+    }
   });
 
   router.put('/whatsapp/mensagens', verificarSupervisorToken, apenasAdmin, async (req, res) => {
-    const erro = validarMensagensLembrete(req.body?.mensagens);
-    if (erro) return res.status(400).json({ erro });
-    const mensagens = (req.body.mensagens as string[]).map((m) => m.trim());
-    const antes = (await getEmpresaConfig()).mensagensLembrete;
-    await prisma.configuracaoEmpresa.update({ where: { id: 'default' }, data: { mensagensLembrete: mensagens } });
-    await registrarAuditoria(req, { acao: 'whatsapp.mensagens', alvo: 'Lembretes do WhatsApp', antes: { quantidade: antes.length }, depois: { quantidade: mensagens.length } });
-    res.json({ mensagens });
+    try {
+      const erro = validarMensagensLembrete(req.body?.mensagens);
+      if (erro) return res.status(400).json({ erro });
+      const mensagens = (req.body.mensagens as string[]).map((m) => m.trim());
+      const antes = await getEmpresaConfig();
+      const pedeConfirmacao = req.body.pedeConfirmacao === true;
+      await prisma.configuracaoEmpresa.update({ where: { id: 'default' }, data: { mensagensLembrete: mensagens, lembretePedeConfirmacao: pedeConfirmacao } });
+      await registrarAuditoria(req, {
+        acao: 'whatsapp.mensagens', alvo: 'Lembretes do WhatsApp',
+        antes: { quantidade: antes.mensagensLembrete.length, pedeConfirmacao: antes.lembretePedeConfirmacao },
+        depois: { quantidade: mensagens.length, pedeConfirmacao },
+      });
+      res.json({ mensagens, pedeConfirmacao });
+    } catch (error) {
+      responderErro(res, error, 'Erro ao salvar as mensagens do lembrete');
+    }
   });
 
   return router;

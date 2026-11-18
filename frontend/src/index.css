@@ -121,8 +121,13 @@
 ::-webkit-scrollbar-thumb { background: var(--color-outline-variant); border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-outline); }
 
-/* Paleta escolhida pelo supervisor (--brand no <html>): deriva todos os tons de "primary", inclusive no modo escuro */
+/* Destaque do painel da TV (fundo sempre escuro): o verde original, ou um tom claro da cor escolhida pelo admin */
+:root { --tv-acento: #afefdd; --tv-fundo: #001410; }
+
+/* Cor escolhida pelo admin (--brand no <html>): deriva todos os tons de "primary", inclusive no modo escuro */
 :root[style*="--brand"] {
+  --tv-acento: color-mix(in oklab, var(--brand) 40%, white);
+  --tv-fundo: color-mix(in oklab, var(--brand) 12%, #050505);
   --color-primary: var(--brand);
   --color-primary-dim: color-mix(in oklab, var(--brand) 80%, black);
   --color-primary-container: color-mix(in oklab, var(--brand) 20%, white);

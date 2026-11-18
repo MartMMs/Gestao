@@ -48,6 +48,8 @@ model Cliente {
   observacao   String?
   // Preenchido quando o cliente é excluído mas tem histórico: os dados pessoais são apagados e os atendimentos ficam
   removidoEm   DateTime?
+  // LGPD: cliente pediu para não receber lembretes no WhatsApp
+  naoReceberWhatsapp Boolean @default(false)
   agendamentos Agendamento[]
 }
 
@@ -104,6 +106,8 @@ model Agendamento {
   lockExpiresAt    DateTime?
   reservaOrigem    String?     @default("interno")
   observacoesSaude String?
+  // Cliente respondeu "Não poderei ir" ao lembrete do WhatsApp (o agendamento continua; a equipe decide)
+  clienteAvisouAusenciaEm DateTime?
   atualizadoEm     DateTime    @default(now()) @updatedAt
   // Reserva do totem que originou o agendamento (garante uma confirmação por reserva)
   reservaToken     String?     @unique
@@ -209,6 +213,8 @@ model ConfiguracaoEmpresa {
   diasFuncionamento     Int[]    @default([0, 1, 2, 3, 4, 5, 6])
   // Lembretes de WhatsApp escritos pela casa, com chaves ({nome}, {horario}...). Vazio = mensagem padrão; várias = sorteia
   mensagensLembrete     String[] @default([])
+  // Lembrete pergunta "1 = Sim, confirmo / 2 = Não poderei ir" (respostas lidas pelo WhatsApp por QR code)
+  lembretePedeConfirmacao Boolean @default(false)
   atualizadoEm         DateTime @updatedAt
 }
 // Trilha de auditoria: cada abertura do histórico (com dados de saúde) de um cliente.

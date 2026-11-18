@@ -347,6 +347,11 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
                 </div>
               </div>
               <h5 className={`font-bold text-on-surface text-[11px] leading-tight mt-0.5 break-words ${height > 52 ? 'line-clamp-2' : 'truncate'}`} title={app.clientName}>{app.clientName}</h5>
+              {app.clienteAvisouAusencia && app.status === 'scheduled' && (
+                <span className="inline-block mt-0.5 rounded-full bg-error/10 px-1.5 text-[10px] font-bold uppercase tracking-wide text-error" title="O cliente respondeu ao lembrete do WhatsApp que não poderá vir">
+                  Cliente não pode comparecer
+                </span>
+              )}
               {app.aguardandoCheckin && app.status === 'scheduled' && (
                 <span className="inline-block mt-0.5 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-700" title="Reserva do totem: abra o agendamento e confirme a chegada do cliente para liberar a ficha">
                   Totem · confirmar chegada

@@ -13,6 +13,7 @@ import { SupervisorClientesTab } from '../features/clients/components';
 import { SupervisorEquipeTab } from '../features/team/components';
 import { SupervisorEscalaTab } from '../features/scale/components';
 import { ModuloRH, SupervisorPlanejamentoTab } from '../features/planning/components';
+import { periodosDeAusencia } from '../features/planning/utils/ausencias';
 import { usePlanejamentoEscala, type ScaleOverridePayload } from '../features/planning/hooks/usePlanejamentoEscala';
 import { SupervisorServicosTab } from '../features/services/components';
 import { AutoatendimentoAdminTab } from '../features/autoatendimento/components';
@@ -194,6 +195,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
     setEmployeeSearchTerm,
     planningOverridesList,
     cltRealtimeAlerts,
+    ajustesSalvos,
   } = planejamento;
 
   // Função para formatar minutos em texto legível (ex: 1h 30m)
@@ -462,6 +464,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
           planejamento={planejamento}
           onSaveScaleOverride={onSaveScaleOverride}
           onReplicateScaleDays={onReplicateScaleDays}
+          onSwapScaleDays={onSwapScaleDays}
         >
           <SupervisorPlanejamentoTab
             {...planejamento}
@@ -622,7 +625,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                   <img src={viewingEmployee.avatar} alt={viewingEmployee.name} className="w-16 h-16 rounded-full object-cover border-2 border-primary/20" />
                   <div>
                     <h2 className="text-xl font-headline text-primary mb-1">{viewingEmployee.name}</h2>
-                    <p className="text-xs text-on-surface-variant">{viewingEmployee.specialty} • {viewingEmployee.email}</p>
+                    <p className="text-xs text-on-surface-variant">{[viewingEmployee.specialty, viewingEmployee.usuario, viewingEmployee.email].filter(Boolean).join(' • ')}</p>
                   </div>
                 </div>
                 <button onClick={() => setViewingEmployee(null)} className="p-2 hover:bg-surface-container rounded-full text-on-surface-variant transition-colors">
@@ -757,13 +760,17 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
             </div>
           )}
 
-          {viewingEmployeeTab === 'ocorrencias' && (
+          {viewingEmployeeTab === 'ocorrencias' && (() => {
+            // Bloqueios da agenda e férias/atestado/afastamento do Módulo RH (gravados na escala)
+            const ausencias = periodosDeAusencia(ajustesSalvos.values(), new Map([[viewingEmployee.id, viewingEmployee.name]]));
+            const total = (viewingEmployee.bloqueios?.length || 0) + ausencias.length;
+            return (
             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-lg font-headline text-primary">Histórico de Ocorrências</h3>
-                <span className="text-xs text-on-surface-variant bg-surface-container px-3 py-1 rounded-full font-bold uppercase tracking-widest">{viewingEmployee.bloqueios?.length || 0} registros</span>
+                <span className="text-xs text-on-surface-variant bg-surface-container px-3 py-1 rounded-full font-bold uppercase tracking-widest">{total} registros</span>
               </div>
-              {(!viewingEmployee.bloqueios || viewingEmployee.bloqueios.length === 0) ? (
+              {total === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center border border-outline-variant/20 rounded-2xl border-dashed">
                   <span className="material-symbols-outlined text-4xl text-outline-variant mb-2">task_alt</span>
                   <p className="text-sm font-bold text-on-surface-variant">Dossiê Limpo</p>
@@ -771,7 +778,23 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {viewingEmployee.bloqueios.map(bloq => (
+                  {ausencias.map((p) => (
+                    <div key={`${p.motivo}:${p.inicio}`} className="flex items-center justify-between bg-surface-container-lowest p-4 rounded-2xl border border-outline-variant/20 shadow-sm">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center bg-secondary-container text-secondary">
+                          <span className="material-symbols-outlined" aria-hidden="true">beach_access</span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-on-surface">{p.motivo}</p>
+                          <p className="text-xs text-on-surface-variant mt-0.5">Registrado no Módulo RH</p>
+                        </div>
+                      </div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-on-surface text-right">
+                        {p.inicio.split('-').reverse().join('/')}{p.fim !== p.inicio ? ` a ${p.fim.split('-').reverse().join('/')}` : ''}
+                      </p>
+                    </div>
+                  ))}
+                  {(viewingEmployee.bloqueios ?? []).map(bloq => (
                     <div key={bloq.id} className="flex items-center justify-between bg-surface-container-lowest p-4 rounded-2xl border border-outline-variant/20 shadow-sm">
                       <div className="flex items-center gap-4">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center ${bloq.motivo.toLowerCase().includes('falta') ? 'bg-error/10 text-error' : 'bg-secondary-container text-secondary'}`}>
@@ -790,7 +813,8 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                 </div>
               )}
             </div>
-          )}
+            );
+          })()}
             </motion.div>
           </div>
         )}

@@ -26,6 +26,16 @@ export const turnoDoDia = (dia?: DiaEscala | null): string | undefined => {
   return dia.turno && TURNO_REGEX.test(dia.turno) ? dia.turno : undefined;
 };
 
+/**
+ * Retrato do dia enviado na troca e na replicação de escala: o servidor confere com o que está gravado. Um lugar só
+ * (grade e "Folgas da equipe"): se divergir, a troca vira 409 ou grava errado
+ */
+export const retratoDoDia = (colaboradorId: string, dia: DiaEscala, ajustesSalvos: ReadonlyMap<string, { descricao?: string | null }>) => ({
+  tipo: dia.tipo,
+  turno: dia.tipo === 'trabalho' ? turnoDoDia(dia) : undefined,
+  descricao: ajustesSalvos.get(`${colaboradorId}:${dia.data}`)?.descricao ?? undefined,
+});
+
 /** Período do turno pela hora de início; "comercial" é o turno da manhã que vai até o fim da tarde (17h ou depois) */
 export const categoriaDoTurno = (turno?: string | null): CategoriaTurno | null => {
   const inicio = horaInicialDoTurno(turno);

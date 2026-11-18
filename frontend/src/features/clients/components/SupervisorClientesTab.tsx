@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { Appointment, Client, Service } from '../../../types';
 import { AnamneseForm, AnamneseData } from '../../../components/AnamneseForm';
 import { fichaOculta, formatAnamneseStorage, parseClientObservation } from '../../../utils/anamneseUtils';
+import { linhasDoTotem } from '@shared/anamnese';
 import { useSearch } from '../../../hooks/useSearch';
 import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
@@ -43,7 +44,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
   const [clientToDelete, setClientToDelete] = useState<string | null>(null);
   // Só o id: a ficha aberta acompanha a lista quando ela recarrega (alteração feita em outro aparelho)
   const [fichaClientId, setFichaClientId] = useState<string | null>(null);
-  const [editingAnamneseClient, setEditingAnamneseClient] = useState<{ id: string; name: string; note: string; data: AnamneseData } | null>(null);
+  const [editingAnamneseClient, setEditingAnamneseClient] = useState<{ id: string; name: string; note: string; data: AnamneseData; restrita?: boolean } | null>(null);
   const [historyClient, setHistoryClient] = useState<Client | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | '7days' | 'month'>('all');
   const [abertoNovo, setAbertoNovo] = useState(false);
@@ -153,8 +154,9 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
       const payload: Partial<Client> = somenteAnamnese
         ? { observacao: finalObservation }
         : ehRecepcao
-          ? { telefone: editingClient.telefone }
+          ? { telefone: editingClient.telefone, naoReceberWhatsapp: editingClient.naoReceberWhatsapp === true }
           : {
+            naoReceberWhatsapp: editingClient.naoReceberWhatsapp === true,
             nome: editingClient.nome,
             telefone: editingClient.telefone,
             cpf: editingClient.cpf,
@@ -435,6 +437,12 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                   />
                 </div>
               )}
+              {!somenteAnamnese && (
+                <label className="flex items-center gap-2 text-sm text-on-surface">
+                  <input type="checkbox" checked={editingClient.naoReceberWhatsapp === true} onChange={(e) => setEditingClient({ ...editingClient, naoReceberWhatsapp: e.target.checked })} className="w-4 h-4 rounded" />
+                  Não quer receber lembretes no WhatsApp
+                </label>
+              )}
               {!ehRecepcao && (
                 <>
                   <div>
@@ -489,7 +497,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
           // Supervisão/profissional autorizado ou recepção (atualização cega no balcão)
           onEditar={onEditClient && (fichaClient.acessoSaude || ehRecepcao) ? () => {
             const parsed = parseClientObservation(fichaClient.observacao);
-            setEditingAnamneseClient({ id: fichaClient.id, name: fichaClient.nome, note: parsed.note, data: parsed.anamData });
+            setEditingAnamneseClient({ id: fichaClient.id, name: fichaClient.nome, note: parsed.note, data: parsed.anamData, restrita: fichaOculta(fichaClient) });
             setFichaClientId(null);
           } : undefined}
           onClose={() => setFichaClientId(null)}
@@ -503,6 +511,8 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
           onClose={handleSaveAnamnese}
           onCancel={() => setEditingAnamneseClient(null)}
           salvando={isSaving}
+          declaracoesTotem={linhasDoTotem(editingAnamneseClient.note)}
+          fichaRestrita={editingAnamneseClient.restrita}
         />
       )}
 

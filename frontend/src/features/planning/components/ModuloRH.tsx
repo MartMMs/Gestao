@@ -1,5 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
-import type { ScaleOverridePayload, ScaleReplicatePayload } from '../../../api';
+import type { ScaleOverridePayload, ScaleReplicatePayload, ScaleSwapPayload } from '../../../api';
+import { FolgasDaEquipe } from './FolgasDaEquipe';
+import { diasEntre, periodosDeAusencia } from '../utils/ausencias';
 import { useModal } from '../../../hooks/useModal';
 import { horasExtrasNoMes, CARGA_SEMANAL_MAXIMA_HORAS } from '../../../utils/cltValidator';
 import type { DiaEscala } from '../../../utils/escalaCalculator';
@@ -11,9 +13,10 @@ import { dataBR } from '@shared/agenda';
 
 // Hub do Módulo RH: abas (Escalas, Espelho de horas, Férias & Afastamentos) e o painel de conformidade CLT
 
-type Aba = 'escalas' | 'ponto' | 'ausencias';
+type Aba = 'escalas' | 'folgas' | 'ponto' | 'ausencias';
 const ABAS: Array<{ id: Aba; rotulo: string; icone: string }> = [
   { id: 'escalas', rotulo: 'Escalas & Alocação', icone: 'calendar_month' },
+  { id: 'folgas', rotulo: 'Folgas da equipe', icone: 'event_busy' },
   { id: 'ponto', rotulo: 'Espelho de Ponto & Banco de Horas', icone: 'schedule' },
   { id: 'ausencias', rotulo: 'Férias & Afastamentos', icone: 'beach_access' },
 ];
@@ -23,22 +26,16 @@ const mesVizinho = (mes: string, delta: number) => {
   const data = new Date(ano, m - 1 + delta, 1);
   return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
 };
-const diasEntre = (inicio: string, fim: string) => {
-  const datas: string[] = [];
-  for (const d = new Date(`${inicio}T12:00:00Z`); d.toISOString().slice(0, 10) <= fim; d.setUTCDate(d.getUTCDate() + 1)) {
-    datas.push(d.toISOString().slice(0, 10));
-  }
-  return datas;
-};
 
 interface ModuloRHProps {
   planejamento: ReturnType<typeof usePlanejamentoEscala>;
   onSaveScaleOverride?: (payload: ScaleOverridePayload) => Promise<boolean | void> | void;
   onReplicateScaleDays?: (payload: ScaleReplicatePayload) => Promise<boolean | void> | void;
+  onSwapScaleDays?: (payload: ScaleSwapPayload) => Promise<boolean | void> | void;
   children: React.ReactNode; // Aba de Escalas (a Grade de Escalas)
 }
 
-export function ModuloRH({ planejamento, onSaveScaleOverride, onReplicateScaleDays, children }: ModuloRHProps) {
+export function ModuloRH({ planejamento, onSaveScaleOverride, onReplicateScaleDays, onSwapScaleDays, children }: ModuloRHProps) {
   const {
     activeNonAdminEmployees: equipe,
     buildScaleForEmployee,
@@ -100,7 +97,7 @@ export function ModuloRH({ planejamento, onSaveScaleOverride, onReplicateScaleDa
             setAba(proxima);
             document.getElementById(`rh-aba-${proxima}`)?.focus();
           }}
-          className="flex bg-surface-container-low p-1 rounded-2xl border border-outline-variant/20 overflow-x-auto max-w-full">
+          className="flex flex-wrap gap-1 bg-surface-container-low p-1 rounded-2xl border border-outline-variant/20 max-w-full">
           {ABAS.map(({ id, rotulo, icone }) => (
             <button
               key={id}
@@ -129,6 +126,9 @@ export function ModuloRH({ planejamento, onSaveScaleOverride, onReplicateScaleDa
       </div>
 
       <div role="tabpanel" id="rh-painel-escalas" aria-labelledby="rh-aba-escalas" hidden={aba !== 'escalas'}>{children}</div>
+      <div role="tabpanel" id="rh-painel-folgas" aria-labelledby="rh-aba-folgas" hidden={aba !== 'folgas'}>
+        {aba === 'folgas' && <FolgasDaEquipe planejamento={planejamento} onSwapScaleDays={onSwapScaleDays} />}
+      </div>
       <div role="tabpanel" id="rh-painel-ponto" aria-labelledby="rh-aba-ponto" hidden={aba !== 'ponto'}>
         {aba === 'ponto' && <EspelhoHoras analises={analises} escalas={escalas} prefixoMes={prefixoMes} mesLabel={selectedScaleMonthLabel} />}
       </div>
@@ -151,7 +151,7 @@ export function ModuloRH({ planejamento, onSaveScaleOverride, onReplicateScaleDa
             aria-modal="true"
             aria-label="Conformidade CLT"
             onClick={(event) => event.stopPropagation()}
-            className="w-full max-w-md h-full bg-surface-container-lowest shadow-2xl flex flex-col"
+            className="w-full max-w-md h-full max-h-none bg-surface-container-lowest shadow-2xl flex flex-col"
           >
             <header className="p-5 border-b border-outline-variant/15 flex items-start justify-between gap-3">
               <div>
@@ -207,7 +207,7 @@ function EspelhoHoras({ analises, escalas, prefixoMes, mesLabel }: {
         <p className="text-xs text-on-surface-variant">Horas previstas pela escala (sem marcação de ponto). Extra = o que passa de {CARGA_SEMANAL_MAXIMA_HORAS}h na semana.</p>
       </header>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm [&_td]:align-top">
           <thead className="text-[11px] uppercase tracking-wider text-on-surface-variant bg-surface-container-low">
             <tr>
               <th scope="col" className="text-left px-4 py-2">Colaborador</th>
@@ -221,7 +221,7 @@ function EspelhoHoras({ analises, escalas, prefixoMes, mesLabel }: {
             {linhas.map(({ emp, dias, semTurno, total, normais, extras }) => (
               <tr key={emp.id} className="border-t border-outline-variant/10">
                 <td className="px-4 py-2 text-on-surface">{emp.name}<span className="block text-[11px] text-on-surface-variant">{emp.cargo || '—'}</span></td>
-                <td className="px-4 py-2 text-right">{dias}{semTurno > 0 && <span className="block text-[11px] text-amber-700 dark:text-amber-400">{semTurno} sem turno, fora das horas</span>}</td>
+                <td className="px-4 py-2 text-right">{dias}{semTurno > 0 && <span className="block text-[11px] whitespace-nowrap text-amber-700 dark:text-amber-400">{semTurno} sem turno, fora das horas</span>}</td>
                 <td className="px-4 py-2 text-right">{formatarHoras(normais)}</td>
                 <td className={`px-4 py-2 text-right ${extras > 0 ? 'text-error font-bold' : ''}`}>{formatarHoras(extras)}</td>
                 <td className="px-4 py-2 text-right font-bold">{formatarHoras(total)}</td>
@@ -252,23 +252,10 @@ function FeriasAfastamentos({ equipe, ajustesSalvos, onSaveScaleOverride, onRepl
   const enviandoRef = useRef(false);
   const podeRegistrar = Boolean(onSaveScaleOverride && onReplicateScaleDays);
 
-  // Dias seguidos com o mesmo motivo viram um período só
-  const periodos = useMemo(() => {
-    const nomes = new Map(equipe.map((emp) => [emp.id, emp.name]));
-    const dias = [...ajustesSalvos.values()]
-      .filter((a) => a.tipo === 'folga' && ehAusencia(a.descricao) && nomes.has(a.colaboradorId))
-      .sort((a, b) => a.colaboradorId.localeCompare(b.colaboradorId) || a.data.localeCompare(b.data));
-    const lista: Array<{ id: string; nome: string; motivo: string; inicio: string; fim: string }> = [];
-    for (const dia of dias) {
-      const ultimo = lista[lista.length - 1];
-      if (ultimo && ultimo.id === dia.colaboradorId && ultimo.motivo === dia.descricao && diasEntre(ultimo.fim, dia.data).length === 2) {
-        ultimo.fim = dia.data;
-      } else {
-        lista.push({ id: dia.colaboradorId, nome: nomes.get(dia.colaboradorId) || '', motivo: dia.descricao || '', inicio: dia.data, fim: dia.data });
-      }
-    }
-    return lista.sort((a, b) => b.inicio.localeCompare(a.inicio));
-  }, [ajustesSalvos, equipe]);
+  const periodos = useMemo(
+    () => periodosDeAusencia(ajustesSalvos.values(), new Map(equipe.map((emp) => [emp.id, emp.name]))),
+    [ajustesSalvos, equipe],
+  );
 
   const registrar = async (event: React.FormEvent) => {
     event.preventDefault();

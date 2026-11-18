@@ -14,6 +14,7 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
   const { token } = useAuth();
   const { mutateAsync: criar, isPending } = useCreateClient(token);
   const [form, setForm] = useState({ nome: '', telefone: '', cpf: '', email: '' });
+  const [naoReceberWhatsapp, setNaoReceberWhatsapp] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const { data: empresa } = useCompanyConfig(token);
   const exigirAnamnese = empresa?.exigirAnamnese === true;
@@ -36,7 +37,7 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
       return;
     }
     try {
-      const criado = await criar({ ...form, ...(fichaPreenchida ? { observacao: formatAnamneseStorage('', ficha) } : {}) });
+      const criado = await criar({ ...form, naoReceberWhatsapp, ...(fichaPreenchida ? { observacao: formatAnamneseStorage('', ficha) } : {}) });
       setToastMessage?.(`Cliente ${criado.nome} cadastrado${criado.codigo ? ` (#${criado.codigo})` : ''}.`);
       onClose();
     } catch (error) {
@@ -72,6 +73,10 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
       <label className="block text-xs font-bold text-on-surface-variant">
         E-mail <span className="font-normal">(opcional)</span>
         <input type="email" maxLength={120} value={form.email} onChange={alterar('email')} className={CAMPO} />
+      </label>
+      <label className="flex items-center gap-2 text-sm text-on-surface">
+        <input type="checkbox" checked={naoReceberWhatsapp} onChange={(e) => setNaoReceberWhatsapp(e.target.checked)} className="w-4 h-4 rounded" />
+        Não quer receber lembretes no WhatsApp
       </label>
       <div className="flex items-center justify-between gap-3 rounded-xl border border-outline-variant/20 px-4 py-3">
         <p className="text-sm text-on-surface">

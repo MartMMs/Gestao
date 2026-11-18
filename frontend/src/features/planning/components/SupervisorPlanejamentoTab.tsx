@@ -6,7 +6,7 @@ import { aplicarAjusteEscala, type DiaEscala } from '../../../utils/escalaCalcul
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { CalendarioEscala } from './CalendarioEscala';
 import { PlanningDayPopover, type AlteracaoDias } from './PlanningDayPopover';
-import { analisarMes, trabalhoAntesDeFolga, turnoDoDia, visualDoDia } from '../utils/turnos';
+import { analisarMes, retratoDoDia, trabalhoAntesDeFolga, turnoDoDia, visualDoDia } from '../utils/turnos';
 import { diaMesBR } from '@shared/agenda';
 import { folgaAcimaDoLimite, mensagemFolgaAcimaDoLimite } from '@shared/escala';
 import { preencher12x36, repetirMesAnterior } from '../utils/modelosEscala';
@@ -275,11 +275,7 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
   };
 
   // Retrato do dia para gravar: turno legível e a observação gravada (não o texto que o sistema gera, como "Feriado: ...")
-  const retrato = (employeeId: string, dia: DiaEscala) => ({
-    tipo: dia.tipo,
-    turno: dia.tipo === 'trabalho' ? turnoDoDia(dia) : undefined,
-    descricao: ajustesSalvos.get(`${employeeId}:${dia.data}`)?.descricao,
-  });
+  const retrato = (employeeId: string, dia: DiaEscala) => retratoDoDia(employeeId, dia, ajustesSalvos);
 
   const pedirTroca = (troca: TrocaDias) => {
     if (troca.fromEmp === troca.toEmp && troca.fromDate === troca.toDate) return;

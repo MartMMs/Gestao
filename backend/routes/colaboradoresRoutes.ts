@@ -283,7 +283,9 @@ export function createColaboradoresRouter(eventos: Eventos) {
           return tx.colaborador.update({ where: { id }, data: dados, omit: { versaoToken: false } });
         })
         : await prisma.colaborador.update({ where: { id }, data: dados, omit: { versaoToken: false } });
-      if (dados.versaoToken) eventos.encerrarSessoesDoUsuario(id);
+      // Papel mudou: o socket reconecta sozinho e entra nas salas do papel novo (senão um supervisor promovido a
+      // admin seguiria recebendo avisos de supervisor, e quem perdeu a recepção seguiria recebendo os dela)
+      if (dados.versaoToken || dados.papel !== undefined) eventos.encerrarSessoesDoUsuario(id);
       const { versaoToken, ...colaboradorPublico } = colaboradorAtualizado;
       // Própria conta com credencial nova: a sessão desta aba é trocada por uma nova (como em /minha-senha), em vez de
       // cair como "sessão expirada"; a antiga e as das outras abas/aparelhos deixam de valer

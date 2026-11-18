@@ -32,6 +32,9 @@ const AdminViewLazy = lazy(() => import('./components/AdminView').then((module) 
 import { atendeNaAgenda } from './utils/formatters';
 import { getAutoatendimentoUrl, isTvHost, noCaminho } from './config/hosts';
 import { DEPENDENCIAS_ESCOPO, ESCOPOS_MUDANCA, ehEscopoMudanca } from '@shared/escopos';
+import { AvisosAusencia } from './components/AvisosAusencia';
+import { COR_PADRAO } from './features/company/components/CompanySettingsTab';
+import { EVENTO_CLIENTE_AUSENTE, type AvisoAusencia } from '@shared/eventosSocket';
 
 // Aparelho da TV (subdomínio tv. ou /painel no desenvolvimento): o endereço não muda depois de carregar
 const ABRIR_NA_TV = isTvHost() || noCaminho('/painel');
@@ -162,8 +165,17 @@ export default function App() {
   const { currentUser, token, loginError, handleLogin, handleLogout, concluirTrocaDeSenha } = useAuth();
   const queryClient = useQueryClient();
   const { data: companyConfig } = useCompanyConfig(token);
+  // Título da aba do navegador com o nome da empresa (Empresa & Segmento, só o admin altera)
+  useEffect(() => { document.title = companyConfig?.nomeEmpresa || 'Gestão'; }, [companyConfig?.nomeEmpresa]);
+  // Cor escolhida pelo admin (Empresa & Segmento) vale para todos. A padrão do banco não troca o tema atual
+  useEffect(() => {
+    const cor = companyConfig?.corTemaPrimaria;
+    if (cor && cor !== COR_PADRAO) document.documentElement.style.setProperty('--brand', cor);
+    else document.documentElement.style.removeProperty('--brand');
+  }, [companyConfig?.corTemaPrimaria]);
   const [activeRoleView, setActiveRoleView] = useState<Role | 'tv' | 'autoatendimento'>(() => (ABRIR_NA_TV ? 'tv' : currentUser?.role ?? 'collaborator'));
   const [isPublicTVMode, setIsPublicTVMode] = useState(ABRIR_NA_TV);
+  const [avisosAusencia, setAvisosAusencia] = useState<AvisoAusencia[]>([]);
   const [isPublicAutoatendimentoMode, setIsPublicAutoatendimentoMode] = useState(false);
   const shouldLoadSupervisorDatasets = Boolean(token) && (currentUser?.role === 'supervisor' || currentUser?.role === 'admin') && (activeRoleView === 'supervisor' || activeRoleView === 'admin');
 
@@ -276,6 +288,8 @@ export default function App() {
   // Só ao sair (havia alguém e não há mais): limpar na entrada cancelaria as buscas iniciais e a tela não sairia do
   // "Carregando". Troca de conta em outra aba passa pelo Sair (encerrarPorTrocaDeConta)
   const usuarioDosDadosRef = useRef(currentUser?.id);
+  const papelAtual = useRef(currentUser?.role);
+  papelAtual.current = currentUser?.role;
   useEffect(() => {
     const anterior = usuarioDosDadosRef.current;
     usuarioDosDadosRef.current = currentUser?.id;
@@ -317,6 +331,12 @@ export default function App() {
         pendentes.forEach((escopo) => queryClient.invalidateQueries({ queryKey: [escopo], refetchType: 'active' }));
         pendentes.clear();
       }, 250);
+    });
+
+    // Admin não recebe aviso de ausência (o servidor já filtra; aqui é a segunda trava)
+    socket.on(EVENTO_CLIENTE_AUSENTE, (aviso: AvisoAusencia) => {
+      if (papelAtual.current === 'admin') return;
+      setAvisosAusencia((lista) => [aviso, ...lista.filter((a) => a.agendamentoId !== aviso.agendamentoId)].slice(0, 5));
     });
 
     return () => {
@@ -603,6 +623,10 @@ export default function App() {
   }
 
   return (
+    <>
+    {currentUser.role !== 'admin' && (
+      <AvisosAusencia avisos={avisosAusencia} onFechar={(id) => setAvisosAusencia((lista) => lista.filter((a) => a.agendamentoId !== id))} />
+    )}
     <Layout 
       userName={currentUser.name} 
       userRole={currentUser.role} 
@@ -714,5 +738,6 @@ export default function App() {
         />
       )}
     </Layout>
+    </>
   );
 }

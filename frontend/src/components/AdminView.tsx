@@ -105,7 +105,7 @@ export function AdminView({
   token,
 }: AdminViewProps) {
   const { data: companyConfig } = useCompanyConfig(token);
-  const [activeTab, setActiveTab] = useState<'empresa' | 'servicos' | 'totem' | 'whatsapp' | 'equipe' | 'dashboard' | 'clientes' | 'relatorios'>('empresa');
+  const [activeTab, setActiveTab] = useState<'empresa' | 'servicos' | 'totem' | 'equipe' | 'dashboard' | 'clientes' | 'relatorios'>('empresa');
 
   // Gestão de Serviços
   const [serviceSearchTerm, setServiceSearchTerm] = useState('');
@@ -305,20 +305,7 @@ export function AdminView({
             }`}
           >
             <span className="material-symbols-outlined text-[18px]">touch_app</span>
-            Totem & Autoatendimento
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('whatsapp')}
-            className={`px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold tracking-wide uppercase whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
-              activeTab === 'whatsapp'
-                ? 'bg-primary text-on-primary shadow-md'
-                : 'bg-surface-container text-on-surface-variant hover:text-primary'
-            }`}
-          >
-            <span className="material-symbols-outlined text-[18px]">chat</span>
-            WhatsApp
+            Totem, Autoatendimento & WhatsApp
           </button>
 
           <button
@@ -429,9 +416,12 @@ export function AdminView({
         />
       )}
 
-      {activeTab === 'totem' && <AutoatendimentoAdminTab />}
-
-      {activeTab === 'whatsapp' && <WhatsappLembretesTab token={token || null} />}
+      {activeTab === 'totem' && (
+        <div className="space-y-8">
+          <AutoatendimentoAdminTab />
+          <WhatsappLembretesTab token={token || null} />
+        </div>
+      )}
 
       {activeTab === 'equipe' && (
         <SupervisorEquipeTab

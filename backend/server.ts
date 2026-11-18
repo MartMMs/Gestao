@@ -11,9 +11,9 @@ import { configurarSocket, criarEventos } from './lib/eventos';
 import { hostDaRequisicao, responderErro } from './lib/http';
 import { redactSensitiveData } from '../shared/redact';
 import { ESCOPOS } from '../shared/escopos';
-import { LIMITE_LEMBRETES_POR_RODADA, enviarLembretes, filtroLembretes } from './services/whatsapp';
 import { whatsapp } from './services/communicationService';
-import { retomarWhatsappQr, whatsappQr } from './services/whatsappQr';
+import { aoReceberMensagemWhatsapp, retomarWhatsappQr, whatsappQr } from './services/whatsappQr';
+import { criarJobLembretes, tratarMensagemRecebida } from './services/lembretesWhatsapp';
 import { getEmpresaConfig } from './services/configService';
 import { redisService } from './services/redisService';
 
@@ -134,37 +134,10 @@ const manutencaoAgenda = async () => {
 };
 setInterval(manutencaoAgenda, 5 * 60 * 1000);
 
-// Lembrete de 24h por WhatsApp: pelo número conectado por QR code (aba WhatsApp do admin) ou, sem ele, pelo
-// WHATSAPP_WEBHOOK_URL. Marca antes de enviar: na falha, não repete (melhor
-// perder um lembrete que mandar vários). A marca dura 2 dias, mais que a janela de 24h.
-let lembretesRodando = false;
-const lembretesWhatsapp = async () => {
-  // Provedor lento (8 s por envio) pode passar dos 10 min do intervalo: uma rodada por vez
-  const provider = whatsappQr.ativo ? whatsappQr : whatsapp;
-  if (lembretesRodando || !provider.ativo) return;
-  lembretesRodando = true;
-  try {
-    const enviados = await enviarLembretes({
-      provider,
-      empresa: await getEmpresaConfig().then((e) => ({ nome: e.nomeEmpresa, telefone: e.telefoneContato, endereco: e.endereco, mensagens: e.mensagensLembrete })),
-      agora: new Date(),
-      buscar: async (de, ate) => (await prisma.agendamento.findMany({
-        where: filtroLembretes(de, ate),
-        select: { id: true, data: true, cliente: { select: { nome: true, telefone: true } } },
-        orderBy: { data: 'asc' },
-        take: LIMITE_LEMBRETES_POR_RODADA,
-      })).map((ag) => ({ id: ag.id, data: ag.data, clienteNome: ag.cliente.nome, clienteTelefone: ag.cliente.telefone })),
-      marcarUmaVez: (id) => redisService.acquireLock(`lembrete-24h:${id}`, 2 * 86_400, '1'),
-      registrarFalha: (id, erro) => console.error(`[WHATSAPP] Lembrete do agendamento ${id} não enviado:`, erro instanceof Error ? erro.message : 'erro desconhecido'),
-    });
-    if (enviados > 0) console.log(`[WHATSAPP] ${enviados} lembrete(s) enviado(s).`);
-  } catch (error) {
-    console.error('🚨 Erro nos lembretes por WhatsApp:', redactSensitiveData(error));
-  } finally {
-    lembretesRodando = false;
-  }
-};
-setInterval(lembretesWhatsapp, 10 * 60 * 1000);
+// Lembrete de 24h por WhatsApp: pelo número conectado por QR code (aba Totem, Autoatendimento & WhatsApp do admin)
+// ou, sem ele, pelo WHATSAPP_WEBHOOK_URL. Regras em services/lembretesWhatsapp.ts
+setInterval(criarJobLembretes(() => (whatsappQr.ativo ? whatsappQr : whatsapp)), 10 * 60 * 1000);
+aoReceberMensagemWhatsapp(tratarMensagemRecebida(eventos));
 void retomarWhatsappQr().catch((erro) => console.error('[WHATSAPP] Não foi possível retomar a sessão do QR code:', erro instanceof Error ? erro.message : 'erro desconhecido'));
 
 // Porta definida no .env (padrão 3333)

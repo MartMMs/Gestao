@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { Service, ServiceEligibilityMode } from '../../../types';
 import { isApiError, useCompanyConfig, useToggleServiceActive } from '../../../api';
 import { useAuth } from '../../../AuthContext';
+import { LIMITE_CATEGORIA, agruparCategorias, montarCategoria, separarCategoria } from '../utils/categorias';
 
 const CATEGORIAS_SUGERIDAS = ['Atendimento', 'Consulta', 'Avaliação', 'Procedimento', 'Pacote', 'Outros'];
 // Rótulo envolvendo o campo: o leitor de tela anuncia o nome de cada campo sem precisar de id
@@ -143,8 +144,20 @@ export function SupervisorServicosTab({
     }
   };
   const trocarAtivo = (srv: Service) => aplicarAtivo(srv.id, srv.ativo === false);
-  // Categorias livres: as sugeridas mais as que já existem nos serviços
-  const categorias = Array.from(new Set([...CATEGORIAS_SUGERIDAS, ...services.map((s) => s.categoria).filter((c): c is string => Boolean(c))]));
+  // Categorias: as sugeridas, as que já existem nos serviços e a escolhida agora (recém-criada ainda não salva)
+  const gruposCategoria = agruparCategorias([...CATEGORIAS_SUGERIDAS, ...services.map((s) => s.categoria ?? ''), newServiceCategoria]);
+  const [criandoCategoria, setCriandoCategoria] = useState(false);
+  const [novoGrupo, setNovoGrupo] = useState('');
+  const [novaCategoria, setNovaCategoria] = useState('');
+  const categoriaMontada = montarCategoria(novoGrupo, novaCategoria);
+  const erroCategoria = categoriaMontada.length > LIMITE_CATEGORIA ? `Grupo e nome juntos passam de ${LIMITE_CATEGORIA} letras.` : null;
+  const criarCategoria = () => {
+    if (!categoriaMontada || erroCategoria) return;
+    setNewServiceCategoria(categoriaMontada);
+    setCriandoCategoria(false);
+    setNovoGrupo('');
+    setNovaCategoria('');
+  };
   const [excluindo, setExcluindo] = useState(false);
   const [erroExclusao, setErroExclusao] = useState<string | null>(null);
 
@@ -302,13 +315,49 @@ export function SupervisorServicosTab({
               Nome <span className="text-error" aria-hidden="true">*</span>
               <input required type="text" value={newServiceName} onChange={e => setNewServiceName(e.target.value)} className={CAMPO} placeholder="Ex.: Avaliação inicial" />
             </label>
-            <label className={ROTULO}>
-              Categoria
-              <input list="categorias-servico" maxLength={60} value={newServiceCategoria} onChange={e => setNewServiceCategoria(e.target.value)} placeholder="Escolha ou digite uma nova" className={CAMPO} />
-              <datalist id="categorias-servico">
-                {categorias.map((c) => <option key={c} value={c} />)}
-              </datalist>
-            </label>
+            <div>
+              <label className={ROTULO}>
+                Categoria
+                <select
+                  value={criandoCategoria ? '__nova__' : newServiceCategoria}
+                  onChange={(e) => {
+                    if (e.target.value === '__nova__') { setCriandoCategoria(true); return; }
+                    setCriandoCategoria(false);
+                    setNewServiceCategoria(e.target.value);
+                  }}
+                  className={CAMPO}
+                >
+                  <option value="">Sem categoria</option>
+                  {gruposCategoria.map(({ grupo, categorias }) => (
+                    <optgroup key={grupo} label={grupo}>
+                      {categorias.map((c) => <option key={c} value={c}>{separarCategoria(c).nome}</option>)}
+                    </optgroup>
+                  ))}
+                  <option value="__nova__">+ Criar categoria…</option>
+                </select>
+              </label>
+              {criandoCategoria && (
+                <div className="mt-2 p-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest space-y-2">
+                  <p className="text-xs text-on-surface-variant">Não achou? Crie aqui: ela já fica escolhida neste serviço e o resto do formulário não se perde.</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className={ROTULO}>
+                      Grupo <span className="font-normal">(opcional)</span>
+                      <input list="grupos-categoria" value={novoGrupo} onChange={(e) => setNovoGrupo(e.target.value)} placeholder="Ex.: Massagens" className={CAMPO} />
+                      <datalist id="grupos-categoria">{gruposCategoria.map(({ grupo }) => <option key={grupo} value={grupo} />)}</datalist>
+                    </label>
+                    <label className={ROTULO}>
+                      Nome da categoria
+                      <input value={novaCategoria} onChange={(e) => setNovaCategoria(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); criarCategoria(); } }} placeholder="Ex.: Relaxante" className={CAMPO} />
+                    </label>
+                  </div>
+                  {erroCategoria && <p role="alert" className="text-xs text-error">{erroCategoria}</p>}
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setCriandoCategoria(false)} className="px-3 py-2 rounded-xl text-xs font-bold text-on-surface-variant hover:bg-surface-container">Cancelar</button>
+                    <button type="button" onClick={criarCategoria} disabled={!categoriaMontada || Boolean(erroCategoria)} className="px-3 py-2 rounded-xl text-xs font-bold bg-primary text-on-primary disabled:opacity-50">Criar e usar</button>
+                  </div>
+                </div>
+              )}
+            </div>
             <div>
               <p className={ROTULO} id="icone-servico">Ícone</p>
               <div role="radiogroup" aria-labelledby="icone-servico" className="mt-1 flex flex-wrap gap-2">

@@ -28,11 +28,12 @@ const somarDias = (data: string, dias: number) =>
   new Date(Date.parse(`${data}T12:00:00Z`) + dias * 86_400_000).toISOString().slice(0, 10);
 const diaDaSemanaSegunda = (data: string) => (new Date(`${data}T12:00:00Z`).getUTCDay() + 6) % 7;
 
-type EstadoPeriodo = 'concluido' | 'falta' | 'sem_baixa' | 'totem' | 'agendado';
+type EstadoPeriodo = 'concluido' | 'falta' | 'sem_baixa' | 'ausente' | 'totem' | 'agendado';
 
 // Mesma leitura de cores e a mesma regra de "sem baixa" da grade do dia e do relatório (shared/statusAgendamento.ts)
 const ESTADOS_PERIODO: Record<EstadoPeriodo, { cor: string; rotulo: string }> = {
   agendado: { cor: 'bg-amber-400', rotulo: 'agendado' },
+  ausente: { cor: 'bg-rose-400', rotulo: 'cliente não pode comparecer' },
   totem: { cor: 'bg-violet-500', rotulo: 'totem, aguardando chegada' },
   sem_baixa: { cor: 'bg-error/50', rotulo: 'sem baixa (conclua ou marque falta)' },
   falta: { cor: 'bg-error', rotulo: 'falta' },
@@ -44,6 +45,7 @@ const estadoDoAtendimento = (app: Appointment, services: Service[], agora: Date)
   if (app.status === 'no_show') return 'falta';
   const servicos = [{ duracao: getDuration(app.services, services) }];
   if (semBaixaVencido({ status: app.status, inicio: instanteNoFuso(app.date, app.time), servicos }, agora)) return 'sem_baixa';
+  if (app.clienteAvisouAusencia) return 'ausente';
   if (app.aguardandoCheckin) return 'totem';
   return 'agendado';
 };

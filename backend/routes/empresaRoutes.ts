@@ -149,6 +149,7 @@ const validarConfigEmpresa = (body: Record<string, unknown>): { erro: string; da
   if (typeof dados.emailContato === 'string' && !EMAIL_REGEX.test(dados.emailContato)) {
     return { erro: 'Informe um e-mail de contato válido.' };
   }
+  if (dados.corTemaPrimaria != null && !/^#[0-9a-f]{6}$/i.test(String(dados.corTemaPrimaria))) return { erro: 'Cor do tema inválida (use o formato #rrggbb).' };
   return { dados };
 };
 
@@ -427,6 +428,12 @@ export function createEmpresaRouter(eventos: Eventos) {
       }
       if (validacao.dados.usarComissao !== undefined && validacao.dados.usarComissao !== atual.usarComissao && !usuarioEhAdmin(req)) {
         return res.status(403).json({ erro: 'Apenas o administrador pode ligar ou desligar a comissão.' });
+      }
+      if (validacao.dados.nomeEmpresa !== undefined && validacao.dados.nomeEmpresa !== atual.nomeEmpresa && !usuarioEhAdmin(req)) {
+        return res.status(403).json({ erro: 'Apenas o administrador pode alterar o nome da empresa.' });
+      }
+      if (validacao.dados.corTemaPrimaria !== undefined && validacao.dados.corTemaPrimaria !== atual.corTemaPrimaria && !usuarioEhAdmin(req)) {
+        return res.status(403).json({ erro: 'Apenas o administrador pode alterar a cor do sistema.' });
       }
 
       // Nada mudou: responde sem gravar nem avisar as telas (o aviso faz todas recarregarem as listas)

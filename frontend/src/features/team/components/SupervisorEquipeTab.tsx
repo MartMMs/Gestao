@@ -1,10 +1,10 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { horarioParaMinutos } from '@shared/agenda';
+import React, { useMemo, useState } from 'react';
 import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import { motion } from 'motion/react';
 import { Employee, Role, EmployeeUpdate } from '../../../types';
 import { useAuth } from '../../../AuthContext';
-import { isApiError, useAddTurno, useDeleteTurno, useServices, useTurnos } from '../../../api';
+import { isApiError, useServices, useTurnos } from '../../../api';
+import { RegrasETurnosTab } from './RegrasETurnosTab';
 import { useSearch } from '../../../hooks/useSearch';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
@@ -92,53 +92,8 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
 
   // --- ESTADOS DA GESTÃO DE TURNOS ---
   const [activeSubTab, setActiveSubTab] = useState<'profissionais' | 'gestao'>('profissionais');
+  // Opções da edição em lote (o cadastro de turnos fica em Regras e Turnos)
   const { data: turnos = [] } = useTurnos(token);
-  const { mutateAsync: criarTurno, isPending: criandoTurno } = useAddTurno(token);
-  const { mutateAsync: excluirTurno, isPending: excluindoTurno } = useDeleteTurno(token);
-  const [turnoParaExcluir, setTurnoParaExcluir] = useState<{ id: string; nome: string } | null>(null);
-  // Trava síncrona: o isPending só chega no próximo render, tarde para segurar um duplo clique
-  const enviandoTurno = useRef(false);
-  const [novoTurnoNome, setNovoTurnoNome] = useState('');
-  const [novoTurnoInicio, setNovoTurnoInicio] = useState('08:00');
-  const [novoTurnoFim, setNovoTurnoFim] = useState('18:00');
-
-  const handleAddTurno = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (enviandoTurno.current) return;
-    enviandoTurno.current = true;
-    try {
-      await criarTurno({ nome: novoTurnoNome.trim(), inicio: novoTurnoInicio, fim: novoTurnoFim });
-      setNovoTurnoNome('');
-      setToastMessage('Turno adicionado.');
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível criar o turno.');
-    } finally {
-      enviandoTurno.current = false;
-    }
-  };
-
-  const confirmarExclusaoTurno = async () => {
-    if (!turnoParaExcluir || enviandoTurno.current) return;
-    enviandoTurno.current = true;
-    try {
-      await excluirTurno(turnoParaExcluir.id);
-      setToastMessage(`Turno "${turnoParaExcluir.nome}" excluído.`);
-      setTurnoParaExcluir(null);
-    } catch (error) {
-      setTurnoParaExcluir(null);
-      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível excluir o turno.');
-    } finally {
-      enviandoTurno.current = false;
-    }
-  };
-
-  // Duração em horas; fim antes do início = turno que vira a noite
-  const duracaoTurno = (inicio: string, fim: string) => {
-    const minutos = (horarioParaMinutos(fim) - horarioParaMinutos(inicio) + 1440) % 1440;
-    return `${Math.floor(minutos / 60)}h${minutos % 60 ? String(minutos % 60).padStart(2, '0') : ''}`;
-  };
-
-
 
   const filteredEmployees = useSearch(
     employees,
@@ -555,59 +510,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
           )}
         </>
       ) : (
-        <section aria-labelledby="turnos-titulo" className="max-w-3xl bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm space-y-6">
-          <header>
-            <h3 id="turnos-titulo" className="text-lg font-headline text-on-surface">Turnos padrão</h3>
-            <p className="text-sm text-on-surface-variant">Aparecem como opções ao editar um dia da escala e na edição em lote. Excluir um turno não muda dias já marcados.</p>
-          </header>
-
-          <form onSubmit={handleAddTurno} className="grid gap-3 sm:grid-cols-[1fr_8rem_8rem_auto] sm:items-end">
-            <label className="text-xs font-bold text-on-surface-variant">
-              Nome
-              <input type="text" value={novoTurnoNome} onChange={e => setNovoTurnoNome(e.target.value)} placeholder="Ex.: Madrugada" maxLength={40} required className="mt-1 w-full h-11 px-3 bg-surface-container-low border border-outline-variant/20 rounded-xl text-sm font-normal text-on-surface focus:ring-1 focus:ring-primary outline-none" />
-            </label>
-            <label className="text-xs font-bold text-on-surface-variant">
-              Início
-              <input type="time" value={novoTurnoInicio} onChange={e => setNovoTurnoInicio(e.target.value)} required className="mt-1 w-full h-11 px-3 bg-surface-container-low border border-outline-variant/20 rounded-xl text-sm font-normal text-on-surface focus:ring-1 focus:ring-primary outline-none" />
-            </label>
-            <label className="text-xs font-bold text-on-surface-variant">
-              Fim
-              <input type="time" value={novoTurnoFim} onChange={e => setNovoTurnoFim(e.target.value)} required className="mt-1 w-full h-11 px-3 bg-surface-container-low border border-outline-variant/20 rounded-xl text-sm font-normal text-on-surface focus:ring-1 focus:ring-primary outline-none" />
-            </label>
-            <button type="submit" disabled={criandoTurno} className="h-11 px-5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:bg-primary-dim disabled:opacity-60">
-              {criandoTurno ? 'Salvando...' : 'Adicionar'}
-            </button>
-          </form>
-
-          {turnos.length === 0 ? (
-            <p className="text-sm text-on-surface-variant">Nenhum turno cadastrado.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-on-surface-variant border-b border-outline-variant/20">
-                  <th scope="col" className="py-2 font-bold">Nome</th>
-                  <th scope="col" className="py-2 font-bold">Horário</th>
-                  <th scope="col" className="py-2 font-bold">Duração</th>
-                  <th scope="col" className="py-2"><span className="sr-only">Ações</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {turnos.map(turno => (
-                  <tr key={turno.id} className="border-b border-outline-variant/10 last:border-0">
-                    <td className="py-3 font-bold text-on-surface">{turno.nome}</td>
-                    <td className="py-3 tabular-nums text-on-surface">{turno.inicio} – {turno.fim}{turno.fim < turno.inicio ? ' (dia seguinte)' : ''}</td>
-                    <td className="py-3 tabular-nums text-on-surface-variant">{duracaoTurno(turno.inicio, turno.fim)}</td>
-                    <td className="py-3 text-right">
-                      <button type="button" onClick={() => setTurnoParaExcluir({ id: turno.id, nome: turno.nome })} aria-label={`Excluir turno ${turno.nome}`} className="p-2 rounded-full text-on-surface-variant hover:text-error hover:bg-error/10">
-                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
+        <RegrasETurnosTab setToastMessage={setToastMessage} setErrorMessage={setErrorMessage} />
       )}
 
       {showEmployeeForm && (
@@ -656,6 +559,7 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                   {/* Admin promove outro admin (a API só aceita de admin); na conta admin a opção precisa existir para o select não mostrar "Colaborador" */}
                   {(podeGerenciarSupervisores || newEmpRole === 'admin') && <option value="admin">Administrador</option>}
                 </select>
+                {!podeGerenciarSupervisores && <p className="text-xs text-on-surface-variant mt-1">Contas de Supervisor e Administrador só o administrador cria.</p>}
               </div>
               <div>
                 <label htmlFor="emp-tipo-escala" className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">Tipo de escala</label>
@@ -771,19 +675,6 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
           </motion.div>
         </div>
       )}
-
-      <ConfirmDialog
-        open={Boolean(turnoParaExcluir)}
-        title={`Excluir o turno ${turnoParaExcluir?.nome ?? ''}?`}
-        description="Ele some das opções da escala. Dias já marcados com esse horário não mudam."
-        confirmLabel="Excluir"
-        confirmingLabel="Excluindo..."
-        cancelLabel="Manter turno"
-        icon="delete"
-        isSubmitting={excluindoTurno}
-        onClose={() => { if (!excluindoTurno) setTurnoParaExcluir(null); }}
-        onConfirm={confirmarExclusaoTurno}
-      />
 
       <ConfirmDialog
         open={Boolean(employeeToResetPassword)}

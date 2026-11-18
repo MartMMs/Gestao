@@ -9,7 +9,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     // Os adapters puros do backend (sem banco) também rodam aqui
-    include: ['src/**/*.test.{ts,tsx}', '../backend/services/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}', '../backend/services/**/*.test.ts', '../backend/lib/**/*.test.ts'],
     clearMocks: true,
   },
   resolve: {

@@ -29,13 +29,20 @@ describe('WhatsApp', () => {
   });
 
   it('lembrete: primeiro nome, data e hora de Brasília, sem nome de serviço', () => {
-    expect(montarLembrete('Spa Teste', ag('a'))).toBe('*Spa Teste*\nOlá, Maria! Lembrete do seu horário em 11/12 às 10:30. Se não puder vir, avise a recepção.');
+    expect(montarLembrete({ nome: 'Spa Teste' }, ag('a'))).toBe('*Spa Teste*\nOlá, Maria! Lembrete do seu horário em 11/12 às 10:30. Se não puder vir, avise a recepção.');
   });
 
   it('lembrete com mensagem da casa: sorteia uma e troca as chaves', () => {
     const empresa = { nome: 'Spa Teste', endereco: 'Rua A, 1', mensagens: ['A {nome}', 'Oi {nome}, {dia da semana} {horario}, reserva {numero da reserva} em {endereco}'] };
     expect(montarLembrete(empresa, ag('abc123'), 0)).toBe('A Maria');
     expect(montarLembrete(empresa, ag('abc123'), 0.99)).toBe('Oi Maria, sexta-feira 10:30, reserva AG-ABC123 em Rua A, 1');
+  });
+
+  it('lembrete com confirmação: acrescenta a pergunta 1/2 no fim', () => {
+    const texto = montarLembrete({ nome: 'Spa', mensagens: ['Oi {nome}'], pedeConfirmacao: true }, ag('a'), 0);
+    expect(texto.startsWith('Oi Maria\n\n*Confirmação de Agendamento*')).toBe(true);
+    expect(texto).toContain('Responda *2* para: Não poderei ir');
+    expect(montarLembrete({ nome: 'Spa', mensagens: ['Oi {nome}'] }, ag('a'), 0)).toBe('Oi Maria');
   });
 
   it('job: janela de 2h a 24h, pula sem telefone e já enviados, segue depois de uma falha', async () => {
@@ -46,7 +53,7 @@ describe('WhatsApp', () => {
     const registrarFalha = vi.fn();
 
     const enviados = await enviarLembretes({
-      provider, empresa: 'Spa', agora: AGORA, buscar, registrarFalha,
+      provider, empresa: { nome: 'Spa' }, agora: AGORA, buscar, registrarFalha,
       marcarUmaVez: async (id) => (marcados.has(id) ? false : (marcados.add(id), true)),
     });
 
@@ -56,7 +63,7 @@ describe('WhatsApp', () => {
     expect(registrarFalha).toHaveBeenCalledWith('falha', expect.any(Error));
     // Rodar de novo não reenvia
     enviar.mockClear();
-    await enviarLembretes({ provider, empresa: 'Spa', agora: AGORA, buscar, marcarUmaVez: async (id) => (marcados.has(id) ? false : (marcados.add(id), true)) });
+    await enviarLembretes({ provider, empresa: { nome: 'Spa' }, agora: AGORA, buscar, marcarUmaVez: async (id) => (marcados.has(id) ? false : (marcados.add(id), true)) });
     expect(enviar).not.toHaveBeenCalled();
   });
 
@@ -66,10 +73,34 @@ describe('WhatsApp', () => {
     const marcarUmaVez = vi.fn(async () => true);
     const enviados = await enviarLembretes({
       provider: { ativo: true, enviar, podeEnviar: () => restam > 0 },
-      empresa: 'Spa', agora: AGORA, buscar: async () => [ag('a'), ag('b')], marcarUmaVez,
+      empresa: { nome: 'Spa' }, agora: AGORA, buscar: async () => [ag('a'), ag('b')], marcarUmaVez,
     });
     expect(enviados).toBe(1);
     expect(marcarUmaVez).toHaveBeenCalledTimes(1); // o segundo fica para amanhã, não é perdido
+  });
+
+  it('job com confirmação: só pergunta 1/2 por provedor que recebe respostas e quando o número não espera outra resposta', async () => {
+    const enviadas: string[] = [];
+    const aoEnviar = vi.fn(async (_a: AgendamentoParaLembrete, _perguntou: boolean) => {});
+    const provider: WhatsappProvider = { ativo: true, recebeRespostas: true, enviar: async (_t, m) => { enviadas.push(m); } };
+    await enviarLembretes({
+      provider, empresa: { nome: 'Spa', pedeConfirmacao: true }, agora: AGORA,
+      buscar: async () => [ag('livre'), ag('ocupado')],
+      marcarUmaVez: async () => true,
+      podePerguntar: async (a) => a.id === 'livre',
+      aoEnviar,
+    });
+    expect(enviadas[0]).toContain('Responda *1*');
+    expect(enviadas[1]).not.toContain('Responda *1*');
+    expect(aoEnviar.mock.calls.map(([a, perguntou]) => [a.id, perguntou])).toEqual([['livre', true], ['ocupado', false]]);
+
+    // Webhook (não recebe respostas): nunca pergunta
+    enviadas.length = 0;
+    await enviarLembretes({
+      provider: { ativo: true, enviar: async (_t, m) => { enviadas.push(m); } }, empresa: { nome: 'Spa', pedeConfirmacao: true }, agora: AGORA,
+      buscar: async () => [ag('x')], marcarUmaVez: async () => true,
+    });
+    expect(enviadas[0]).not.toContain('Responda *1*');
   });
 
   it('filtro do job: só marcados na janela, sem reserva aguardando pagamento, cliente ativo e com telefone', () => {
@@ -79,7 +110,7 @@ describe('WhatsApp', () => {
       status: 'scheduled',
       data: { gte: de, lte: ate },
       statusPagamento: { not: 'aguardando_pagamento' },
-      cliente: { removidoEm: null, telefone: { not: null } },
+      cliente: { removidoEm: null, telefone: { not: null }, naoReceberWhatsapp: false },
     });
   });
 });

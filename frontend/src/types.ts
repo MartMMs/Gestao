@@ -89,6 +89,8 @@ export interface Appointment {
   clientCode?: number;
   // Versão do registro no servidor (detecta edição simultânea)
   version?: string;
+  // Cliente respondeu "Não poderei ir" ao lembrete do WhatsApp
+  clienteAvisouAusencia?: boolean;
 }
 
 export interface Service {
@@ -124,6 +126,8 @@ export interface Client {
   // Calculado pela API: quem está logado vê e grava a ficha de saúde deste cliente
   acessoSaude?: boolean;
   observacao?: string;
+  // LGPD: pediu para não receber lembretes no WhatsApp
+  naoReceberWhatsapp?: boolean;
   alergias?: string[];
   preferencias?: string[];
 }

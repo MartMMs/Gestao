@@ -16,12 +16,10 @@ import {
   temFichaAnamnese,
 } from '../../shared/anamnese';
 import { getEmpresaConfig } from '../services/configService';
+import { dataHoraDe as formatarDataHora } from '../../shared/datasBR';
 import { MAX_LINHAS_IMPORTACAO, MENSAGEM_EMAIL_INVALIDO, emailValido, erroNomeCliente, lerCliente, limparTexto, validarImportacao, type DadosCliente } from '../../shared/clientes';
 import { LIMITE_OBSERVACAO, MENSAGEM_CPF_INVALIDO, MENSAGEM_TELEFONE_INVALIDO, apenasDigitos, cpfValido, normalizarNome, normalizarTelefone, telefoneValido, valorMascarado } from '../../shared/validadores';
 
-const formatarDataHora = (data: Date) => new Intl.DateTimeFormat('pt-BR', {
-  timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-}).format(data);
 
 export function createClientesRouter(notificar: Notificar) {
   const router = Router();
@@ -54,7 +52,7 @@ export function createClientesRouter(notificar: Notificar) {
 
   // Grava clientes já validados, todos ou nenhum. Pega as travas de nome e de CPF antes de reler a base (outro
   // cadastro pode ter entrado depois da validação), em ordem fixa para dois envios simultâneos não se cruzarem
-  const gravarClientes = (lista: DadosCliente[], observacao: string | null = null) => transacaoComTravas(async (tx) => {
+  const gravarClientes = (lista: Array<DadosCliente & { naoReceberWhatsapp?: boolean }>, observacao: string | null = null) => transacaoComTravas(async (tx) => {
     for (const nome of [...new Set(lista.map((d) => normalizarNome(d.nome)))].sort()) await travarNomeCliente(tx, nome);
     for (const cpf of [...new Set(lista.flatMap((d) => (d.cpf ? [d.cpf] : [])))].sort()) await travarChave(tx, `cliente-cpf:${cpf}`);
     const existentes = await tx.cliente.findMany({ where: { removidoEm: null }, select: { nome: true, cpf: true, codigo: true } });
@@ -73,7 +71,7 @@ export function createClientesRouter(notificar: Notificar) {
       if ((await getEmpresaConfig()).exigirAnamnese && !temFichaAnamnese(observacao)) {
         return res.status(400).json({ erro: MENSAGEM_ANAMNESE_OBRIGATORIA, code: CODIGO_ANAMNESE_OBRIGATORIA });
       }
-      const [criado] = await gravarClientes([dados], observacao || null);
+      const [criado] = await gravarClientes([{ ...dados, naoReceberWhatsapp: req.body?.naoReceberWhatsapp === true }], observacao || null);
       notificar();
       res.status(201).json(criado);
     } catch (error) {
@@ -173,6 +171,8 @@ export function createClientesRouter(notificar: Notificar) {
         if (erroNome) return res.status(400).json({ erro: erroNome });
         dados.nome = nomeLimpo.slice(0, 120);
       }
+      // LGPD: o pedido de não receber lembretes vale assim que a recepção ou a supervisão registra
+      if (gerencia && typeof req.body?.naoReceberWhatsapp === 'boolean') dados.naoReceberWhatsapp = req.body.naoReceberWhatsapp;
       if (gerencia && telefone !== undefined && !valorMascarado(telefone)) {
         if (telefone && !telefoneValido(telefone)) return res.status(400).json({ erro: MENSAGEM_TELEFONE_INVALIDO });
         dados.telefone = normalizarTelefone(telefone) || null;

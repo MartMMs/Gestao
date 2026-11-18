@@ -1,3 +1,5 @@
+import { normalizarTelefone } from './validadores';
+
 // Mensagens de lembrete escritas pela casa, com chaves entre chaves: "Olá, {nome}! Seu horário é {horario}."
 // Usado pela tela (destacar e explicar as chaves) e pelo servidor (trocar pelas informações do cliente).
 
@@ -13,6 +15,9 @@ export const VARIAVEIS_LEMBRETE = [
 ] as const;
 
 export type DadosLembrete = Partial<Record<(typeof VARIAVEIS_LEMBRETE)[number]['chave'], string>>;
+
+/** Lembrete quando a casa não escreveu nenhuma mensagem */
+export const MENSAGEM_PADRAO = '*{nome da empresa}*\nOlá, {nome}! Lembrete do seu horário em {data} às {horario}. Se não puder vir, avise a recepção.';
 
 export const MAX_MENSAGENS_LEMBRETE = 10;
 export const MAX_TAMANHO_MENSAGEM = 1000;
@@ -56,3 +61,33 @@ export const validarMensagensLembrete = (mensagens: unknown): string | null => {
   }
   return null;
 };
+
+// Confirmação no lembrete. Pelo WhatsApp por QR code (não oficial) botões clicáveis não chegam de forma confiável,
+// principalmente no iPhone: a pergunta vai como texto e o cliente responde 1 ou 2 (funciona em qualquer celular)
+export const TITULO_CONFIRMACAO = 'Confirmação de Agendamento';
+export const OPCAO_SIM = 'Sim, confirmo';
+export const OPCAO_NAO = 'Não poderei ir';
+export const TEXTO_CONFIRMACAO = `\n\n*${TITULO_CONFIRMACAO}*\nResponda *1* para: ${OPCAO_SIM}\nResponda *2* para: ${OPCAO_NAO}`;
+export const RESPOSTA_SIM = 'Obrigado! Seu horário está confirmado. Até lá!';
+export const RESPOSTA_NAO = 'Tudo bem, avisamos a equipe. Para remarcar, fale com a recepção.';
+
+/** Resposta do cliente ao lembrete: 'sim', 'nao' ou null (qualquer outra mensagem é ignorada) */
+export const interpretarResposta = (texto: unknown): 'sim' | 'nao' | null => {
+  if (typeof texto !== 'string') return null;
+  const t = normalizar(normalizar(texto).replace(/[^a-z0-9 ]/g, ' '));
+  if (t === '1' || t === 'sim' || t.startsWith('sim ') || t.startsWith('confirmo')) return 'sim';
+  if (t === '2' || t === 'nao' || t.startsWith('nao ') || t.startsWith('nao poderei')) return 'nao';
+  return null;
+};
+
+/**
+ * Telefone na forma usada para ligar a resposta ao lembrete: DDD + número, com o 9 dos celulares antigos (o WhatsApp
+ * mostra "55 11 87654321" para quem tem "11 987654321"). Envio e resposta passam por aqui, para as chaves baterem
+ */
+export const telefoneParaResposta = (telefone: unknown) => {
+  const d = normalizarTelefone(telefone);
+  return d.length === 10 && /[6-9]/.test(d[2]) ? `${d.slice(0, 2)}9${d.slice(2)}` : d;
+};
+
+/** Número do WhatsApp (ex.: "5511987654321@s.whatsapp.net") no mesmo formato */
+export const telefoneDoWhatsapp = (jid: string) => telefoneParaResposta(jid.split('@')[0].split(':')[0]);

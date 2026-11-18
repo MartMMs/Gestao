@@ -12,6 +12,7 @@ import {
 } from './agendaService';
 import { DURACAO_PADRAO_MIN, duracaoTotal, instanteNoFuso } from '../../shared/agenda';
 import { versaoConsentimentoValida } from '../../shared/consentimento';
+import { PREFIXO_TOTEM } from '../../shared/anamnese';
 import {
   LIMITE_OBSERVACAO,
   MENSAGEM_CPF_INVALIDO,
@@ -256,7 +257,7 @@ export const criarAgendamentoTotem = async (
   // A declaração do cliente fica numa linha só: é a linha inteira que a regra de forja (shared/anamnese.ts) protege.
   // O \s do JS não cobre o NEL (U+0085), que a regra de linha do shared conta como quebra
   const observacao = cliente.observacoesSaude
-    ? `[Anamnese Autoatendimento ${sessao.data}]: ${cliente.observacoesSaude.replace(/[\s\u0085]+/g, ' ').trim()}`
+    ? `${PREFIXO_TOTEM}${sessao.data}]: ${cliente.observacoesSaude.replace(/[\s\u0085]+/g, ' ').trim()}`
     : null;
 
   return transacaoComTravas(async (tx) => {

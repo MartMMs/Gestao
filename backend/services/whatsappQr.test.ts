@@ -23,3 +23,29 @@ describe('WhatsApp por QR code', () => {
     expect(jidDoTelefone('5511987654321')).toBe('5511987654321@s.whatsapp.net');
   });
 });
+
+import { codigoDesconexao, esperaReconexao, lerMensagemRecebida } from './whatsappQr';
+
+describe('mensagens recebidas e reconexão', () => {
+  it('só conversa individual de outra pessoa, com texto; @lid usa o número de senderPn', () => {
+    const msg = (key: object, texto = '2') => ({ key, message: { conversation: texto } });
+    expect(lerMensagemRecebida(msg({ remoteJid: '5511987654321@s.whatsapp.net' }))).toEqual({ jid: '5511987654321@s.whatsapp.net', destino: '5511987654321@s.whatsapp.net', texto: '2' });
+    expect(lerMensagemRecebida(msg({ remoteJid: '123@lid', senderPn: '5511987654321@s.whatsapp.net' }))).toEqual({ jid: '5511987654321@s.whatsapp.net', destino: '123@lid', texto: '2' });
+    expect(lerMensagemRecebida(msg({ remoteJid: '123@lid' }))).toBeNull();
+    expect(lerMensagemRecebida(msg({ remoteJid: '5511987654321@s.whatsapp.net', fromMe: true }))).toBeNull();
+    expect(lerMensagemRecebida(msg({ remoteJid: '1203630@g.us' }))).toBeNull();
+    expect(lerMensagemRecebida(msg({ remoteJid: '5511987654321@s.whatsapp.net' }, ''))).toBeNull();
+    expect(lerMensagemRecebida({ key: { remoteJid: '5511987654321@s.whatsapp.net' }, message: { extendedTextMessage: { text: 'sim' } } })?.texto).toBe('sim');
+  });
+
+  it('código da desconexão sem confiar no formato', () => {
+    expect(codigoDesconexao({ output: { statusCode: 401 } })).toBe(401);
+    expect(codigoDesconexao(new Error('x'))).toBeUndefined();
+    expect(codigoDesconexao(undefined)).toBeUndefined();
+  });
+
+  it('reconexão espera cada vez mais e desiste depois de 6 tentativas', () => {
+    expect([0, 1, 2, 5].map(esperaReconexao)).toEqual([5000, 10_000, 20_000, 120_000]);
+    expect(esperaReconexao(6)).toBeNull();
+  });
+});

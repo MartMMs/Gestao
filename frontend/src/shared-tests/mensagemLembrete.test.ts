@@ -23,3 +23,41 @@ describe('mensagem de lembrete', () => {
     expect(validarMensagensLembrete(['Oi {nome}'])).toBeNull();
   });
 });
+
+import { interpretarResposta, telefoneDoWhatsapp } from '@shared/mensagemLembrete';
+
+describe('resposta ao lembrete', () => {
+  it('entende 1/2, sim/não com ou sem acento, e ignora o resto', () => {
+    expect(interpretarResposta(' 1 ')).toBe('sim');
+    expect(interpretarResposta('Sim, confirmo!')).toBe('sim');
+    expect(interpretarResposta('2')).toBe('nao');
+    expect(interpretarResposta('Não poderei ir')).toBe('nao');
+    expect(interpretarResposta('NAO')).toBe('nao');
+    expect(interpretarResposta('Bom dia, qual o endereço?')).toBeNull();
+    expect(interpretarResposta('simples')).toBeNull();
+  });
+
+  it('número do WhatsApp vira o telefone do cadastro, devolvendo o 9 do celular', () => {
+    expect(telefoneDoWhatsapp('5511987654321@s.whatsapp.net')).toBe('11987654321');
+    expect(telefoneDoWhatsapp('551187654321@s.whatsapp.net')).toBe('11987654321');
+    expect(telefoneDoWhatsapp('551133334444@s.whatsapp.net')).toBe('1133334444');
+  });
+});
+
+import { telefoneParaResposta } from '@shared/mensagemLembrete';
+
+describe('telefone do envio e da resposta', () => {
+  it('o cadastro e o WhatsApp chegam à mesma chave, com ou sem máscara, DDI e o 9', () => {
+    const chave = telefoneDoWhatsapp('551187654321@s.whatsapp.net');
+    for (const gravado of ['11987654321', '(11) 98765-4321', '5511987654321', '1187654321']) expect(telefoneParaResposta(gravado)).toBe(chave);
+  });
+});
+
+import { PREFIXO_TOTEM, declaracaoDoTotem } from '@shared/anamnese';
+
+describe('declaração do totem', () => {
+  it('lê a linha no formato que o totem grava', () => {
+    expect(declaracaoDoTotem(`${PREFIXO_TOTEM}2026-11-10]: Alergia a amendoim`)).toBe('2026-11-10: Alergia a amendoim');
+    expect(declaracaoDoTotem('texto comum')).toBe('texto comum');
+  });
+});
