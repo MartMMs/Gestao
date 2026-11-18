@@ -151,6 +151,7 @@ const chaveLid = (lid: string) => `wa-lid:${lid.split('@')[0].split(':')[0]}`;
 const chaveEnquete = (id: string) => `wa-enquete:${id}`;
 type EnqueteGuardada = { segredo: string; jid: string; opcoes: string[] };
 const log = (texto: string) => console.log(`[WhatsApp Webhook] ${texto}`);
+const ehOProprioNumero = (jid: string) => Boolean(sock?.user?.id) && jidNormalizedUser(sock!.user!.id) === jidNormalizedUser(jid);
 const mascarar = (jid: string | null) => (jid ? mascararTelefone(telefoneDoWhatsapp(jid)) ?? '?' : 'desconhecido');
 export const conectarWhatsappQr = async () => {
   // Dois cliques seguidos não podem abrir duas conexões no mesmo número
@@ -185,7 +186,12 @@ export const conectarWhatsappQr = async () => {
     if (type !== 'notify' || !aoReceber) return;
     for (const m of messages) {
       const recebida = lerMensagemRecebida(m as MensagemBaileys);
-      if (!recebida) continue;
+      if (!recebida) {
+        if (m.key.fromMe && (m.message?.conversation || m.message?.extendedTextMessage?.text) && m.key.remoteJid && ehOProprioNumero(m.key.remoteJid)) {
+          log('Resposta escrita no próprio número conectado (conversa "Você"): ignorada. O cliente precisa ser outro celular.');
+        }
+        continue;
+      }
       try {
         // "@lid" sem número: usa o mapa gravado quando o lembrete foi enviado para esse contato
         const jid = recebida.jid ?? (recebida.lid ? await redisService.get(chaveLid(recebida.lid)) : null);
@@ -293,6 +299,9 @@ export const whatsappQr: WhatsappProvider = {
     const existe = (await sock.onWhatsApp(jidDoTelefone(telefone)))?.[0];
     ultimoEnvio = Date.now();
     if (!existe?.exists) throw new Error('Número sem WhatsApp.');
+    // Lembrete para o próprio número conectado: o WhatsApp guarda na conversa "Você", sem notificação, e a resposta
+    // sai como mensagem do próprio número (ignorada). Para testar, o cliente precisa ser outro celular
+    if (ehOProprioNumero(existe.jid)) log(`Atenção: o cliente ${mascarar(existe.jid)} é o próprio número conectado no QR. A mensagem fica na conversa "Você" do WhatsApp e a resposta não é lida. Teste com outro celular.`);
     await sock.sendMessage(existe.jid, { text: mensagem });
     contador.registrar();
     if (typeof existe.lid === 'string' && existe.lid) await redisService.set(chaveLid(existe.lid), existe.jid, PRAZO_MAPA_SEGUNDOS);
