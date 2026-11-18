@@ -1,0 +1,75 @@
+# Módulo RH: abas, modais e validações (rodar com o app de teste em http://localhost:3010)
+url: http://localhost:3010
+---
+- runFlow:
+    file: login-supervisor.yaml
+    env:
+      SENHA: ${SENHA}
+- startRecording: rh-execucao
+- tapOn: "(?i)acessar m[oó]dulo rh"
+- takeScreenshot: 01-rh-abas
+
+# Abas da Grade de Escalas: todas visíveis (nenhuma cortada)
+- assertVisible: "(?i)escalas & aloca[cç][aã]o"
+- assertVisible: "(?i)folgas da equipe"
+- assertVisible: "(?i)espelho de ponto.*"
+- assertVisible: "(?i)f[eé]rias & afastamentos"
+
+# Conformidade CLT abre e fecha
+- tapOn: "(?i)verificar conformidade clt"
+- assertVisible: "Conformidade CLT"
+- takeScreenshot: 02-painel-clt
+- tapOn: "close"
+
+# Folgas da equipe
+- tapOn: "(?i)folgas da equipe"
+- assertVisible: "Folgas da equipe"
+- tapOn: "chevron_right"
+- assertVisible: "(?i)esta semana"
+- takeScreenshot: 03-folgas-da-equipe
+
+# Espelho de ponto
+- tapOn: "(?i)espelho de ponto.*"
+- assertVisible: "(?i)espelho de horas.*"
+- takeScreenshot: 04-espelho-de-ponto
+
+# Férias: vazio é barrado (nada é registrado)
+- tapOn: "(?i)f[eé]rias & afastamentos"
+- assertVisible: "Registrar ausência"
+- scrollUntilVisible:
+    element: "(?i)registrar"
+- tapOn: "(?i)registrar"
+- assertNotVisible: "(?i)ausência registrada.*"
+- takeScreenshot: 05-ferias-vazio-barrado
+
+# Profissionais e cargos: modais
+- scrollUntilVisible:
+    element: "(?i)profissionais e cargos"
+    direction: UP
+- tapOn: "(?i)profissionais e cargos"
+- tapOn: "(?i)criar usu[aá]rio"
+- assertVisible: "Criar Usuário"
+- assertVisible: "(?i)e-mail \\(opcional\\)"
+- takeScreenshot: 06-criar-usuario
+- tapOn: "close"
+# Perfil (RH): botão só com ícone ("badge"); no celular fica abaixo da dobra
+- scrollUntilVisible:
+    element: "badge"
+- tapOn:
+    text: "badge"
+    index: 0
+- assertVisible: "(?i)ocorr[eê]ncias \\(rh\\)"
+- tapOn: "(?i)ocorr[eê]ncias \\(rh\\)"
+- assertVisible: "Histórico de Ocorrências"
+- takeScreenshot: 07-ocorrencias
+- tapOn: "close"
+
+# Regras e turnos
+- tapOn: "(?i)regras e turnos"
+- assertVisible: "Regras da escala"
+- takeScreenshot: 08-regras
+# No celular as duas colunas empilham: "Turnos padrão" fica abaixo
+- scrollUntilVisible:
+    element: "Turnos padrão"
+- takeScreenshot: 09-turnos
+- stopRecording

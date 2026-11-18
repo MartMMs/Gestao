@@ -1,0 +1,13 @@
+# Sub-fluxo: entra como supervisor (senha por variável: maestro test -e SENHA=...)
+url: http://localhost:3010
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "(?i)usu[aá]rio ou e-mail"
+    timeout: 15000
+- tapOn: "(?i)usu[aá]rio ou e-mail"
+- inputText: "supervisor@serenidade.com"
+- tapOn: "(?i)senha"
+- inputText: ${SENHA}
+- pressKey: Enter
+- assertVisible: "(?i)acessar m[oó]dulo rh"
