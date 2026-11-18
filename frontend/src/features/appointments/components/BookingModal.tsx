@@ -649,7 +649,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
             <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Cliente Selecionado</p>
-                <p className="text-sm font-bold text-on-surface truncate">{bookName || 'Nenhum cliente selecionado'}{selectedClientId && <AvisoCliente semFicha={!clienteTemFicha} />}</p>
+                <p className="text-sm font-bold text-on-surface break-words">{bookName || 'Nenhum cliente selecionado'}{selectedClientId && <AvisoCliente semFicha={!clienteTemFicha} />}</p>
               </div>
               {clienteEscolhido && (
                 <button type="button" onClick={() => setVerFicha(true)} className="text-[11px] text-primary font-bold uppercase tracking-widest hover:underline whitespace-nowrap">

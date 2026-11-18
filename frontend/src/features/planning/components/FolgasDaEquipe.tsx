@@ -29,7 +29,7 @@ export function FolgasDaEquipe({ planejamento, onSwapScaleDays }: {
 
   const datas = diasDaSemana(diaDaSemana);
   const segunda = datas[0];
-  const porDia = useMemo(() => {
+  const { porDia, feriados } = useMemo(() => {
     // A semana pode atravessar a virada do mês: monta a escala dos dois meses envolvidos
     const semana = diasDaSemana(segunda);
     const meses = [...new Set([semana[0].slice(0, 7), semana[6].slice(0, 7)])];
@@ -85,9 +85,9 @@ export function FolgasDaEquipe({ planejamento, onSwapScaleDays }: {
           const folgas = porDia.get(data) ?? [];
           return (
             <li key={data} className={`py-3 grid gap-2 sm:grid-cols-[9rem_1fr] ${data === hoje ? 'bg-primary/5 -mx-3 px-3 rounded-xl' : ''}`}>
-              <p className="text-sm font-bold text-on-surface">{NOMES_DIA[i]} <span className="font-normal text-on-surface-variant tabular-nums">{diaMesBR(data)}</span>{data === hoje && <span className="ml-1 text-xs text-primary">(hoje)</span>}</p>
+              <p className="text-sm font-bold text-on-surface">{NOMES_DIA[i]} <span className="font-normal text-on-surface-variant tabular-nums">{diaMesBR(data)}</span>{data === hoje && <span className="ml-1 text-xs text-primary">(hoje)</span>}{feriados.get(data) && <span className="block text-xs font-normal text-on-surface-variant">Feriado: {feriados.get(data)}</span>}</p>
               {folgas.length === 0 ? (
-                <p className="text-sm text-on-surface-variant">Ninguém de folga.</p>
+                <p className="text-sm text-on-surface-variant">{feriados.get(data) ? 'Ninguém de folga além do feriado.' : 'Ninguém de folga.'}</p>
               ) : (
                 <ul className="flex flex-wrap gap-2">
                   {folgas.map((f) => (

@@ -20,7 +20,7 @@ describe('folgas da semana', () => {
       b: escala({ '2026-11-24': { tipo: 'folga', descricao: 'Férias' }, '2026-11-26': { tipo: 'folga' } }),
       c: escala({ '2026-11-23': { tipo: 'folga' } }),
     };
-    const porDia = folgasDaSemana(
+    const { porDia, feriados } = folgasDaSemana(
       [{ id: 'b', name: 'Bruna' }, { id: 'a', name: 'Ana' }, { id: 'c', name: 'Caio' }],
       (id) => escalas[id],
       '2026-11-25',
@@ -33,5 +33,13 @@ describe('folgas da semana', () => {
     expect(porDia.get('2026-11-24')![0]).toMatchObject({ nome: 'Bruna', rotulo: 'Férias', trocavel: false });
     // Folga que já passou não troca
     expect(porDia.get('2026-11-23')![0]).toMatchObject({ nome: 'Caio', trocavel: false });
+    expect(feriados.size).toBe(0);
+  });
+
+  it('feriado vai uma vez no dia e não aparece ao lado de cada pessoa', () => {
+    const comFeriado = escala({ '2026-11-27': { tipo: 'folga', feriadoNome: 'Feriado Teste' } });
+    const { porDia, feriados } = folgasDaSemana([{ id: 'a', name: 'Ana' }, { id: 'b', name: 'Bia' }], () => comFeriado, '2026-11-25', '2026-11-25');
+    expect(feriados.get('2026-11-27')).toBe('Feriado Teste');
+    expect(porDia.get('2026-11-27')).toEqual([]);
   });
 });

@@ -658,9 +658,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                  </div>
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
                    <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Média de Avaliação</p>
-                   <div className="flex items-center gap-1 text-2xl font-headline text-primary">
-                     {viewingEmployee.rating.toFixed(1)} <span className="material-symbols-outlined star-active text-xl">star</span>
-                   </div>
+                   <p className="text-sm text-on-surface-variant mt-2">Sem avaliações</p>
                  </div>
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
                    <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Faturamento</p>

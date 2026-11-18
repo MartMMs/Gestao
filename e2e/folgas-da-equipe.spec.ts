@@ -92,3 +92,30 @@ test.describe('Folgas da equipe', () => {
     }
   });
 });
+
+test('excluir férias: recepção não pode (403); supervisão apaga só os dias de férias e a folga comum fica', async ({ request }) => {
+  const { segunda } = escolherSemana();
+  const { id } = await criarComFolgaNaQuarta(request, segunda);
+  const supervisor = await authHeaders(request, CONTAS.supervisor);
+  try {
+    // Férias de quinta a sexta da mesma semana (a quarta continua folga comum)
+    for (const i of [3, 4]) {
+      const r = await request.post(`${apiBase()}/escala/override`, { headers: supervisor, data: { colaboradorId: id, data: somar(segunda, i), tipo: 'folga', descricao: 'Férias' } });
+      expect(r.ok(), await r.text()).toBeTruthy();
+    }
+    const corpo = { colaboradorId: id, inicio: somar(segunda, 3), fim: somar(segunda, 4), motivo: 'Férias' };
+    const recepcao = await request.post(`${apiBase()}/escala/ausencia/remover`, { headers: await authHeaders(request, CONTAS.recepcao), data: corpo });
+    expect(recepcao.status()).toBe(403);
+
+    const r = await request.post(`${apiBase()}/escala/ausencia/remover`, { headers: supervisor, data: corpo });
+    expect(r.status(), await r.text()).toBe(200);
+    expect((await r.json()).removidos).toBe(2);
+    expect(await tipoNoDia(request, id, somar(segunda, 3))).toBeUndefined();
+    expect(await tipoNoDia(request, id, somar(segunda, 2))).toBe('folga');
+
+    // De novo: nada mais para apagar
+    expect((await request.post(`${apiBase()}/escala/ausencia/remover`, { headers: supervisor, data: corpo })).status()).toBe(404);
+  } finally {
+    await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: await authHeaders(request, CONTAS.admin) });
+  }
+});

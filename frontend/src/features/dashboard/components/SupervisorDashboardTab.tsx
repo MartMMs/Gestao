@@ -100,12 +100,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
           <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Média da Equipe</p>
-          <div className="flex items-center gap-2">
-            <p className="text-4xl font-headline text-primary">
-              {employees.length > 0 ? (employees.reduce((acc, emp) => acc + emp.rating, 0) / employees.length).toFixed(1) : '0.0'}
-            </p>
-            <span className="material-symbols-outlined text-primary star-active text-2xl">star</span>
-          </div>
+          <p className="text-sm text-on-surface-variant mt-3">Sem avaliações</p>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm flex flex-col justify-center">
           <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Destaque do Mês</p>

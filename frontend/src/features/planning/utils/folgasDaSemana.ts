@@ -39,14 +39,17 @@ export function folgasDaSemana(
   escalaDe: (colaboradorId: string) => DiaEscala[],
   qualquerDia: string,
   hoje: string,
-): Map<string, FolgaDaSemana[]> {
+): { porDia: Map<string, FolgaDaSemana[]>; feriados: Map<string, string> } {
   const datas = diasDaSemana(qualquerDia);
   const porDia = new Map<string, FolgaDaSemana[]>(datas.map((d) => [d, []]));
+  // Feriado vale para a casa toda: vai uma vez no dia, não ao lado de cada pessoa
+  const feriados = new Map<string, string>();
   for (const pessoa of equipe) {
     const daSemana = escalaDe(pessoa.id).filter((d) => porDia.has(d.data));
     const destinos = daSemana.filter((d) => d.tipo === 'trabalho' && !d.feriadoNome && d.data >= hoje);
     for (const dia of daSemana) {
-      if (dia.tipo === 'trabalho') continue;
+      if (dia.feriadoNome) feriados.set(dia.data, dia.feriadoNome);
+      if (dia.tipo === 'trabalho' || dia.feriadoNome) continue;
       porDia.get(dia.data)!.push({
         colaboradorId: pessoa.id,
         nome: pessoa.name,
@@ -59,5 +62,5 @@ export function folgasDaSemana(
     }
   }
   for (const lista of porDia.values()) lista.sort((a, b) => a.nome.localeCompare(b.nome));
-  return porDia;
+  return { porDia, feriados };
 }

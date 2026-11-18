@@ -759,75 +759,13 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
               <h3 className="text-lg font-headline text-primary">Montar Escala</h3>
               <button type="button" onClick={fecharEscala} disabled={isApplyingBulkShift} aria-label="Fechar" className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant disabled:opacity-40"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
             </div>
-            <div className="space-y-4 max-h-[72vh] overflow-y-auto pr-1 custom-scrollbar">
-              <div>
-                <p className="text-sm font-bold text-on-surface mb-2">{selectedEmpForSchedule?.name}</p>
-                <p className="text-xs text-on-surface-variant">{selectedEmpForSchedule?.specialty}</p>
-              </div>
-
-              <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest p-4 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Edição em Lote (Bulk Edit)</p>
-                  <button
-                    type="button"
-                    onClick={toggleSelectAllBulk}
-                    className="text-[11px] font-bold uppercase tracking-widest text-primary hover:opacity-80"
-                  >
-                    {bulkSelectedEmployeeIds.length === selectableEmployees.length ? 'Limpar seleção' : 'Selecionar todos'}
-                  </button>
+            <div className="space-y-6 max-h-[72vh] overflow-y-auto pr-1 custom-scrollbar">
+              {/* Parte 1: a escala da pessoa que abriu o modal */}
+              <section aria-labelledby="escala-dias-titulo" className="space-y-3">
+                <div>
+                  <h4 id="escala-dias-titulo" className="text-sm font-bold text-on-surface">Dias de trabalho de {selectedEmpForSchedule.name}</h4>
+                  <p className="text-xs text-on-surface-variant">Marque os dias da semana em que a pessoa trabalha. O horário de cada dia fica na Grade de Escalas.</p>
                 </div>
-
-                <div className="max-h-32 overflow-y-auto rounded-xl border border-outline-variant/20 bg-surface-container p-2 custom-scrollbar">
-                  {selectableEmployees.map((emp) => (
-                    <label key={emp.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-container-high cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={bulkSelectedEmployeeIds.includes(emp.id)}
-                        onChange={() => toggleBulkSelection(emp.id)}
-                        className="w-4 h-4 accent-primary"
-                      />
-                      <span className="text-xs text-on-surface truncate">{emp.name}</span>
-                    </label>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Data da Aplicação</label>
-                    <input
-                      type="date"
-                      value={bulkTargetDate}
-                      onChange={(e) => setBulkTargetDate(e.target.value)}
-                      className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Turno em Lote</label>
-                    <select
-                      value={bulkShiftSelection}
-                      onChange={(e) => handleBulkShiftChange(e.target.value)}
-                      className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm"
-                    >
-                      <option value="">Escolha o turno...</option>
-                      {/* Turnos padrão (Regras e Turnos) */}
-                      {turnos.map((t) => <option key={t.id} value={`${t.inicio}-${t.fim}`}>{t.nome} ({t.inicio} - {t.fim})</option>)}
-                      <option value="folga">Folga</option>
-                    </select>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleApplyBulkShift}
-                  disabled={isApplyingBulkShift || bulkSelectedEmployeeIds.length === 0 || !bulkShiftSelection}
-                  className="w-full bg-secondary text-on-secondary py-2.5 rounded-xl font-bold text-xs uppercase tracking-[0.18em] shadow-sm hover:opacity-90 disabled:opacity-60"
-                >
-                  {isApplyingBulkShift ? 'Aplicando...' : 'Aplicar em lote'}
-                </button>
-              </div>
-
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-3">Dias de Trabalho</p>
                 <div className="grid grid-cols-4 gap-2">
                   {WEEK_DAYS.map((day) => (
                     <button
@@ -841,16 +779,70 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
                     </button>
                   ))}
                 </div>
-              </div>
+                <button type="button" onClick={handleSaveSchedule} disabled={isSavingSchedule || isApplyingBulkShift} className="w-full bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim transition-colors disabled:opacity-60">
+                  {isSavingSchedule ? 'Salvando...' : 'Salvar dias de trabalho'}
+                </button>
+              </section>
 
-              {/* O horário de cada dia (turno) é definido na aba Escala; aqui ficam só os dias de trabalho */}
-              <p className="text-xs text-on-surface-variant">O horário de cada dia (turno) é definido na aba Escala.</p>
+              {/* Parte 2: um turno num dia para várias pessoas, em 3 passos */}
+              <section aria-labelledby="escala-lote-titulo" className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest p-4 space-y-4">
+                <div>
+                  <h4 id="escala-lote-titulo" className="text-sm font-bold text-on-surface">Aplicar um turno em vários colaboradores</h4>
+                  <p className="text-xs text-on-surface-variant">Opcional: para mudar um dia específico de várias pessoas de uma vez.</p>
+                </div>
 
-              <button type="button" onClick={handleSaveSchedule} disabled={isSavingSchedule || isApplyingBulkShift} className="w-full bg-primary text-on-primary py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] shadow-sm hover:bg-primary-dim transition-colors disabled:opacity-60">
-                {isSavingSchedule ? 'Salvando...' : 'Salvar Escala'}
-              </button>
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-on-surface">1. Escolha o dia e o turno</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+                      Dia
+                      <input type="date" value={bulkTargetDate} onChange={(e) => setBulkTargetDate(e.target.value)} className="mt-1 w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm normal-case" />
+                    </label>
+                    <label className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+                      Turno
+                      <select value={bulkShiftSelection} onChange={(e) => handleBulkShiftChange(e.target.value)} className="mt-1 w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm normal-case">
+                        <option value="">Escolha o turno...</option>
+                        {/* Turnos padrão (Regras e Turnos) */}
+                        {turnos.map((t) => <option key={t.id} value={`${t.inicio}-${t.fim}`}>{t.nome} ({t.inicio} - {t.fim})</option>)}
+                        <option value="folga">Folga</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-bold text-on-surface">2. Marque quem recebe <span className="font-normal text-on-surface-variant">({bulkSelectedEmployeeIds.length} selecionado{bulkSelectedEmployeeIds.length === 1 ? '' : 's'})</span></p>
+                    <button type="button" onClick={toggleSelectAllBulk} className="text-[11px] font-bold uppercase tracking-widest text-primary hover:opacity-80">
+                      {bulkSelectedEmployeeIds.length === selectableEmployees.length ? 'Limpar seleção' : 'Selecionar todos'}
+                    </button>
+                  </div>
+                  <div className="max-h-32 overflow-y-auto rounded-xl border border-outline-variant/20 bg-surface-container p-2 custom-scrollbar">
+                    {selectableEmployees.map((emp) => (
+                      <label key={emp.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-container-high cursor-pointer">
+                        <input type="checkbox" checked={bulkSelectedEmployeeIds.includes(emp.id)} onChange={() => toggleBulkSelection(emp.id)} className="w-4 h-4 accent-primary" />
+                        <span className="text-xs text-on-surface truncate">{emp.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-on-surface">3. Aplique</p>
+                  <button
+                    type="button"
+                    onClick={handleApplyBulkShift}
+                    disabled={isApplyingBulkShift || bulkSelectedEmployeeIds.length === 0 || !bulkShiftSelection}
+                    className="w-full bg-secondary text-on-secondary py-2.5 rounded-xl font-bold text-xs uppercase tracking-[0.18em] shadow-sm hover:opacity-90 disabled:opacity-60"
+                  >
+                    {isApplyingBulkShift ? 'Aplicando...' : 'Aplicar turno'}
+                  </button>
+                  {(bulkSelectedEmployeeIds.length === 0 || !bulkShiftSelection) && <p className="text-[11px] text-on-surface-variant">Escolha o turno e pelo menos uma pessoa para liberar o botão.</p>}
+                </div>
+              </section>
+
               <button type="button" onClick={fecharEscala} disabled={isSavingSchedule || isApplyingBulkShift} className="w-full py-2 rounded-xl text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:bg-surface-container disabled:opacity-40">
-                Cancelar
+                Fechar
               </button>
             </div>
           </motion.div>

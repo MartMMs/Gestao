@@ -748,6 +748,19 @@ export const useScaleOverrides = (
   enabled: !!token && (options?.enabled ?? true),
 });
 
+// Desfaz férias/atestado/afastamento do RH: os dias voltam ao rodízio da escala
+export const useRemoverAusencia = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { colaboradorId: string; inicio: string; fim: string; motivo: string }) =>
+      fetchApi('/escala/ausencia/remover', token, { method: 'POST', body: JSON.stringify(data) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['scale-overrides'] });
+    },
+  });
+};
+
 export const useSaveScaleOverride = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({

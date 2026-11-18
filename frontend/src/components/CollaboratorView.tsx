@@ -125,7 +125,7 @@ export function CollaboratorView({
   );
 
   // Calcula as estatísticas pessoais
-  const { completedCount, averageRating, nextClient } = useMemo(() => {
+  const { completedCount, nextClient } = useMemo(() => {
     const todayStr = getLocalTodayString();
     const next = myAppointments
       .filter(a => a.date === todayStr && a.status === 'scheduled')
@@ -133,7 +133,6 @@ export function CollaboratorView({
 
     return {
       completedCount: currentUser.completedServices,
-      averageRating: currentUser.rating,
       nextClient: next,
     };
   }, [myAppointments, currentUser]);
@@ -236,10 +235,7 @@ export function CollaboratorView({
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
           <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Sua Média</p>
-          <div className="flex items-center gap-2">
-            <p className="text-4xl font-headline text-primary">{averageRating.toFixed(1)}</p>
-            <span className="material-symbols-outlined text-primary star-active text-2xl">star</span>
-          </div>
+          <p className="text-sm text-on-surface-variant mt-3">Sem avaliações</p>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
           <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Próximo Cliente (Hoje)</p>

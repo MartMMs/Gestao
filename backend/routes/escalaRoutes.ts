@@ -8,6 +8,8 @@ import { dataValida, diaMesBR, horarioParaMinutos, partesNoFuso, TURNO_PADRAO, T
 import { agendamentosDoDia } from '../services/agendaService';
 import { aplicarAjusteEscala, folgaAcimaDoLimite, gerarEscalaComRegras, limiteFolgasPorSemana, mensagemFolgaAcimaDoLimite, segundaDaSemana, type TipoEscala as TipoContrato } from '../../shared/escala';
 import { analisarConformidadeCLT } from '../../shared/clt';
+import { MOTIVOS_AUSENCIA } from '../../shared/escala';
+import { registrarAuditoria } from '../lib/auditoria';
 
 type TipoEscala = 'trabalho' | 'folga' | 'fds';
 type DiaEscala = { tipo: TipoEscala; turno: string | null; descricao: string | null };
@@ -180,6 +182,28 @@ export function createEscalaRouter(notificar: Notificar) {
       res.json({ ...salvo, alertasClt });
     } catch (error) {
       responderErro(res, error, 'Erro ao salvar a escala');
+    }
+  });
+
+  // Desfaz férias/atestado/afastamento lançado no RH: apaga os dias daquele motivo no período e cada dia volta ao
+  // rodízio da escala (o que a malha calcula). Só apaga ausência: folga comum e trabalho do período ficam
+  router.post('/escala/ausencia/remover', verificarSupervisorToken, async (req, res) => {
+    try {
+      const colaboradorId = await garantirColaborador(req.body?.colaboradorId);
+      const { inicio, fim, motivo } = req.body ?? {};
+      if (!dataValida(inicio) || !dataValida(fim) || fim < inicio) return res.status(400).json({ erro: 'Período inválido.' });
+      if (!MOTIVOS_AUSENCIA.includes(motivo)) return res.status(400).json({ erro: 'Motivo inválido.' });
+      const { count } = await transacaoComTravas(async (tx) => {
+        const dias = await tx.escalaOverride.findMany({ where: { colaboradorId, data: { gte: inicio, lte: fim }, tipo: 'folga', descricao: { startsWith: motivo } }, select: { key: true } });
+        for (const { key } of [...dias].sort((a, b) => a.key.localeCompare(b.key))) await travarChave(tx, `escala:${key}`);
+        return tx.escalaOverride.deleteMany({ where: { key: { in: dias.map((d) => d.key) } } });
+      });
+      if (count === 0) return res.status(404).json({ erro: 'Nenhum dia desse período foi encontrado (já pode ter sido removido).' });
+      await registrarAuditoria(req, { acao: 'escala.ausencia.remover', alvo: `Colaborador ${colaboradorId}`, antes: { motivo, inicio, fim, dias: count }, depois: { dias: 0 } });
+      notificar();
+      res.json({ removidos: count });
+    } catch (error) {
+      responderErro(res, error, 'Erro ao remover a ausência');
     }
   });
 

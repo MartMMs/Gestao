@@ -1,7 +1,10 @@
 import React, { useMemo, useRef, useState } from 'react';
 import type { ScaleOverridePayload, ScaleReplicatePayload, ScaleSwapPayload } from '../../../api';
 import { FolgasDaEquipe } from './FolgasDaEquipe';
-import { diasEntre, periodosDeAusencia } from '../utils/ausencias';
+import { diasEntre, periodosDeAusencia, type PeriodoAusencia } from '../utils/ausencias';
+import { useRemoverAusencia } from '../../../api';
+import { useAuth } from '../../../AuthContext';
+import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { useModal } from '../../../hooks/useModal';
 import { horasExtrasNoMes, CARGA_SEMANAL_MAXIMA_HORAS } from '../../../utils/cltValidator';
 import type { DiaEscala } from '../../../utils/escalaCalculator';
@@ -251,6 +254,9 @@ function FeriasAfastamentos({ equipe, ajustesSalvos, onSaveScaleOverride, onRepl
   // Trava síncrona: o estado só muda na próxima renderização e o clique duplo gravava o período duas vezes
   const enviandoRef = useRef(false);
   const podeRegistrar = Boolean(onSaveScaleOverride && onReplicateScaleDays);
+  const { token } = useAuth();
+  const removerAusencia = useRemoverAusencia(token);
+  const [paraExcluir, setParaExcluir] = useState<PeriodoAusencia | null>(null);
 
   const periodos = useMemo(
     () => periodosDeAusencia(ajustesSalvos.values(), new Map(equipe.map((emp) => [emp.id, emp.name]))),
@@ -332,20 +338,40 @@ function FeriasAfastamentos({ equipe, ajustesSalvos, onSaveScaleOverride, onRepl
         <h2 className="text-base font-bold text-on-surface mb-3">Períodos registrados</h2>
         {periodos.length === 0 && <p className="text-sm text-on-surface-variant">Nenhuma férias ou afastamento registrado.</p>}
         {periodos.length > 0 && (
-          <p className="text-[11px] text-on-surface-variant mb-2">
-            Lançou errado? Na aba Escalas &amp; Alocação, abra cada dia do período na grade e volte o status que ele tinha:
-            Trabalho nos dias de trabalho e Folga nas folgas do rodízio.
-          </p>
+          <p className="text-[11px] text-on-surface-variant mb-2">Lançou errado? Use Excluir: os dias do período voltam ao rodízio normal da escala.</p>
         )}
         <ul className="divide-y divide-outline-variant/10">
           {periodos.map((p) => (
             <li key={`${p.id}:${p.inicio}`} className="py-2 flex items-center justify-between gap-3 text-sm">
               <span className="text-on-surface">{p.nome}</span>
               <span className="text-on-surface-variant">{p.motivo} · {dataBR(p.inicio)}{p.fim !== p.inicio ? ` a ${dataBR(p.fim)}` : ''}</span>
+              <button type="button" onClick={() => setParaExcluir(p)} aria-label={`Excluir ${p.motivo} de ${p.nome}`} className="shrink-0 px-2 py-1 rounded-lg text-xs font-bold text-error hover:bg-error/10">Excluir</button>
             </li>
           ))}
         </ul>
       </section>
+      <ConfirmDialog
+        open={Boolean(paraExcluir)}
+        title={paraExcluir ? `Excluir ${paraExcluir.motivo.toLowerCase()} de ${paraExcluir.nome}?` : ''}
+        description={paraExcluir ? `${dataBR(paraExcluir.inicio)}${paraExcluir.fim !== paraExcluir.inicio ? ` a ${dataBR(paraExcluir.fim)}` : ''}: os dias voltam ao rodízio normal da escala.` : ''}
+        confirmLabel="Excluir"
+        confirmingLabel="Excluindo..."
+        cancelLabel="Manter"
+        icon="delete"
+        isSubmitting={removerAusencia.isPending}
+        onClose={() => { if (!removerAusencia.isPending) setParaExcluir(null); }}
+        onConfirm={async () => {
+          if (!paraExcluir) return;
+          try {
+            await removerAusencia.mutateAsync({ colaboradorId: paraExcluir.id, inicio: paraExcluir.inicio, fim: paraExcluir.fim, motivo: paraExcluir.motivo });
+            setToastMessage(`${paraExcluir.motivo} de ${paraExcluir.nome} excluído.`);
+          } catch (erro) {
+            setErrorMessage(erro instanceof Error ? erro.message : 'Não foi possível excluir.');
+          } finally {
+            setParaExcluir(null);
+          }
+        }}
+      />
     </div>
   );
 }
