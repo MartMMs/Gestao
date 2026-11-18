@@ -194,7 +194,8 @@ export function createClientesRouter(notificar: Notificar) {
         await travarChave(tx, `cliente:${id}`);
         const atual = await tx.cliente.findUnique({ where: { id }, select: { removidoEm: true, observacao: true, codigo: true } });
         if (!atual || atual.removidoEm) throw new HttpError(404, 'Cliente não encontrado.');
-        if (dados.nome) {
+        // Só quando o nome muda: a tela reenvia o nome em toda edição, e um homônimo antigo travava até trocar o telefone
+        if (dados.nome && mudaNome) {
           const homonimo = await clienteComMesmoNome(tx, dados.nome as string, id);
           if (homonimo) throw new HttpError(409, mensagemNomeDuplicado(homonimo, 'carteira'));
         }
