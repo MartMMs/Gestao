@@ -60,6 +60,10 @@ const arrastar = async (page: Page, de: number, ate: number) => {
   await page.mouse.up();
 };
 
+// Um teste por vez neste arquivo (mesmo worker, em ordem): em paralelo entre si, estes testes de tela pesados
+// disputavam CPU e banco e estouravam o tempo. 'default' em vez de 'serial': uma falha não pula os seguintes
+test.describe.configure({ mode: 'default' });
+
 test.describe('Grade de Escalas', () => {
   test('um dia: abre pelo clique e não salva sem mudança', async ({ page, request }) => {
     const nome = `Escala Dia ${sufixo()}`;

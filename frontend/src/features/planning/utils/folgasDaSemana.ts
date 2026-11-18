@@ -29,8 +29,9 @@ export const diasDaSemana = (qualquerDia: string) => {
 export const semanaVizinha = (qualquerDia: string, delta: number) => somarDias(segundaDaSemana(qualquerDia), delta * 7);
 
 export const rotuloDaFolga = (dia: DiaEscala) => {
-  if (dia.feriadoNome) return `Feriado (${dia.feriadoNome})`;
+  // Ausência do RH vem antes do feriado: férias num feriado continuam sendo férias daquela pessoa
   if (ehAusencia(dia.descricao)) return MOTIVOS_AUSENCIA.find((m) => dia.descricao!.startsWith(m)) ?? 'Ausência';
+  if (dia.feriadoNome) return `Feriado (${dia.feriadoNome})`;
   return dia.tipo === 'fds' ? 'FDS' : 'Folga';
 };
 
@@ -49,7 +50,8 @@ export function folgasDaSemana(
     const destinos = daSemana.filter((d) => d.tipo === 'trabalho' && !d.feriadoNome && d.data >= hoje);
     for (const dia of daSemana) {
       if (dia.feriadoNome) feriados.set(dia.data, dia.feriadoNome);
-      if (dia.tipo === 'trabalho' || dia.feriadoNome) continue;
+      // No feriado some só quem não trabalha por causa dele; férias/atestado/afastamento continuam na lista
+      if (dia.tipo === 'trabalho' || (dia.feriadoNome && !ehAusencia(dia.descricao))) continue;
       porDia.get(dia.data)!.push({
         colaboradorId: pessoa.id,
         nome: pessoa.name,

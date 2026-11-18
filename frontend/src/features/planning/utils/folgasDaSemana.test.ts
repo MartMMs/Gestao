@@ -42,4 +42,21 @@ describe('folgas da semana', () => {
     expect(feriados.get('2026-11-27')).toBe('Feriado Teste');
     expect(porDia.get('2026-11-27')).toEqual([]);
   });
+
+  it('férias ou atestado num feriado continuam listados com a tag da ausência; o resto da equipe some', () => {
+    const escalas: Record<string, DiaEscala[]> = {
+      ferias: escala({ '2026-11-27': { tipo: 'folga', feriadoNome: 'Feriado Teste', descricao: 'Férias' } }),
+      atestado: escala({ '2026-11-27': { tipo: 'folga', feriadoNome: 'Feriado Teste', descricao: 'Atestado médico' } }),
+      feriado: escala({ '2026-11-27': { tipo: 'folga', feriadoNome: 'Feriado Teste' } }),
+    };
+    const { porDia, feriados } = folgasDaSemana(
+      [{ id: 'ferias', name: 'Fábio' }, { id: 'atestado', name: 'Alice' }, { id: 'feriado', name: 'Zeca' }],
+      (id) => escalas[id], '2026-11-25', '2026-11-25',
+    );
+    expect(feriados.get('2026-11-27')).toBe('Feriado Teste');
+    expect(porDia.get('2026-11-27')!.map((f) => [f.nome, f.rotulo, f.trocavel])).toEqual([
+      ['Alice', 'Atestado médico', false],
+      ['Fábio', 'Férias', false],
+    ]);
+  });
 });

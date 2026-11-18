@@ -118,7 +118,7 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
           </button>
         </div>
 
-        <div className="grid gap-3 border-b border-outline-variant/20 bg-surface-container-low px-6 py-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 border-b border-outline-variant/20 bg-surface-container-low px-6 py-4 sm:grid-cols-2">
           <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
             <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Hoje</p>
             <p className="text-2xl font-headline text-primary">{summary.today}</p>
