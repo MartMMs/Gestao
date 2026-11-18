@@ -1,0 +1,10 @@
+# Botão "Sponsor" (Patrocinar) na página do repositório no GitHub.
+# Para o GitHub mostrar o botão, a conta precisa estar no GitHub Sponsors (github.com/sponsors).
+# Outras opções aceitas pelo GitHub: descomente e troque pelo seu usuário ou link.
+github: [MartMMs]
+# ko_fi: seu_usuario
+# buy_me_a_coffee: seu_usuario
+# patreon: seu_usuario
+# open_collective: seu_projeto
+# liberapay: seu_usuario
+# custom: ["https://seu-link-de-pagamento"]   # ex.: página com Pix
