@@ -38,6 +38,14 @@ export const getEmpresaConfig = () => prisma.configuracaoEmpresa.upsert({
   create: EMPRESA_PADRAO,
 });
 
+/**
+ * Configuração da empresa para quem não está logado (totem, TV, tela de login) e para o aviso em tempo real, que vai
+ * a todas as conexões: sem os textos e a ligação da confirmação do WhatsApp (só o admin lê, em /whatsapp/mensagens)
+ */
+export const empresaPublica = <T extends { mensagensLembrete?: unknown; lembretePedeConfirmacao?: unknown }>(
+  { mensagensLembrete: _mensagens, lembretePedeConfirmacao: _confirmacao, ...publica }: T,
+) => publica;
+
 export const getAutoatendimentoConfig = () => prisma.configuracaoAutoatendimento.upsert({
   where: { id: 'default' },
   update: {},

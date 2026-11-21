@@ -7,7 +7,7 @@ import { valoresGravados } from '../lib/valores';
 import { usuarioEhAdmin, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { redisService } from '../services/redisService';
 import { communicationService } from '../services/communicationService';
-import { comDisponibilidadePagamento, gatewayPagamento, getAutoatendimentoConfig, getEmpresaConfig, pagamentoOnlineDisponivel } from '../services/configService';
+import { empresaPublica, comDisponibilidadePagamento, gatewayPagamento, getAutoatendimentoConfig, getEmpresaConfig, pagamentoOnlineDisponivel } from '../services/configService';
 import {
   agendamentosDoDia,
   blocosDoIntervalo,
@@ -124,7 +124,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
 
   router.get('/empresa', async (_req, res) => {
     try {
-      res.json(await getEmpresaConfig());
+      res.json(empresaPublica(await getEmpresaConfig()));
     } catch (error) {
       responderErro(res, error, 'Falha ao buscar dados da empresa.');
     }

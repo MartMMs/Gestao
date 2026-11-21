@@ -46,3 +46,6 @@ generated/
 
 # Sessão do WhatsApp conectado por QR code (equivale a estar logado no número)
 .whatsapp-sessao/
+
+# Dumps do banco feitos pelo scripts/deploy-producao.sh (dados reais de clientes)
+backups/

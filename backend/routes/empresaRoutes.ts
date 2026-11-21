@@ -6,7 +6,7 @@ import { prisma } from '../db';
 import { config } from '../env';
 import { assinarToken, avisoTentativasSenha, dadosDoToken, getUsuario, revogarToken, senhaAtualConfere, tokenCsrfDaSessao, usuarioEhAdmin, verificarSupervisorToken, verificarToken, verificarTokenSenhaProvisoria, violaCsrf, type Papel } from '../auth';
 import { redisService } from '../services/redisService';
-import { getEmpresaConfig } from '../services/configService';
+import { empresaPublica, getEmpresaConfig } from '../services/configService';
 import { obterFeriadosNacionais } from '../../shared/feriadosBR';
 import { EMAIL_REGEX, USUARIO_REGEX } from '../../shared/validadores';
 import { duracaoTotal, horarioValido, partesNoFuso, validarFuncionamento, validarHorarioAgendamento, type Funcionamento } from '../../shared/agenda';
@@ -384,7 +384,7 @@ export function createEmpresaRouter(eventos: Eventos) {
   // Configurações gerais da empresa (leitura pública: usadas na tela de login e no totem)
   router.get('/empresa/config', async (_req, res) => {
     try {
-      res.json(await getEmpresaConfig());
+      res.json(empresaPublica(await getEmpresaConfig()));
     } catch (error) {
       responderErro(res, error, 'Falha ao buscar configurações da empresa');
     }
@@ -453,7 +453,7 @@ export function createEmpresaRouter(eventos: Eventos) {
       // Só o evento da config: notificarMudanca() sem escopo fazia todas as telas baixarem todas as listas de uma vez
       // (agenda, clientes, equipe...) e travava Clientes e Relatórios. Nenhuma lista de ESCOPOS_MUDANCA muda com a
       // config; a config e os relatórios (que usam a comissão) o front recarrega por este evento (invalidarConfigEmpresa)
-      eventos.emitirConfigEmpresa(configAtualizada);
+      eventos.emitirConfigEmpresa(empresaPublica(configAtualizada));
       res.json(configAtualizada);
     } catch (error) {
       responderErro(res, error, 'Falha ao salvar configurações da empresa');

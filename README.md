@@ -170,25 +170,29 @@ add_header X-Content-Type-Options nosniff always;
 
 Defina `VITE_API_URL` no build de producao: sem ela, a CSP libera a porta 3333 de qualquer host.
 
-## HTTPS / TLS (producao)
+## Producao: HTTPS e isolamento do totem
 
 O TLS fica no nginx; o Node escuta so em `127.0.0.1:3333`. Modelo pronto em
-[docs/nginx-https.conf.example](docs/nginx-https.conf.example) (nginx 1.25.1+: TLS 1.2/1.3, HTTP vira HTTPS, HSTS, CSP,
-Referrer-Policy, Permissions-Policy, WebSocket, host desconhecido sem resposta). Teste a CSP antes com
-`Content-Security-Policy-Report-Only` e preencha `VITE_AUTOATENDIMENTO_HOST` e `VITE_TV_HOST` com os hosts exatos.
+[docs/nginx-https.conf.example](docs/nginx-https.conf.example): dois sites com o mesmo build, cada um falando com a API
+no proprio endereco (`/api`):
 
-1. Gere o certificado: `sudo certbot certonly --nginx -d app.suaempresa.com -d autoatendimento.suaempresa.com -d tv.suaempresa.com -d api.suaempresa.com`.
-2. Backend com `NODE_ENV=production` (cookie de sessao `Secure` e HSTS) e `TRUST_PROXY=1`.
-3. Use `https://` em `CORS_ORIGINS`, `VITE_API_URL`, `VITE_SOCKET_URL` e `VITE_AUTOATENDIMENTO_URL`.
-4. O certbot renova sozinho; confira com `sudo certbot renew --dry-run`.
+- `agendar.suaempresa.com` (clientes): so o totem e `/api/autoatendimento/*`. `/login`, `/rh`, `/admin`, o resto da
+  `/api` e `/health` respondem **404** (nunca 403 nem redirecionamento).
+- `painel.suaempresa.com` e `tv.suaempresa.com` (equipe): API inteira. Bloco pronto (comentado) para restringir por IP
+  ou Cloudflare Access.
 
-## Totem em subdominio (producao)
+1. DNS dos tres hosts para o servidor; certificado: `sudo certbot certonly --nginx -d agendar.suaempresa.com -d painel.suaempresa.com -d tv.suaempresa.com`.
+2. `.env` do backend: `NODE_ENV=production`, `TRUST_PROXY=1`, `REDIS_URL`,
+   `CORS_ORIGINS=https://agendar.suaempresa.com,https://painel.suaempresa.com,https://tv.suaempresa.com`.
+3. `.env` do build: `VITE_API_URL=/api`, `VITE_SOCKET_URL=/`, `VITE_AUTOATENDIMENTO_HOST=agendar.suaempresa.com`,
+   `VITE_TV_HOST=tv.suaempresa.com`, `VITE_AUTOATENDIMENTO_URL=https://agendar.suaempresa.com`.
+4. Deploy: `SERVICO_API=gestao-api ./scripts/deploy-producao.sh` (confere o `.env`, `pg_dump` em `./backups`,
+   `npm ci`, `prisma migrate deploy`, build limpo sem source maps, reinicia e espera `/health` = ok).
+5. `sudo nginx -t && sudo systemctl reload nginx`; o certbot renova sozinho (`sudo certbot renew --dry-run`).
 
-1. Aponte o DNS de `autoatendimento.<seu-dominio>` para o mesmo servidor do portal e sirva o mesmo build do frontend.
-2. Inclua as duas origens em `CORS_ORIGINS` (ex.: `https://app.suaempresa.com,https://autoatendimento.suaempresa.com`).
-3. Gere o build com `VITE_AUTOATENDIMENTO_URL=https://autoatendimento.suaempresa.com`.
-
-Use um subdominio, nao um caminho (`app.x.com/autoatendimento`): so outra origem isola a sessao da equipe.
+Teste local dos dois fluxos: `npm run dev:all` e abra `http://autoatendimento.localhost:3000` (so o totem; qualquer
+caminho, inclusive `/login`, abre o inicio do totem) e `http://localhost:3000` (portal). Em DEV `/totem` tambem abre o totem.
+Use subdominio, nao caminho (`painel.x.com/agendar`): so outra origem isola a sessao da equipe.
 
 ## Pagamentos do autoatendimento
 

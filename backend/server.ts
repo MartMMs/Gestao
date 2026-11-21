@@ -97,6 +97,16 @@ const jsonPadrao = lerJson('100kb');
 app.use('/api/clientes/importar', lerJson('400kb'));
 app.use(jsonPadrao);
 
+// Saúde para o deploy e o monitoramento: só diz se a API e o banco respondem (nada de versão, host ou erro)
+app.get(['/health', '/api/health'], async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok' });
+  } catch {
+    res.status(503).json({ status: 'erro' });
+  }
+});
+
 app.use('/api', createRouter(eventos));
 app.use('/api/autoatendimento', createAutoatendimentoRouter(eventos));
 

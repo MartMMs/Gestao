@@ -11,11 +11,13 @@ const politicaDeSeguranca = (env: Record<string, string>): Plugin => {
   };
   const api = [origem(env.VITE_API_URL), origem(env.VITE_SOCKET_URL)].filter(Boolean);
   const sockets = api.map((o) => o.replace(/^http/, 'ws'));
+  // API no mesmo endereço do site (VITE_API_URL=/api, atrás do proxy): 'self' já cobre, nada a liberar
+  const mesmaOrigem = (env.VITE_API_URL || '').startsWith('/');
   // Sem URL configurada, a API fica na porta 3333 do mesmo host (ver config/api.ts): libera só essa porta
-  if (api.length === 0) {
+  if (api.length === 0 && !mesmaOrigem) {
     console.warn('[CSP] VITE_API_URL não definida: a política libera a porta 3333 de qualquer host. Defina-a no build de produção.');
   }
-  const conexoes = api.length > 0
+  const conexoes = api.length > 0 || mesmaOrigem
     ? [...api, ...sockets]
     : ['http://*:3333', 'https://*:3333', 'ws://*:3333', 'wss://*:3333'];
   const csp = [
@@ -44,6 +46,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, path.resolve(__dirname, '..'), 'VITE_');
   return {
     plugins: [react(), tailwindcss(), politicaDeSeguranca(env)],
+    // Sem mapas do código-fonte em produção: o código do portal não fica legível para quem abre o totem
+    build: { sourcemap: false },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
