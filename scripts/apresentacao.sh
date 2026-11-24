@@ -23,17 +23,20 @@ command -v cloudflared >/dev/null || falha "instale o cloudflared (ver README)."
 
 # Banco: exige um de demonstração explícito e recusa o mesmo banco do .env (dados reais de clientes).
 # Exceção consciente: USAR_BANCO_DO_ENV=1 publica o banco do .env (só quando ele é de teste, sem dados reais).
+# DATABASE_URL do .env lida pelo mesmo dotenv da API: aspas e caracteres no meio da senha ficam como estão
+url_do_env() { [ -f .env ] && node -e 'process.stdout.write(require("dotenv").parse(require("fs").readFileSync(".env")).DATABASE_URL ?? "")' 2>/dev/null; }
 if [ "${USAR_BANCO_DO_ENV:-}" = 1 ]; then
-  DATABASE_URL_DEMO="$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?DATABASE_URL[[:space:]]*=[[:space:]]*//p' .env 2>/dev/null | tail -1 | tr -d "\"'")"
+  DATABASE_URL_DEMO="$(url_do_env)"
   [ -n "$DATABASE_URL_DEMO" ] || falha "USAR_BANCO_DO_ENV=1, mas não achei DATABASE_URL no .env."
   echo "ATENÇÃO: publicando o banco do .env (${DATABASE_URL_DEMO##*/}) na internet. Use só se ele NÃO tem dados reais de clientes."
 fi
 [ -n "${DATABASE_URL_DEMO:-}" ] || falha "defina DATABASE_URL_DEMO com um banco só de demonstração (ex.: .../gestao_demo). O banco do .env nunca é usado aqui."
-# "#" e "?" confundiriam a leitura do nome (ex.: .../gestao#demo conecta no banco "gestao")
-[[ "$DATABASE_URL_DEMO" != *"#"* && "$DATABASE_URL_DEMO" != *"?"* ]] || falha "DATABASE_URL_DEMO não pode ter '#' nem '?'."
+# "#" e "?" confundiriam a leitura do nome (ex.: .../gestao#demo conecta no banco "gestao"). Com USAR_BANCO_DO_ENV
+# o nome não decide nada (a URL já é a da API), então "?schema=public" do .env é aceito
+[ "${USAR_BANCO_DO_ENV:-}" = 1 ] || [[ "$DATABASE_URL_DEMO" != *"#"* && "$DATABASE_URL_DEMO" != *"?"* ]] || falha "DATABASE_URL_DEMO não pode ter '#' nem '?'."
 nome_do_banco() { local u="${1%%\?*}"; printf '%s' "${u##*/}"; }
 BANCO_DEMO="$(nome_do_banco "$DATABASE_URL_DEMO")"
-BANCO_REAL="$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?DATABASE_URL[[:space:]]*=[[:space:]]*//p' .env 2>/dev/null | tail -1 | tr -d "\"'" || true)"
+BANCO_REAL="$(url_do_env || true)"
 [ -n "$BANCO_REAL" ] || [ ! -f .env ] || falha "não consegui ler DATABASE_URL do .env para garantir que o banco de demonstração é outro."
 if [ "${USAR_BANCO_DO_ENV:-}" != 1 ] && [ -n "$BANCO_REAL" ] && [ "$BANCO_DEMO" = "$(nome_do_banco "$BANCO_REAL")" ]; then
   falha "DATABASE_URL_DEMO aponta para o mesmo banco do .env ($BANCO_DEMO). Use um banco separado, ex.: gestao_demo."

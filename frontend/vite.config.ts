@@ -5,6 +5,9 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, path.resolve(__dirname, '..'), 'VITE_');
+  const hostsDoSite = [env.VITE_AUTOATENDIMENTO_HOST, env.VITE_PAINEL_HOST, env.VITE_TV_HOST].flatMap((h) => (h ?? '').split(',').map((x) => x.trim()).filter(Boolean));
+  // Tempo real (Socket.IO) só com o próprio site: "wss:" sozinho deixaria um script injetado falar com qualquer servidor
+  const wssDoSite = hostsDoSite.map((h) => `wss://${h}`).join(' ');
   return {
     // CSP: fonte única no nginx (docs/nginx-https.conf.example), por cabeçalho; o build não leva <meta> de CSP
     plugins: [react(), tailwindcss()],
@@ -19,16 +22,17 @@ export default defineConfig(({ mode }) => {
       },
     },
     // vite preview atrás do Cloudflare Tunnel (scripts/apresentacao.sh): aceita só os hosts configurados e manda
-    // os mesmos cabeçalhos de segurança do nginx de produção (CSP em Report-Only, como lá)
+    // os mesmos cabeçalhos de segurança do nginx de produção (CSP bloqueando, como lá). Imagens externas: só os
+    // avatares gerados (api.dicebear.com); o QR do WhatsApp vem como data:
     preview: {
       headers: {
         'X-Frame-Options': 'DENY',
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'strict-origin-when-cross-origin',
         'Strict-Transport-Security': 'max-age=31536000',
-        'Content-Security-Policy': "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' https://assets.mixkit.co; connect-src 'self' wss: https://api.open-meteo.com https://cloudflareinsights.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+        'Content-Security-Policy': `default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://api.dicebear.com; media-src 'self' https://assets.mixkit.co; connect-src 'self' ${wssDoSite} https://api.open-meteo.com https://cloudflareinsights.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`,
       },
-      allowedHosts: [env.VITE_AUTOATENDIMENTO_HOST, env.VITE_PAINEL_HOST, env.VITE_TV_HOST].flatMap((h) => (h ?? '').split(',').map((x) => x.trim()).filter(Boolean)),
+      allowedHosts: hostsDoSite,
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
