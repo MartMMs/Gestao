@@ -16,7 +16,7 @@ import { ScheduleRulerGrid } from '../../../components/ScheduleRulerGrid';
 import { atendeNaAgenda, formatarReais } from '../../../utils/formatters';
 import { JANELA_AGENDA_DIAS } from '@shared/agendaJanela';
 import { ListaSemBaixa, useSemBaixa } from './ListaSemBaixa';
-import { bloqueioDiaInteiro, diaDaSemana, horarioParaMinutos, INTERVALO_AGENDAMENTO_MIN, minutoDentroDoBloqueio, minutosParaHorario, validarHorarioAgendamento } from '@shared/agenda';
+import { abreNaData, bloqueioDiaInteiro, diaDaSemana, funcionamentoNaData, mensagemCasaFechada, horarioParaMinutos, INTERVALO_AGENDAMENTO_MIN, minutoDentroDoBloqueio, minutosParaHorario, validarHorarioAgendamento } from '@shared/agenda';
 import type { DiaEscala } from '@shared/escala';
 import { codigoReserva, lerCodigoReserva } from '@shared/codigoReserva';
 import { estaDeFolga, statusDoDia, type EmployeeDayStatus } from '../utils/statusDoDia';
@@ -71,7 +71,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     .filter((a) => a.date === receptionDate && a.status !== 'cancelled')
     .map((a): [number, number] => { const i = horarioParaMinutos(a.time); return [i, i + getDuration(a.services, services)]; }),
   [appointments, receptionDate, services]);
-  const { horaInicioGrade, horaFimGrade } = horasDaGrade(funcionamento, intervalosDoDia);
+  const { horaInicioGrade, horaFimGrade } = horasDaGrade(funcionamentoNaData(funcionamento, receptionDate), intervalosDoDia);
   const [scheduleSearchTerm, setScheduleSearchTerm] = useState('');
   const [professionalFilter, setProfessionalFilter] = useState('all');
   const OFF_DAY_FILTER = '__off_today__';
@@ -639,9 +639,9 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
         {visao === 'dia' && professionalFilter === OFF_DAY_FILTER && activeEmployees.length === 0 && (
           <p role="status" className="text-sm text-on-surface-variant mb-2 shrink-0">Nenhum profissional de folga neste dia.</p>
         )}
-        {visao === 'dia' && !funcionamento.dias.includes(diaDaSemana(receptionDate)) && (
+        {visao === 'dia' && !abreNaData(funcionamento, receptionDate) && (
           <p role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300 mb-2 shrink-0">
-            Casa fechada neste dia (horário de funcionamento). Novos agendamentos não são aceitos.
+            {mensagemCasaFechada(funcionamento, receptionDate)} Novos agendamentos não são aceitos.
           </p>
         )}
         {visao === 'dia' && (

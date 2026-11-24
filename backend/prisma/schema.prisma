@@ -230,6 +230,8 @@ model ConfiguracaoEmpresa {
   horaFechamento        String   @default("21:00")
   horaLimiteAgendamento String?
   diasFuncionamento     Int[]    @default([0, 1, 2, 3, 4, 5, 6])
+  // Exceções por data: [{ data: "AAAA-MM-DD", fechado, abertura, fechamento, motivo }] (shared/agenda.ts DiaEspecial)
+  diasEspeciais         Json     @default("[]")
   // Lembretes de WhatsApp escritos pela casa, com chaves ({nome}, {horario}...). Vazio = mensagem padrão; várias = sorteia
   mensagensLembrete     String[] @default([])
   // Lembrete pergunta "1 = Sim, confirmo / 2 = Não poderei ir" (respostas lidas pelo WhatsApp por QR code)

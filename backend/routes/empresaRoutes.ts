@@ -10,7 +10,7 @@ import { redisService } from '../services/redisService';
 import { empresaPublica, getEmpresaConfig } from '../services/configService';
 import { obterFeriadosNacionais } from '../../shared/feriadosBR';
 import { EMAIL_REGEX, USUARIO_REGEX } from '../../shared/validadores';
-import { duracaoTotal, horarioValido, partesNoFuso, validarFuncionamento, validarHorarioAgendamento, type Funcionamento } from '../../shared/agenda';
+import { duracaoTotal, horarioValido, lerDiaEspecial, lerFuncionamento, MAX_DIAS_ESPECIAIS, partesNoFuso, validarFuncionamento, validarHorarioAgendamento, type DiaEspecial, type Funcionamento } from '../../shared/agenda';
 import { CODIGO_FORA_DO_HORARIO } from '../../shared/codigosErro';
 import { responderErro, ipDoCliente } from '../lib/http';
 import { registrarAuditoria } from '../lib/auditoria';
@@ -101,7 +101,8 @@ const CAMPOS_EMPRESA = [
 
 // Campos validados do PUT; os do horário com o tipo certo (o PUT monta o horário novo sem conversões)
 type DadosEmpresa = {
-  [campo: string]: string | boolean | number[] | null | undefined;
+  [campo: string]: string | boolean | number[] | DiaEspecial[] | null | undefined;
+  diasEspeciais?: DiaEspecial[];
   horaAbertura?: string;
   horaFechamento?: string;
   horaLimiteAgendamento?: string | null;
@@ -125,6 +126,13 @@ const validarConfigEmpresa = (body: Record<string, unknown>): { erro: string; da
     const dias: unknown = body.diasFuncionamento;
     if (!Array.isArray(dias) || dias.some((d) => !Number.isInteger(d))) return { erro: 'Dias de funcionamento inválidos.' };
     dados.diasFuncionamento = [...(dias as number[])].sort((a, b) => a - b);
+  }
+  if (body.diasEspeciais !== undefined) {
+    const lista: unknown = body.diasEspeciais;
+    if (!Array.isArray(lista) || lista.length > MAX_DIAS_ESPECIAIS) return { erro: `Dias especiais inválidos (no máximo ${MAX_DIAS_ESPECIAIS}).` };
+    const especiais = lista.map(lerDiaEspecial);
+    if (especiais.some((d) => d === null)) return { erro: 'Dias especiais inválidos.' };
+    dados.diasEspeciais = (especiais as DiaEspecial[]).sort((a, b) => a.data.localeCompare(b.data));
   }
   if (body.usarComissao !== undefined) {
     if (typeof body.usarComissao !== 'boolean') return { erro: 'Campo usarComissao inválido.' };
@@ -410,10 +418,11 @@ export function createEmpresaRouter(eventos: Eventos) {
         fechamento: d.horaFechamento ?? atual.horaFechamento,
         limite: d.horaLimiteAgendamento !== undefined ? d.horaLimiteAgendamento : atual.horaLimiteAgendamento,
         dias: d.diasFuncionamento ?? atual.diasFuncionamento,
+        especiais: d.diasEspeciais ?? lerFuncionamento(atual).especiais,
       };
       const erroHorario = validarFuncionamento(novoHorario);
       if (erroHorario) return res.status(400).json({ erro: erroHorario });
-      const horarioMudou = (['horaAbertura', 'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento'] as const)
+      const horarioMudou = (['horaAbertura', 'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento', 'diasEspeciais'] as const)
         .some((c) => d[c] !== undefined && JSON.stringify(d[c]) !== JSON.stringify(atual[c]));
       // Atendimentos marcados que ficariam fora do novo horário continuam marcados: quem muda precisa saber e confirmar
       if (horarioMudou && req.body?.confirmarForaDoHorario !== true) {
@@ -454,7 +463,7 @@ export function createEmpresaRouter(eventos: Eventos) {
 
       await registrarAuditoria(req, { acao: 'empresa.comissao', alvo: 'Comissão da empresa', antes: atual, depois: configAtualizada, campos: ['usarComissao'] });
       // Horário muda o que a agenda e o totem aceitam: fica no histórico (só registra se mudou)
-      await registrarAuditoria(req, { acao: 'empresa.horario', alvo: 'Horário de funcionamento', antes: atual, depois: configAtualizada, campos: ['horaAbertura', 'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento'] });
+      await registrarAuditoria(req, { acao: 'empresa.horario', alvo: 'Horário de funcionamento', antes: atual, depois: configAtualizada, campos: ['horaAbertura', 'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento', 'diasEspeciais'] });
       // Ligar ou desligar a ficha obrigatória muda quem consegue agendar: fica no histórico (só registra se mudou)
       await registrarAuditoria(req, { acao: 'empresa.habilidades', alvo: 'Exigir habilidades nos agendamentos', antes: atual, depois: configAtualizada, campos: ['exigenciaHabilidades'] });
       await registrarAuditoria(req, { acao: 'empresa.anamnese', alvo: 'Ficha de anamnese obrigatória', antes: atual, depois: configAtualizada, campos: ['exigirAnamnese'] });

@@ -4,7 +4,8 @@ import { CONTAS, apiBase, authHeaders, loginPelaTela } from './credenciais';
 // Mudam o horário da empresa toda: projeto configuracao-global, em série, e o original volta no fim
 test.describe.configure({ mode: 'serial' });
 
-type Horario = { horaAbertura: string; horaFechamento: string; horaLimiteAgendamento: string | null; diasFuncionamento: number[] };
+type DiaEspecial = { data: string; fechado: boolean; abertura?: string | null; fechamento?: string | null; motivo?: string | null };
+type Horario = { horaAbertura: string; horaFechamento: string; horaLimiteAgendamento: string | null; diasFuncionamento: number[]; diasEspeciais?: DiaEspecial[] };
 let original: Horario;
 
 const gravar = async (request: APIRequestContext, dados: Partial<Horario> & { confirmarForaDoHorario?: boolean }, conta: string = CONTAS.admin) =>
@@ -44,7 +45,7 @@ test.beforeAll(async ({ request }) => {
   const r = await request.get(`${apiBase()}/empresa/config`);
   expect(r.ok(), 'ler o horário original para devolver no fim').toBeTruthy();
   const c = await r.json();
-  original = { horaAbertura: c.horaAbertura, horaFechamento: c.horaFechamento, horaLimiteAgendamento: c.horaLimiteAgendamento, diasFuncionamento: c.diasFuncionamento };
+  original = { horaAbertura: c.horaAbertura, horaFechamento: c.horaFechamento, horaLimiteAgendamento: c.horaLimiteAgendamento, diasFuncionamento: c.diasFuncionamento, diasEspeciais: c.diasEspeciais ?? [] };
   expect(original.horaAbertura && original.horaFechamento && Array.isArray(original.diasFuncionamento), JSON.stringify(original)).toBeTruthy();
 });
 test.afterAll(async ({ request }) => gravarConfirmando(request, original));
@@ -150,4 +151,63 @@ test('tela: supervisão muda o horário, o administrador vê o mesmo e salvar a 
   } finally {
     await contexto.close();
   }
+});
+
+test('dias especiais: data fechada, horário próprio e domingo aberto valem no totem e na agenda', async ({ request }) => {
+  const [quarta, quinta, domingo] = [proximo(3, 5), proximo(4, 5), proximo(0, 5)];
+  await gravarConfirmando(request, {
+    horaAbertura: '09:00', horaFechamento: '18:00', horaLimiteAgendamento: null, diasFuncionamento: [1, 2, 3, 4, 5, 6],
+    diasEspeciais: [
+      { data: quarta, fechado: true, motivo: 'Inventário' },
+      { data: quinta, fechado: false, abertura: '10:00', fechamento: '14:00' },
+      { data: domingo, fechado: false, abertura: '09:00', fechamento: '12:00' },
+    ],
+  });
+  const config = await (await request.get(`${apiBase()}/empresa/config`)).json();
+  expect(config.diasEspeciais).toHaveLength(3); // a config pública leva os dias especiais
+
+  const servicos = await (await request.get(`${apiBase()}/autoatendimento/servicos`)).json() as { id: string; nome: string }[];
+  const servicoId = (servicos.find((s) => s.nome === 'E2E Massagem') ?? servicos[0]).id;
+  const totem = async (data: string) => (await request.get(`${apiBase()}/autoatendimento/disponibilidade?data=${data}&servicoIds=${servicoId}`)).json();
+  const br = (d: string) => d.split('-').reverse().join('/');
+
+  const fechado = await totem(quarta);
+  expect(fechado.slots).toEqual([]);
+  expect(fechado.mensagem).toBe(`A casa estará fechada em ${br(quarta)} (Inventário).`);
+  const curto = (await totem(quinta)).slots.map((s: { horario: string }) => s.horario);
+  expect(curto[0]).toBe('10:00');
+  expect(curto.every((h: string) => h >= '10:00' && h < '14:00')).toBeTruthy();
+  expect((await totem(domingo)).slots.length).toBeGreaterThan(0); // domingo normalmente fechado, aberto só nessa data
+
+  // Agenda da equipe: recusa a data fechada e o horário depois do fechamento especial
+  const naQuarta = await marcar(request, quarta, '11:00');
+  expect(naQuarta.status()).toBe(400);
+  expect((await naQuarta.json()).erro).toContain(`fechada em ${br(quarta)}`);
+  const tardeNaQuinta = await marcar(request, quinta, '15:00');
+  expect(tardeNaQuinta.status()).toBe(400);
+  const manhaNaQuinta = await marcar(request, quinta, '10:00');
+  expect(manhaNaQuinta.status(), await manhaNaQuinta.text()).toBe(201);
+  await apagar(request, await manhaNaQuinta.json());
+
+  // Data inválida é recusada
+  const invalido = await gravar(request, { diasEspeciais: [{ data: quinta, fechado: false, abertura: '14:00', fechamento: '10:00' }] });
+  expect(invalido.status()).toBe(400);
+});
+
+test('tela: supervisão fecha uma data pelo cartão de horário', async ({ page, request }) => {
+  await gravarConfirmando(request, { horaAbertura: '09:00', horaFechamento: '21:00', horaLimiteAgendamento: null, diasFuncionamento: [1, 2, 3, 4, 5, 6], diasEspeciais: [] });
+  const data = proximo(2, 20);
+  await page.goto('/');
+  await loginPelaTela(page, CONTAS.supervisor);
+  await page.getByRole('button', { name: /Totem & Autoatendimento/i }).click();
+  const cartao = page.getByRole('form', { name: 'Horário de funcionamento' });
+  await cartao.getByLabel('Data').fill(data);
+  await cartao.getByRole('button', { name: 'Adicionar dia' }).click();
+  const lista = cartao.getByRole('list', { name: 'Dias especiais' });
+  await expect(lista.getByText(data.split('-').reverse().join('/'))).toBeVisible();
+  await lista.getByRole('textbox').fill('Inventário');
+  await cartao.getByRole('button', { name: /Salvar/ }).click();
+  await expect(cartao.getByRole('status')).toContainText('Horário de funcionamento salvo');
+  await expect.poll(async () => (await (await request.get(`${apiBase()}/empresa/config`)).json()).diasEspeciais)
+    .toEqual([{ data, fechado: true, abertura: null, fechamento: null, motivo: 'Inventário' }]);
 });

@@ -13,6 +13,7 @@ const empresa = {
   horaFechamento: '21:00',
   horaLimiteAgendamento: null,
   diasFuncionamento: [1, 2, 3],
+  diasEspeciais: [],
   mensagensLembrete: ['Oi {nome}'],
   lembretePedeConfirmacao: true,
   atualizadoEm: new Date('2026-11-21T12:00:00Z'),

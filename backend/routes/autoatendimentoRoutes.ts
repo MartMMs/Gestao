@@ -40,6 +40,9 @@ import type { Eventos } from '../lib/eventos';
 import {
   diaDaSemana,
   lerFuncionamento,
+  funcionamentoNaData,
+  abreNaData,
+  mensagemCasaFechada,
   diaNoPlural,
   INTERVALO_SLOT_TOTEM_MIN,
   dataValida,
@@ -230,6 +233,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       const elegiveis = colaboradores.filter((c) => !indisponivelNaEscala.has(c.id) && !erroElegibilidade(c, servicos, { checarHabilidade }));
       const agora = new Date();
       const funcionamento = lerFuncionamento(empresa);
+      const horarioDoDia = funcionamentoNaData(funcionamento, data);
 
       const slots: Array<{
         horario: string;
@@ -240,8 +244,8 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       }> = [];
 
       // Primeiro horário alinhado aos 30 min do totem (abertura 08:15 começa em 08:30; sem isso nenhum horário passaria)
-      const primeiroHorario = Math.ceil(horarioParaMinutos(funcionamento.abertura) / INTERVALO_SLOT_TOTEM_MIN) * INTERVALO_SLOT_TOTEM_MIN;
-      for (let inicio = primeiroHorario; inicio + resumo.duracaoTotalSlot <= horarioParaMinutos(funcionamento.fechamento); inicio += INTERVALO_SLOT_TOTEM_MIN) {
+      const primeiroHorario = Math.ceil(horarioParaMinutos(horarioDoDia.abertura) / INTERVALO_SLOT_TOTEM_MIN) * INTERVALO_SLOT_TOTEM_MIN;
+      for (let inicio = primeiroHorario; inicio + resumo.duracaoTotalSlot <= horarioParaMinutos(horarioDoDia.fechamento); inicio += INTERVALO_SLOT_TOTEM_MIN) {
         const horario = minutosParaHorario(inicio);
         // Horários que já passaram não são oferecidos
         if (validarHorarioAgendamento(data, horario, resumo.duracaoTotalSlot, { agora, intervaloMin: INTERVALO_SLOT_TOTEM_MIN, funcionamento })) continue;
@@ -302,9 +306,9 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         slots,
         ...(slots.length === 0 ? {
           // Dia fechado não é dia lotado: o cliente precisa saber que não adianta tentar outro horário
-          mensagem: funcionamento.dias.includes(diaDaSemana(data))
+          mensagem: abreNaData(funcionamento, data)
             ? 'Não há horários disponíveis para esta data.'
-            : `Não abrimos ${diaNoPlural(diaDaSemana(data))}.`,
+            : horarioDoDia.especial?.fechado ? mensagemCasaFechada(funcionamento, data) : `Não abrimos ${diaNoPlural(diaDaSemana(data))}.`,
         } : {}),
       });
     } catch (error) {

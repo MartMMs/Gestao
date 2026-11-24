@@ -32,10 +32,13 @@ export const horarioParaMinutos = (horario: string) => {
  * Horário de funcionamento da casa (ConfiguracaoEmpresa). `limite` = último horário em que um atendimento pode
  * começar (null = até o fechamento). `dias` = dias da semana abertos (0 = domingo ... 6 = sábado).
  */
-export type Funcionamento = { abertura: string; fechamento: string; limite: string | null; dias: number[] };
+export type Funcionamento = { abertura: string; fechamento: string; limite: string | null; dias: number[]; especiais: DiaEspecial[] };
+/** Exceção de uma data (AAAA-MM-DD): fechada o dia todo, ou aberta com horário próprio (vale mesmo em dia da semana fechado). */
+export type DiaEspecial = { data: string; fechado: boolean; abertura: string | null; fechamento: string | null; motivo: string | null };
 export const FUNCIONAMENTO_PADRAO: Funcionamento = {
-  abertura: '09:00', fechamento: '21:00', limite: null, dias: [0, 1, 2, 3, 4, 5, 6],
+  abertura: '09:00', fechamento: '21:00', limite: null, dias: [0, 1, 2, 3, 4, 5, 6], especiais: [],
 };
+export const MAX_DIAS_ESPECIAIS = 120;
 export const NOMES_DIAS_SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 // "aos domingos", "às segundas": o dia da semana no plural, para avisos de dia fechado
 export const diaNoPlural = (semana: number) => `${semana === 0 || semana === 6 ? 'aos' : 'às'} ${NOMES_DIAS_SEMANA[semana]}s`;
@@ -43,13 +46,70 @@ export const diaNoPlural = (semana: number) => `${semana === 0 || semana === 6 ?
 // Lê da config da empresa (ou de dados ainda não carregados): campo ausente ou inválido vale o padrão
 export const lerFuncionamento = (cfg?: {
   horaAbertura?: string | null; horaFechamento?: string | null; horaLimiteAgendamento?: string | null; diasFuncionamento?: number[] | null;
+  diasEspeciais?: unknown;
 } | null): Funcionamento => ({
   abertura: horarioValido(cfg?.horaAbertura) ? cfg.horaAbertura : FUNCIONAMENTO_PADRAO.abertura,
   fechamento: horarioValido(cfg?.horaFechamento) ? cfg.horaFechamento : FUNCIONAMENTO_PADRAO.fechamento,
   limite: horarioValido(cfg?.horaLimiteAgendamento) ? cfg.horaLimiteAgendamento : null,
   // Lista vazia ou com lixo (gravada direto no banco) fecharia a casa inteira: vale o padrão
   dias: diasValidos(cfg?.diasFuncionamento) ? cfg.diasFuncionamento : FUNCIONAMENTO_PADRAO.dias,
+  // Item com lixo (gravado direto no banco) é ignorado: não pode fechar nem abrir a casa por engano
+  especiais: Array.isArray(cfg?.diasEspeciais)
+    ? (cfg.diasEspeciais as unknown[]).map(normalizarDiaEspecial).filter((d): d is DiaEspecial => d !== null && !erroDiaEspecial(d))
+      .sort((a, b) => a.data.localeCompare(b.data))
+    : [],
 });
+
+const normalizarDiaEspecial = (bruto: unknown): DiaEspecial | null => {
+  if (!bruto || typeof bruto !== 'object') return null;
+  const d = bruto as Record<string, unknown>;
+  const texto = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const fechado = d.fechado === true;
+  return {
+    data: typeof d.data === 'string' ? d.data : '',
+    fechado,
+    abertura: fechado ? null : texto(d.abertura),
+    fechamento: fechado ? null : texto(d.fechamento),
+    motivo: texto(d.motivo)?.slice(0, 80) ?? null,
+  };
+};
+export const lerDiaEspecial = normalizarDiaEspecial;
+
+// Confere um dia especial; retorna a mensagem de erro ou null
+export const erroDiaEspecial = (d: DiaEspecial): string | null => {
+  if (!dataValida(d.data)) return 'Escolha uma data válida para o dia especial.';
+  if (d.fechado) return null;
+  if (!horarioValido(d.abertura) || !horarioValido(d.fechamento)) return `Informe abertura e fechamento de ${dataCurta(d.data)} no formato HH:MM.`;
+  const abre = horarioParaMinutos(d.abertura);
+  if (horarioParaMinutos(d.fechamento) <= abre) return `Em ${dataCurta(d.data)}, o fechamento precisa ser depois da abertura.`;
+  if (abre % INTERVALO_AGENDAMENTO_MIN !== 0) return `Em ${dataCurta(d.data)}, a abertura precisa ser de ${INTERVALO_AGENDAMENTO_MIN} em ${INTERVALO_AGENDAMENTO_MIN} minutos (ex.: 08:00, 08:15).`;
+  return null;
+};
+
+// DD/MM/AAAA sem importar datasBR (que importa este arquivo)
+const dataCurta = (data: string) => data.split('-').reverse().join('/');
+
+/**
+ * Horário que vale numa data: o dia especial dela, se houver, senão o horário da semana.
+ * Dia especial aberto vale a abertura/fechamento dele (sem "último horário": até o fechamento).
+ */
+export const funcionamentoNaData = (f: Funcionamento, data: string): Funcionamento & { especial: DiaEspecial | null } => {
+  const especial = f.especiais.find((d) => d.data === data) ?? null;
+  if (!especial) return { ...f, especial: null };
+  if (especial.fechado) return { ...f, dias: f.dias.filter((d) => d !== diaDaSemana(data)), especial };
+  return { ...f, abertura: especial.abertura!, fechamento: especial.fechamento!, limite: null, dias: [0, 1, 2, 3, 4, 5, 6], especial };
+};
+
+// A casa abre nessa data (dia da semana aberto, sem dia especial fechado; ou dia especial aberto)
+export const abreNaData = (f: Funcionamento, data: string) => funcionamentoNaData(f, data).dias.includes(diaDaSemana(data));
+
+// "Fechado em 10/12/2026 (Inventário)." ou "A casa não abre aos domingos."
+export const mensagemCasaFechada = (f: Funcionamento, data: string) => {
+  const { especial } = funcionamentoNaData(f, data);
+  return especial?.fechado
+    ? `A casa estará fechada em ${dataCurta(data)}${especial.motivo ? ` (${especial.motivo})` : ''}.`
+    : `A casa não abre ${diaNoPlural(diaDaSemana(data))}.`;
+};
 
 function diasValidos(dias: unknown): dias is number[] {
   return Array.isArray(dias) && dias.length > 0 && new Set(dias).size === dias.length
@@ -73,6 +133,9 @@ export const validarFuncionamento = (f: Funcionamento): string | null => {
   }
   if (!Array.isArray(f.dias) || f.dias.length === 0) return 'Escolha pelo menos um dia de funcionamento.';
   if (!diasValidos(f.dias)) return 'Dias de funcionamento inválidos.';
+  if (f.especiais.length > MAX_DIAS_ESPECIAIS) return `No máximo ${MAX_DIAS_ESPECIAIS} dias especiais.`;
+  if (new Set(f.especiais.map((d) => d.data)).size !== f.especiais.length) return 'Há mais de um dia especial na mesma data.';
+  for (const d of f.especiais) { const e = erroDiaEspecial(d); if (e) return e; }
   return null;
 };
 
@@ -144,13 +207,13 @@ export const validarHorarioAgendamento = (
   data: string,
   horario: string,
   duracaoMin: number,
-  { agora, intervaloMin = INTERVALO_AGENDAMENTO_MIN, funcionamento: f = FUNCIONAMENTO_PADRAO }: { agora?: Date; intervaloMin?: number; funcionamento?: Funcionamento } = {},
+  { agora, intervaloMin = INTERVALO_AGENDAMENTO_MIN, funcionamento: semanal = FUNCIONAMENTO_PADRAO }: { agora?: Date; intervaloMin?: number; funcionamento?: Funcionamento } = {},
 ): string | null => {
   if (!dataValida(data) || !horarioValido(horario)) return 'Data ou horário inválido.';
   if (!Number.isFinite(duracaoMin) || duracaoMin <= 0) return 'Duração do atendimento inválida.';
 
-  const semana = diaDaSemana(data);
-  if (!f.dias.includes(semana)) return `A casa não abre ${diaNoPlural(semana)}.`;
+  if (!abreNaData(semanal, data)) return mensagemCasaFechada(semanal, data);
+  const f = funcionamentoNaData(semanal, data);
   const inicio = horarioParaMinutos(horario);
   const abre = horarioParaMinutos(f.abertura);
   const fecha = horarioParaMinutos(f.fechamento);

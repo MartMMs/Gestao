@@ -1,3 +1,4 @@
+import type { DiaEspecial } from '@shared/agenda';
 export type ExigenciaHabilidades = 'sempre' | 'apenas_totem' | 'desligado';
 export interface Habilidade { id: string; nome: string; ativa: boolean; servicosAtivos?: number; colaboradores?: number }
 export type Role = 'collaborator' | 'supervisor' | 'admin' | 'receptionist';
@@ -30,6 +31,7 @@ export interface ConfiguracaoEmpresa {
   horaFechamento?: string;
   horaLimiteAgendamento?: string | null;
   diasFuncionamento?: number[];
+  diasEspeciais?: DiaEspecial[];
   atualizadoEm?: string;
   // Só na config pública: a API tem provedor de WhatsApp para a confirmação da reserva
   whatsappAtivo?: boolean;

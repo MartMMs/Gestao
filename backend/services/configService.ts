@@ -44,7 +44,7 @@ export const getEmpresaConfig = () => prisma.configuracaoEmpresa.upsert({
 const CAMPOS_EMPRESA_PUBLICOS = [
   'id', 'nomeEmpresa', 'segmento', 'slogan', 'icone', 'termoAtendimento', 'termoProfissional', 'termoEspaco', 'termoServico',
   'telefoneContato', 'emailContato', 'endereco', 'corTemaPrimaria', 'usarComissao', 'exigirAnamnese', 'exigenciaHabilidades', 'horaAbertura',
-  'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento', 'atualizadoEm',
+  'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento', 'diasEspeciais', 'atualizadoEm',
 ] as const satisfies readonly (keyof ConfiguracaoEmpresa)[];
 
 export type EmpresaPublica = Pick<ConfiguracaoEmpresa, (typeof CAMPOS_EMPRESA_PUBLICOS)[number]> & { whatsappAtivo: boolean };

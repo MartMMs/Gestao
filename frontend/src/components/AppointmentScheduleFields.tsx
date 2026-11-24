@@ -1,4 +1,5 @@
 import { useFuncionamento } from '../config/funcionamento';
+import { funcionamentoNaData } from '@shared/agenda';
 import React from 'react';
 import { Employee, Service } from '../types';
 
@@ -51,7 +52,8 @@ export function AppointmentScheduleFields({
   detailsDisabled = false,
   employeeHelperText,
 }: AppointmentScheduleFieldsProps) {
-  const funcionamento = useFuncionamento();
+  // Horário daquele dia: dia especial (ex.: 24/12 até 14:00) muda os limites do campo
+  const funcionamento = funcionamentoNaData(useFuncionamento(), date);
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

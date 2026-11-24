@@ -1,7 +1,7 @@
 import { formatarDataBR } from '@shared/datasBR';
 import { horasDaGrade, useFuncionamento } from '../config/funcionamento';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { horarioParaMinutos, INTERVALO_AGENDAMENTO_MIN, minutoDentroDoBloqueio, validarHorarioAgendamento } from '@shared/agenda';
+import { funcionamentoNaData, horarioParaMinutos, INTERVALO_AGENDAMENTO_MIN, minutoDentroDoBloqueio, validarHorarioAgendamento } from '@shared/agenda';
 import { useToast } from '../hooks/useToast';
 import { useModal } from '../hooks/useModal';
 import { Employee, Appointment, Service, Client } from '../types';
@@ -60,7 +60,7 @@ export function CollaboratorView({
     .filter((a) => a.date === receptionDate && a.status !== 'cancelled')
     .map((a): [number, number] => { const i = horarioParaMinutos(a.time); return [i, i + getDuration(a.services, services)]; }),
   [appointments, receptionDate, services]);
-  const { horaInicioGrade, horaFimGrade } = horasDaGrade(funcionamento, intervalosDoDia);
+  const { horaInicioGrade, horaFimGrade } = horasDaGrade(funcionamentoNaData(funcionamento, receptionDate), intervalosDoDia);
   const { toastMessage, setToastMessage } = useToast();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentMinute, setCurrentMinute] = useState(new Date());
