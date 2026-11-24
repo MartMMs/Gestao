@@ -99,6 +99,6 @@ done
 curl -fs --max-time 2 http://127.0.0.1:3333/health | grep -q '"ok"' || falha "a API não respondeu em 30 s; o túnel não foi aberto."
 
 echo; echo "Painel: https://$PAINEL   Totem: https://$AGENDAR"; echo
-cloudflared tunnel --config "$CONFIG" run &
+cloudflared tunnel --no-autoupdate --config "$CONFIG" run &
 PIDS+=($!)
 wait "${PIDS[@]}"

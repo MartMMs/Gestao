@@ -56,3 +56,5 @@ frontend/dist.anterior/
 .versao-publicada
 .deploy-pendente
 backend/.versao
+# Capturas de tela geradas localmente (podem mostrar dados das telas)
+prints-sistema/
