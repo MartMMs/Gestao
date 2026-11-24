@@ -10,8 +10,8 @@ import { redisService } from '../services/redisService';
 import { empresaPublica, getEmpresaConfig } from '../services/configService';
 import { obterFeriadosNacionais } from '../../shared/feriadosBR';
 import { EMAIL_REGEX, USUARIO_REGEX } from '../../shared/validadores';
-import { duracaoTotal, horarioValido, lerDiaEspecial, lerFuncionamento, MAX_DIAS_ESPECIAIS, partesNoFuso, validarFuncionamento, validarHorarioAgendamento, type DiaEspecial, type Funcionamento } from '../../shared/agenda';
-import { CODIGO_FORA_DO_HORARIO } from '../../shared/codigosErro';
+import { dataValida, duracaoTotal, horarioValido, lerDiaEspecial, lerFuncionamento, MAX_DIAS_ESPECIAIS, partesNoFuso, validarFuncionamento, validarHorarioAgendamento, type DiaEspecial, type Funcionamento } from '../../shared/agenda';
+import { CODIGO_CONFIG_DESATUALIZADA, CODIGO_FORA_DO_HORARIO } from '../../shared/codigosErro';
 import { responderErro, ipDoCliente } from '../lib/http';
 import { registrarAuditoria } from '../lib/auditoria';
 import { provaValida, type DesafioLogin } from '../../shared/provaDeTrabalho';
@@ -129,10 +129,13 @@ const validarConfigEmpresa = (body: Record<string, unknown>): { erro: string; da
   }
   if (body.diasEspeciais !== undefined) {
     const lista: unknown = body.diasEspeciais;
-    if (!Array.isArray(lista) || lista.length > MAX_DIAS_ESPECIAIS) return { erro: `Dias especiais inválidos (no máximo ${MAX_DIAS_ESPECIAIS}).` };
+    // Teto bruto só contra corpo gigante; o limite de verdade (MAX_DIAS_ESPECIAIS) conta só as datas futuras
+    if (!Array.isArray(lista) || lista.length > MAX_DIAS_ESPECIAIS * 5) return { erro: `Dias especiais inválidos (no máximo ${MAX_DIAS_ESPECIAIS}).` };
     const especiais = lista.map(lerDiaEspecial);
     if (especiais.some((d) => d === null)) return { erro: 'Dias especiais inválidos.' };
-    dados.diasEspeciais = (especiais as DiaEspecial[]).sort((a, b) => a.data.localeCompare(b.data));
+    // Data que já passou não vale mais nada: sai ao salvar, senão a lista cresce até travar no limite
+    const hoje = partesNoFuso(new Date()).data;
+    dados.diasEspeciais = (especiais as DiaEspecial[]).filter((d) => !(dataValida(d.data) && d.data < hoje)).sort((a, b) => a.data.localeCompare(b.data));
   }
   if (body.usarComissao !== undefined) {
     if (typeof body.usarComissao !== 'boolean') return { erro: 'Campo usarComissao inválido.' };
@@ -456,10 +459,29 @@ export function createEmpresaRouter(eventos: Eventos) {
       const mudou = Object.entries(validacao.dados).some(([campo, valor]) => JSON.stringify((atual as Record<string, unknown>)[campo]) !== JSON.stringify(valor));
       if (!mudou) return res.json(atual);
 
-      const configAtualizada = await prisma.configuracaoEmpresa.update({
-        where: { id: 'default' },
-        data: validacao.dados as Prisma.ConfiguracaoEmpresaUpdateInput,
+      // Com `versao` (a config que a tela leu), só grava se ninguém salvou no meio: sem isso o segundo a salvar
+      // apagaria em silêncio o que o primeiro mudou (ex.: dias especiais). Sem `versao`, grava como antes.
+      const versao = typeof req.body?.versao === 'string' ? new Date(req.body.versao) : null;
+      if (versao && Number.isNaN(versao.getTime())) return res.status(400).json({ erro: 'Versão da configuração inválida.' });
+      const desatualizada = () => res.status(409).json({
+        erro: 'Outra pessoa salvou o horário enquanto você editava. Confira o horário salvo e refaça a sua mudança.',
+        code: CODIGO_CONFIG_DESATUALIZADA,
       });
+
+      // updateMany com a versão no filtro: conferir e gravar é uma operação só (sem janela entre os dois)
+      if (versao) {
+        const { count } = await prisma.configuracaoEmpresa.updateMany({
+          where: { id: 'default', atualizadoEm: versao },
+          data: validacao.dados as Prisma.ConfiguracaoEmpresaUpdateManyMutationInput,
+        });
+        if (count === 0) return desatualizada();
+      }
+      const configAtualizada = versao
+        ? await prisma.configuracaoEmpresa.findUniqueOrThrow({ where: { id: 'default' } })
+        : await prisma.configuracaoEmpresa.update({
+          where: { id: 'default' },
+          data: validacao.dados as Prisma.ConfiguracaoEmpresaUpdateInput,
+        });
 
       await registrarAuditoria(req, { acao: 'empresa.comissao', alvo: 'Comissão da empresa', antes: atual, depois: configAtualizada, campos: ['usarComissao'] });
       // Horário muda o que a agenda e o totem aceitam: fica no histórico (só registra se mudou)

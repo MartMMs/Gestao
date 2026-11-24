@@ -81,6 +81,11 @@ describe('dias especiais', () => {
     expect(v('2027-03-07', '09:00', 60, comEspeciais)).toBeNull();
     expect(v('2027-03-14', '09:00', 60, comEspeciais)).toMatch(/não abre aos domingos/);
   });
+  it('bloqueio de dia inteiro usa o horário do dia especial', () => {
+    // Quinta especial das 10h às 14h: bloquear 10h–14h é o dia todo; na semana (08h–18h) não seria
+    expect(bloqueioDiaInteiro({ data: '2027-03-04', horaInicio: '10:00', horaFim: '14:00' }, comEspeciais)).toBe(true);
+    expect(bloqueioDiaInteiro({ data: '2027-03-02', horaInicio: '10:00', horaFim: '14:00' }, comEspeciais)).toBe(false);
+  });
   it('validação: horário invertido, data repetida e lixo gravado no banco', () => {
     expect(validarFuncionamento({ ...casa, especiais: [{ data: '2027-03-04', fechado: false, abertura: '14:00', fechamento: '10:00', motivo: null }] })).toMatch(/depois da abertura/);
     const dia = comEspeciais.especiais[0];

@@ -1,14 +1,16 @@
 import { test, expect, type APIRequestContext } from '@playwright/test';
 import { CONTAS, apiBase, authHeaders, loginPelaTela } from './credenciais';
+import type { DiaEspecial } from '../shared/agenda';
 
 // Mudam o horário da empresa toda: projeto configuracao-global, em série, e o original volta no fim
 test.describe.configure({ mode: 'serial' });
 
-type DiaEspecial = { data: string; fechado: boolean; abertura?: string | null; fechamento?: string | null; motivo?: string | null };
-type Horario = { horaAbertura: string; horaFechamento: string; horaLimiteAgendamento: string | null; diasFuncionamento: number[]; diasEspeciais?: DiaEspecial[] };
+// O que se manda no PUT: data e fechado obrigatórios, o resto opcional (o servidor completa com null)
+type DiaEspecialEnviado = Pick<DiaEspecial, 'data' | 'fechado'> & Partial<DiaEspecial>;
+type Horario = { horaAbertura: string; horaFechamento: string; horaLimiteAgendamento: string | null; diasFuncionamento: number[]; diasEspeciais?: DiaEspecialEnviado[] };
 let original: Horario;
 
-const gravar = async (request: APIRequestContext, dados: Partial<Horario> & { confirmarForaDoHorario?: boolean }, conta: string = CONTAS.admin) =>
+const gravar = async (request: APIRequestContext, dados: Partial<Horario> & { confirmarForaDoHorario?: boolean; versao?: string }, conta: string = CONTAS.admin) =>
   request.put(`${apiBase()}/empresa/config`, { headers: await authHeaders(request, conta), data: dados });
 
 // Grava confirmando (o banco de testes pode ter atendimentos de outras specs fora do horário de teste)
@@ -201,6 +203,11 @@ test('tela: supervisão fecha uma data pelo cartão de horário', async ({ page,
   await loginPelaTela(page, CONTAS.supervisor);
   await page.getByRole('button', { name: /Totem & Autoatendimento/i }).click();
   const cartao = page.getByRole('form', { name: 'Horário de funcionamento' });
+  // Data passada digitada no teclado: não entra (o min do campo só limita o calendário)
+  const ontem = new Date(Date.now() - 86_400_000).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  await cartao.getByLabel('Data').fill(ontem);
+  await expect(cartao.getByRole('button', { name: 'Adicionar dia' })).toBeDisabled();
+  await expect(cartao.getByRole('alert').filter({ hasText: 'Escolha hoje ou uma data futura' })).toBeVisible();
   await cartao.getByLabel('Data').fill(data);
   await cartao.getByRole('button', { name: 'Adicionar dia' }).click();
   const lista = cartao.getByRole('list', { name: 'Dias especiais' });
@@ -210,4 +217,30 @@ test('tela: supervisão fecha uma data pelo cartão de horário', async ({ page,
   await expect(cartao.getByRole('status')).toContainText('Horário de funcionamento salvo');
   await expect.poll(async () => (await (await request.get(`${apiBase()}/empresa/config`)).json()).diasEspeciais)
     .toEqual([{ data, fechado: true, abertura: null, fechamento: null, motivo: 'Inventário' }]);
+});
+
+test('dias especiais: data passada sai ao salvar e não conta no limite', async ({ request }) => {
+  const ontem = new Date(Date.now() - 86_400_000).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  const futura = proximo(2, 10);
+  await gravarConfirmando(request, { diasEspeciais: [{ data: ontem, fechado: true }, { data: futura, fechado: true }] });
+  const salvos = (await (await request.get(`${apiBase()}/empresa/config`)).json()).diasEspeciais as DiaEspecial[];
+  expect(salvos.map((d) => d.data)).toEqual([futura]);
+});
+
+test('edição simultânea: salvar com versão velha dá 409 em vez de apagar a mudança do outro', async ({ request }) => {
+  await gravarConfirmando(request, { diasEspeciais: [] });
+  const versaoLida = (await (await request.get(`${apiBase()}/empresa/config`)).json()).atualizadoEm as string;
+  // Supervisor A salva primeiro, a partir da versão lida
+  const a = await gravar(request, { diasEspeciais: [{ data: proximo(2, 12), fechado: true }], versao: versaoLida });
+  expect(a.status(), await a.text()).toBe(200);
+  // Supervisor B, com a mesma versão (agora velha), é recusado e a data de A continua lá
+  const b = await gravar(request, { diasEspeciais: [{ data: proximo(4, 12), fechado: true }], versao: versaoLida }, CONTAS.supervisor);
+  expect(b.status()).toBe(409);
+  expect((await b.json()).code).toBe('CONFIG_DESATUALIZADA');
+  const depois = await (await request.get(`${apiBase()}/empresa/config`)).json();
+  expect(depois.diasEspeciais.map((d: DiaEspecial) => d.data)).toEqual([proximo(2, 12)]);
+  // Com a versão nova, B consegue salvar
+  const b2 = await gravar(request, { diasEspeciais: [{ data: proximo(4, 12), fechado: true }], versao: depois.atualizadoEm }, CONTAS.supervisor);
+  expect(b2.status(), await b2.text()).toBe(200);
+  await gravarConfirmando(request, { diasEspeciais: [] });
 });

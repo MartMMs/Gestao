@@ -1,3 +1,6 @@
+// datasBR importa daqui só a constante do fuso, e só dentro de funções: o ciclo entre os dois arquivos é seguro
+import { formatarDataBR } from './datasBR';
+
 /**
  * Regras de agenda compartilhadas entre backend (API interna e totem) e frontend.
  * Alterar aqui muda o comportamento dos dois lados ao mesmo tempo.
@@ -55,12 +58,13 @@ export const lerFuncionamento = (cfg?: {
   dias: diasValidos(cfg?.diasFuncionamento) ? cfg.diasFuncionamento : FUNCIONAMENTO_PADRAO.dias,
   // Item com lixo (gravado direto no banco) é ignorado: não pode fechar nem abrir a casa por engano
   especiais: Array.isArray(cfg?.diasEspeciais)
-    ? (cfg.diasEspeciais as unknown[]).map(normalizarDiaEspecial).filter((d): d is DiaEspecial => d !== null && !erroDiaEspecial(d))
+    ? (cfg.diasEspeciais as unknown[]).map(lerDiaEspecial).filter((d): d is DiaEspecial => d !== null && !erroDiaEspecial(d))
       .sort((a, b) => a.data.localeCompare(b.data))
     : [],
 });
 
-const normalizarDiaEspecial = (bruto: unknown): DiaEspecial | null => {
+// Lê um dia especial vindo do banco ou do corpo da requisição (só os campos conhecidos); null se não for objeto
+export const lerDiaEspecial = (bruto: unknown): DiaEspecial | null => {
   if (!bruto || typeof bruto !== 'object') return null;
   const d = bruto as Record<string, unknown>;
   const texto = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
@@ -73,21 +77,18 @@ const normalizarDiaEspecial = (bruto: unknown): DiaEspecial | null => {
     motivo: texto(d.motivo)?.slice(0, 80) ?? null,
   };
 };
-export const lerDiaEspecial = normalizarDiaEspecial;
 
 // Confere um dia especial; retorna a mensagem de erro ou null
 export const erroDiaEspecial = (d: DiaEspecial): string | null => {
   if (!dataValida(d.data)) return 'Escolha uma data válida para o dia especial.';
   if (d.fechado) return null;
-  if (!horarioValido(d.abertura) || !horarioValido(d.fechamento)) return `Informe abertura e fechamento de ${dataCurta(d.data)} no formato HH:MM.`;
+  if (!horarioValido(d.abertura) || !horarioValido(d.fechamento)) return `Informe abertura e fechamento de ${formatarDataBR(d.data)} no formato HH:MM.`;
   const abre = horarioParaMinutos(d.abertura);
-  if (horarioParaMinutos(d.fechamento) <= abre) return `Em ${dataCurta(d.data)}, o fechamento precisa ser depois da abertura.`;
-  if (abre % INTERVALO_AGENDAMENTO_MIN !== 0) return `Em ${dataCurta(d.data)}, a abertura precisa ser de ${INTERVALO_AGENDAMENTO_MIN} em ${INTERVALO_AGENDAMENTO_MIN} minutos (ex.: 08:00, 08:15).`;
+  if (horarioParaMinutos(d.fechamento) <= abre) return `Em ${formatarDataBR(d.data)}, o fechamento precisa ser depois da abertura.`;
+  if (abre % INTERVALO_AGENDAMENTO_MIN !== 0) return `Em ${formatarDataBR(d.data)}, a abertura precisa ser de ${INTERVALO_AGENDAMENTO_MIN} em ${INTERVALO_AGENDAMENTO_MIN} minutos (ex.: 08:00, 08:15).`;
   return null;
 };
 
-// DD/MM/AAAA sem importar datasBR (que importa este arquivo)
-const dataCurta = (data: string) => data.split('-').reverse().join('/');
 
 /**
  * Horário que vale numa data: o dia especial dela, se houver, senão o horário da semana.
@@ -107,7 +108,7 @@ export const abreNaData = (f: Funcionamento, data: string) => funcionamentoNaDat
 export const mensagemCasaFechada = (f: Funcionamento, data: string) => {
   const { especial } = funcionamentoNaData(f, data);
   return especial?.fechado
-    ? `A casa estará fechada em ${dataCurta(data)}${especial.motivo ? ` (${especial.motivo})` : ''}.`
+    ? `A casa estará fechada em ${formatarDataBR(data)}${especial.motivo ? ` (${especial.motivo})` : ''}.`
     : `A casa não abre ${diaNoPlural(diaDaSemana(data))}.`;
 };
 
@@ -151,9 +152,12 @@ export const FOLGA_FIM = '23:59';
 
 // Bloqueio que cobre todo o expediente (da abertura ao fechamento): o profissional fica indisponível no dia
 // O horário é obrigatório: sem ele valeria o padrão 09:00–21:00 calado, mesmo com a casa configurada de outro jeito
-export const bloqueioDiaInteiro = (bloqueio: { horaInicio: string; horaFim: string }, f: Funcionamento) =>
-  horarioParaMinutos(bloqueio.horaInicio) <= horarioParaMinutos(f.abertura)
-  && horarioParaMinutos(bloqueio.horaFim) >= horarioParaMinutos(f.fechamento);
+// Com a data do bloqueio, vale o horário daquele dia (dia especial das 10h às 14h: bloquear 10h–14h é o dia todo)
+export const bloqueioDiaInteiro = (bloqueio: { horaInicio: string; horaFim: string; data?: string }, semanal: Funcionamento) => {
+  const f = bloqueio.data ? funcionamentoNaData(semanal, bloqueio.data) : semanal;
+  return horarioParaMinutos(bloqueio.horaInicio) <= horarioParaMinutos(f.abertura)
+    && horarioParaMinutos(bloqueio.horaFim) >= horarioParaMinutos(f.fechamento);
+};
 
 // O minuto do dia cai dentro do bloqueio (início incluso, fim excluso)
 export const minutoDentroDoBloqueio = (minuto: number, bloqueio: { horaInicio: string; horaFim: string }) =>
