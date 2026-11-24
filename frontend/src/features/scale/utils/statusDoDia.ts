@@ -4,7 +4,7 @@ import type { DiaEscala } from '@shared/escala';
 import type { Bloqueio } from '../../../types';
 
 export type EmployeeDayStatus = {
-  label: 'Folga' | 'FDS' | 'Férias' | 'Bloqueio';
+  label: 'Folga' | 'Férias' | 'Bloqueio';
   reason: string;
   isAllDayUnavailable: boolean;
 };
@@ -22,16 +22,15 @@ export const statusDoDia = (
 ): EmployeeDayStatus | null => {
   if (diaEscala && diaEscala.tipo !== 'trabalho') {
     return {
-      label: ehFerias(diaEscala.descricao) ? 'Férias' : (diaEscala.tipo === 'fds' ? 'FDS' : 'Folga'),
-      reason: diaEscala.descricao || 'Folga contratual (Escala)',
+      label: ehFerias(diaEscala.descricao) ? 'Férias' : 'Folga',
+      reason: diaEscala.descricao || 'Folga (escala)',
       isAllDayUnavailable: true,
     };
   }
 
   if (ajuste && ajuste.tipo !== 'trabalho') {
     if (ehFerias(ajuste.descricao)) return { label: 'Férias', reason: ajuste.descricao || 'Férias planejadas', isAllDayUnavailable: true };
-    if (ajuste.tipo === 'fds') return { label: 'FDS', reason: ajuste.descricao || 'Fim de semana (escala)', isAllDayUnavailable: true };
-    return { label: 'Folga', reason: ajuste.descricao || 'Folga planejada', isAllDayUnavailable: true };
+    return { label: 'Folga', reason: ajuste.descricao || 'Folga (escala)', isAllDayUnavailable: true };
   }
 
   if (bloqueiosDoDia.length === 0) return null;

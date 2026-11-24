@@ -1,3 +1,4 @@
+import { formatarDataBR } from '@shared/datasBR';
 import { TURNO_REGEX, horarioParaMinutos } from '@shared/agenda';
 import { horaInicialDoTurno, separarTurno, type DiaEscala } from '../../../utils/escalaCalculator';
 import {
@@ -47,9 +48,10 @@ export const categoriaDoTurno = (turno?: string | null): CategoriaTurno | null =
 };
 
 // Dia de trabalho sem turno conta como comercial (o horário da casa), como sempre foi no filtro da grade
+// Descanso de fim de semana ("fds") é unificado visualmente em "folga"
 export const categoriaDoDia = (dia?: DiaEscala | null): CategoriaDia | null => {
   if (!dia) return null;
-  if (dia.tipo !== 'trabalho') return dia.feriadoNome ? 'feriado' : dia.tipo;
+  if (dia.tipo !== 'trabalho') return dia.feriadoNome ? 'feriado' : 'folga';
   return categoriaDoTurno(turnoDoDia(dia)) ?? 'comercial';
 };
 
@@ -62,7 +64,7 @@ export const VISUAL_CATEGORIA: Record<CategoriaDia, VisualCategoria> = {
   tarde: { rotulo: 'Tarde', icone: 'partly_cloudy_day', cor: 'bg-amber-500', barra: 'border-l-amber-500', fundo: 'bg-amber-500/15', texto: 'text-amber-700 dark:text-amber-300' },
   noite: { rotulo: 'Noite', icone: 'dark_mode', cor: 'bg-violet-500', barra: 'border-l-violet-500', fundo: 'bg-violet-500/15', texto: 'text-violet-700 dark:text-violet-300' },
   folga: { rotulo: 'Folga', icone: 'event_busy', cor: 'bg-outline', barra: 'border-l-outline/60', fundo: 'bg-surface-container-low', texto: 'text-on-surface-variant' },
-  fds: { rotulo: 'FDS', icone: 'weekend', cor: 'bg-outline', barra: 'border-l-outline/60', fundo: 'bg-surface-container-low', texto: 'text-on-surface-variant' },
+  fds: { rotulo: 'Folga', icone: 'event_busy', cor: 'bg-outline', barra: 'border-l-outline/60', fundo: 'bg-surface-container-low', texto: 'text-on-surface-variant' },
   feriado: { rotulo: 'Feriado', icone: 'celebration', cor: 'bg-rose-500', barra: 'border-l-rose-500', fundo: 'bg-rose-500/10', texto: 'text-rose-700 dark:text-rose-300' },
 };
 
@@ -100,8 +102,8 @@ export function analisarMes(escala: DiaEscala[], prefixoMes: string, tipoEscala?
   const interjornada = analisarInterjornadaEscala(escala).violacoes.filter((v) => v.dataTurnoAtual.startsWith(prefixoMes));
   const setimoDia = analisarSetimoDiaConsecutivo(escala).violacoes.filter((v) => v.data.startsWith(prefixoMes));
   const alertas = [
-    ...interjornada.map((v) => `Descanso de ${formatarHoras(v.descansoHoras)} entre jornadas em ${v.dataTurnoAtual.split('-').reverse().join('/')} (mínimo 11h).`),
-    ...(setimoDia.length > 0 ? [`7º dia seguido sem folga em ${setimoDia[0].data.split('-').reverse().join('/')}.`] : []),
+    ...interjornada.map((v) => `Descanso de ${formatarHoras(v.descansoHoras)} entre jornadas em ${formatarDataBR(v.dataTurnoAtual)} (mínimo 11h).`),
+    ...(setimoDia.length > 0 ? [`7º dia seguido sem folga em ${formatarDataBR(setimoDia[0].data)}.`] : []),
     ...(carga.conforme ? [] : [tipoEscala === '12x36'
       ? `Média semanal de ${formatarHoras(carga.cargaTotal)}, acima do limite de ${CARGA_SEMANAL_MAXIMA_HORAS}h.`
       : `Semana de ${formatarHoras(carga.cargaTotal)}, acima do limite de ${CARGA_SEMANAL_MAXIMA_HORAS}h (${carga.semanaAnalisada}).`]),

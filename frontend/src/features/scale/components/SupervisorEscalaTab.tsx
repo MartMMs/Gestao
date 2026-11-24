@@ -1,3 +1,4 @@
+import { formatarDataBR } from '@shared/datasBR';
 import { horasDaGrade, useFuncionamento } from '../../../config/funcionamento';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion } from 'motion/react';
@@ -6,7 +7,8 @@ import { getDuration, getBrazilCurrentMinuteOfDay, getBrazilCurrentTimeString, g
 import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { BlockModal, BookingModal, EditAppointmentModal, DeleteAppointmentModal } from '../../../features/appointments/components';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
-import { isApiError } from '../../../api';
+import { isApiError, useEscalaOperacional } from '../../../api';
+import { useAuth } from '../../../AuthContext';
 import { useScheduleModals } from '../../../features/appointments/hooks';
 import { EmployeeScheduleColumn, LegendaEstadosAgenda, ScheduleGridProvider, type AcaoDeStatus, type ScheduleGridActions, type ScheduleGridContext } from '../../../components/ScheduleGridColumn';
 import { AgendaVisaoPeriodo, type VisaoAgenda } from './AgendaVisaoPeriodo';
@@ -61,6 +63,7 @@ interface SupervisorEscalaTabProps {
 
 
 export function SupervisorEscalaTab({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onOpenUpcomingAppointments, onReassignAppointment, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onAlterarStatus, onEditClient, onAddBloqueio, onDeleteBloqueio, setToastMessage, setErrorMessage, buildScaleForEmployee, papel }: SupervisorEscalaTabProps) {
+  const { token } = useAuth();
   const ehRecepcao = papel === 'recepcao';
   const funcionamento = useFuncionamento();
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
@@ -116,13 +119,27 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   const handlePrevMonth = () => setCurrentMonthDate(new Date(year, month - 1, 1));
   const handleNextMonth = () => setCurrentMonthDate(new Date(year, month + 1, 1));
   const formatDayString = (d: number) => `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const calendarMonthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const receptionMonthStr = receptionDate.slice(0, 7);
+
+  // Recepção usa o endpoint operacional somente leitura (apenas trabalho/folga e turno do mês, sem dados sensíveis do RH)
+  const { data: escalaOperacionalMes = NO_SCALE_OVERRIDES } = useEscalaOperacional(token, calendarMonthStr, { enabled: ehRecepcao });
+  const { data: escalaOperacionalDia = NO_SCALE_OVERRIDES } = useEscalaOperacional(token, receptionMonthStr, {
+    enabled: ehRecepcao && receptionMonthStr !== calendarMonthStr,
+  });
+
+  const effectiveScaleOverrides = useMemo(() => {
+    if (!ehRecepcao) return scaleOverrides;
+    if (receptionMonthStr === calendarMonthStr) return escalaOperacionalMes;
+    return [...escalaOperacionalMes, ...escalaOperacionalDia];
+  }, [ehRecepcao, scaleOverrides, calendarMonthStr, receptionMonthStr, escalaOperacionalMes, escalaOperacionalDia]);
 
   // Overrides indexados por colaborador+dia: o calendário consulta todos os dias do mês para toda a equipe
   const overrideByEmployeeDay = useMemo(() => {
     const map = new Map<string, { tipo: 'trabalho' | 'folga' | 'fds' }>();
-    for (const override of scaleOverrides) map.set(`${override.colaboradorId}:${override.data}`, override);
+    for (const override of effectiveScaleOverrides) map.set(`${override.colaboradorId}:${override.data}`, override);
     return map;
-  }, [scaleOverrides]);
+  }, [effectiveScaleOverrides]);
 
   const getDayCoverage = useCallback((dateStr: string) => {
     const team = employees.filter((emp) => atendeNaAgenda(emp));
@@ -158,7 +175,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   const dayScaleOverrideByEmployee = useMemo(() => {
     const map = new Map<string, { tipo: 'trabalho' | 'folga' | 'fds'; descricao?: string }>();
 
-    for (const override of scaleOverrides) {
+    for (const override of effectiveScaleOverrides) {
       if (override.data !== receptionDate) continue;
       if (!override.colaboradorId || !override.tipo || override.tipo === 'trabalho') continue;
       map.set(override.colaboradorId, {
@@ -168,7 +185,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     }
 
     return map;
-  }, [scaleOverrides, receptionDate]);
+  }, [effectiveScaleOverrides, receptionDate]);
 
   const getEmployeeDayStatus = useCallback((emp: Employee): EmployeeDayStatus | null => statusDoDia(
     buildScaleForEmployee?.(emp.id).find((d) => d.data === receptionDate),
@@ -369,7 +386,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     const { app, empId, time } = movimentoPendente;
     const duracao = getDuration(app.services, services);
     const intervalo = (inicio: string) => `${inicio}–${minutosParaHorario(horarioParaMinutos(inicio) + duracao)}`;
-    const dia = app.date.split('-').reverse().join('/');
+    const dia = formatarDataBR(app.date);
     return `${app.clientName}, ${dia}: de ${intervalo(app.time)} com ${nomeProfissional(app.assignedEmployeeId)} para ${intervalo(time)} com ${nomeProfissional(empId)}.`;
   })();
 
@@ -407,7 +424,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   const textoAcao = (() => {
     if (!acaoPendente) return { titulo: '', descricao: '', botao: '' };
     const { app, acao } = acaoPendente;
-    const quando = `${app.date.split('-').reverse().join('/')} às ${app.time}, com ${nomeProfissional(app.assignedEmployeeId)}`;
+    const quando = `${formatarDataBR(app.date)} às ${app.time}, com ${nomeProfissional(app.assignedEmployeeId)}`;
     if (acao === 'concluir') {
       const valor = typeof app.valorTotal === 'number' ? ` (${formatarReais(app.valorTotal)})` : '';
       return { titulo: 'Concluir atendimento?', descricao: `${app.clientName}, ${quando}. Ele entra no faturamento${valor} e na comissão.`, botao: 'Concluir' };
@@ -478,7 +495,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
                  {/* Tooltip Hover nativo CSS */}
                  <div className="absolute z-50 bottom-full mb-2 hidden group-hover:flex flex-col w-64 p-3 bg-surface-container-highest shadow-2xl rounded-2xl text-sm border border-outline-variant pointer-events-none left-1/2 -translate-x-1/2">
                     <div className="font-bold text-primary mb-2 flex justify-between items-center border-b border-outline-variant/30 pb-1">
-                      <span>Cobertura: {dStr.split('-').reverse().join('/')}</span>
+                      <span>Cobertura: {formatarDataBR(dStr)}</span>
                       <span className={`px-2 py-0.5 rounded-full text-[11px] ${coverage.availableCount < coverage.ideal ? 'bg-orange-500/20 text-orange-600' : 'bg-emerald-500/20 text-emerald-600'}`}>
                         {coverage.availableCount} {coverage.availableCount === 1 ? 'Plantão' : 'Plantões'}
                       </span>
@@ -497,36 +514,83 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
              );
            })}
         </div>
-        <div className="mt-6 rounded-2xl border border-outline-variant/20 bg-surface-container-low p-3">
-          <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Dica operacional</p>
-          <p className="text-xs text-on-surface-variant mt-1">Use os atalhos acima da grade para Nova Reserva, Lista de Hoje{onAddBloqueio ? ' e Bloqueios' : ''}.</p>
+        {/* Legenda discreta das cores do mini calendário */}
+        <div className="mt-4 pt-3 border-t border-outline-variant/15 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-on-surface-variant" aria-label="Legenda do calendário">
+          <span className="inline-flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-200 border border-emerald-400" />
+            Cobertura ok
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-orange-200 border border-orange-400" />
+            Reduzida
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-full border-2 border-primary" />
+            Hoje
+          </span>
         </div>
+
+        {/* Card compacto somente leitura com quem está de folga no dia (oculto quando ninguém está de folga) */}
+        {(() => {
+          const folgasHoje = employees
+            .filter((emp) => atendeNaAgenda(emp) && estaDeFolga(dayStatusByEmployee.get(emp.id)))
+            .map((emp) => ({
+              id: emp.id,
+              nome: emp.name,
+              status: dayStatusByEmployee.get(emp.id)!,
+            }));
+          if (folgasHoje.length === 0) return null;
+          return (
+            <div className="mt-4 rounded-2xl border border-outline-variant/20 bg-surface-container-low p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">De folga no dia</p>
+                <span className="text-[11px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">{folgasHoje.length}</span>
+              </div>
+              <ul className="space-y-1">
+                {folgasHoje.map((item) => (
+                  <li key={item.id} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="font-medium text-on-surface truncate">{item.nome}</span>
+                    <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-error bg-error/10 px-2 py-0.5 rounded-full">{item.status.label}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Painel Central (Grade Visual) */}
       <div className="flex-1 bg-surface-container-lowest p-6 lg:p-8 rounded-3xl border border-outline-variant/10 shadow-sm overflow-hidden flex flex-col">
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 gap-4 shrink-0">
-          <div>
+        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-4 gap-3 shrink-0">
+          <div className="min-w-0">
             <h3 className="text-2xl font-headline text-primary">Agenda da Recepção</h3>
             <p className="text-sm text-on-surface-variant">
-              {visao === 'dia' ? `Controle do dia ${receptionDate.split('-').reverse().join('/')}` : visao === 'semana' ? 'Visão da semana' : 'Visão do mês'}
+              {visao === 'dia' ? `Controle do dia ${formatarDataBR(receptionDate)}` : visao === 'semana' ? 'Visão da semana' : 'Visão do mês'}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 w-full lg:w-auto">
-            <button onClick={() => openBookingModal('', '')} className="px-5 py-3 bg-primary text-on-primary rounded-xl text-xs font-bold uppercase tracking-widest shadow-md hover:bg-primary-dim transition-all flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px]">add</span> Nova Reserva
+          <div className="flex flex-nowrap items-center gap-2 overflow-x-auto max-w-full shrink-0">
+            <button onClick={() => openBookingModal('', '')} className="px-3.5 py-2.5 bg-primary text-on-primary rounded-xl text-xs font-bold uppercase tracking-wider shadow-md hover:bg-primary-dim transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0">
+              <span className="material-symbols-outlined text-[17px]">add</span> Nova Reserva
             </button>
-            <button onClick={() => onOpenUpcomingAppointments?.()} className="px-4 py-3 border border-primary/40 text-primary rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-primary/10 transition-all flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px]">event_note</span> Lista de Hoje
-            </button>
+            {ehRecepcao && onOpenUpcomingAppointments && (
+              <button onClick={() => onOpenUpcomingAppointments()} className="px-3.5 py-2.5 border border-primary/40 text-primary rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/10 transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0">
+                <span className="material-symbols-outlined text-[17px]">event_note</span> Lista de Hoje
+              </button>
+            )}
             {semBaixa.length > 0 && (
-              <button onClick={() => setMostrarSemBaixa((v) => !v)} aria-expanded={mostrarSemBaixa} aria-controls="lista-sem-baixa" className="px-4 py-3 border border-error/40 text-error rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-error/10 transition-all flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">pending_actions</span> Sem baixa ({semBaixa.length})
+              <button
+                onClick={() => setMostrarSemBaixa((v) => !v)}
+                aria-expanded={mostrarSemBaixa}
+                aria-controls="lista-sem-baixa"
+                title="Total acumulado de atendimentos passados sem baixa"
+                className="px-3.5 py-2.5 border border-error/40 text-error rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-error/10 transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <span className="material-symbols-outlined text-[17px]" aria-hidden="true">pending_actions</span> Sem baixa ({semBaixa.length})
               </button>
             )}
             {onAddBloqueio && !ehRecepcao && (
-              <button onClick={() => openBlockModal('', '')} className="px-4 py-3 bg-error/15 text-error rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-error/25 transition-all flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px]">block</span> Bloqueio
+              <button onClick={() => openBlockModal('', '')} className="px-3.5 py-2.5 bg-error/15 text-error rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-error/25 transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0">
+                <span className="material-symbols-outlined text-[17px]">block</span> Bloqueio
               </button>
             )}
           </div>
@@ -536,7 +600,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
 
         <div className="flex flex-col md:flex-row gap-3 mb-6 shrink-0">
           <div className="relative flex-1">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline-variant text-[18px]">search</span>
+            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">search</span>
             <input type="text" placeholder="Buscar cliente, serviço ou código (AG-...)" aria-label="Buscar cliente, serviço ou código da reserva" value={scheduleSearchTerm} onChange={e => setScheduleSearchTerm(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') abrirPorCodigo(); }} className="w-full pl-10 pr-4 py-2 bg-surface-container-low border border-outline-variant/30 text-sm rounded-xl focus:ring-1 focus:ring-primary text-on-surface" />
           </div>
           <select
@@ -651,7 +715,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
 
               <ScheduleGridProvider schedule={scheduleGridContext} actions={scheduleGridActions}>
                 <div
-                  className="relative flex flex-1 z-10 min-w-max"
+                  className="relative flex flex-1 min-w-max"
                 >
                   {activeEmployees.map(emp => (
                     <EmployeeScheduleColumn key={emp.id} emp={emp} appointments={dayAppointmentsByEmployee.get(emp.id) ?? NO_APPOINTMENTS} />

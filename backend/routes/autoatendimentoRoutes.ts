@@ -14,6 +14,7 @@ import {
   chaveTravaProfissional,
   chaveTravaSala,
   erroElegibilidade,
+  habilidadeBarra,
   existeTrava,
   mensagemIndisponibilidadeEscala, mensagemForaDoTurno,
   verificarCLTInterjornadaEmMemoria,
@@ -161,8 +162,10 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
   router.get('/servicos', async (_req, res) => {
     try {
       const servicos = await prisma.servico.findMany({ where: { ativo: true }, orderBy: [{ ordem: 'asc' }, { nome: 'asc' }] });
-      // Profissionais exclusivos e comissão são internos; o catálogo público não precisa deles
-      res.json(servicos.map(({ profissionaisPermitidos: _ids, comissaoPercentual: _comissao, ...s }) => s));
+      // Regras de quem atende (profissionais, cargos, habilidades) e comissão são internas: o catálogo público não as leva
+      res.json(servicos.map(({
+        profissionaisPermitidos: _ids, comissaoPercentual: _comissao, cargosPermitidos: _cargos, habilidadesPermitidasLegado: _hab, ...s
+      }) => s));
     } catch (error) {
       responderErro(res, error, 'Falha ao buscar catálogo de serviços.');
     }
@@ -198,7 +201,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       const [colaboradores, salas, agendamentos, escalas, agendamentosVizinhos] = await Promise.all([
         prisma.colaborador.findMany({
           where: { ativo: true, papel: { in: PAPEIS_ATENDIMENTO } },
-          include: { bloqueios: { where: { data } } },
+          include: { bloqueios: { where: { data } }, habilidadesCadastradas: { where: { ativa: true }, select: { id: true } } },
           orderBy: { nome: 'asc' },
         }),
         prisma.sala.findMany({ where: { ativa: true }, orderBy: { numero: 'asc' } }),
@@ -222,9 +225,11 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       }
 
       const indisponivelNaEscala = new Set(escalas.filter((e) => mensagemIndisponibilidadeEscala(e)).map((e) => e.colaboradorId));
-      const elegiveis = colaboradores.filter((c) => !indisponivelNaEscala.has(c.id) && !erroElegibilidade(c, servicos));
+      const empresa = await getEmpresaConfig();
+      const checarHabilidade = habilidadeBarra(empresa.exigenciaHabilidades, 'totem');
+      const elegiveis = colaboradores.filter((c) => !indisponivelNaEscala.has(c.id) && !erroElegibilidade(c, servicos, { checarHabilidade }));
       const agora = new Date();
-      const funcionamento = lerFuncionamento(await getEmpresaConfig());
+      const funcionamento = lerFuncionamento(empresa);
 
       const slots: Array<{
         horario: string;

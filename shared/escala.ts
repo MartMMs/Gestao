@@ -1,9 +1,10 @@
+import { formatarDataBR } from './datasBR';
 /**
  * utils/escalaCalculator.ts
  * Lógica de cálculo de escalas (6x1, 5x2, 12x36, rotativo)
  */
 
-import { diaMesBR, horarioParaMinutos, TURNO_REGEX } from './agenda';
+import { horarioParaMinutos, TURNO_REGEX } from './agenda';
 import { ehFeriado, obterNomeFeriado } from './feriadosBR';
 
 export type TipoEscala = '6x1' | '5x1' | '5x2' | '12x36' | 'rotativo' | 'personalizado';
@@ -440,5 +441,5 @@ export function folgaAcimaDoLimite(tipo: string | null | undefined, antes: DiaEs
 
 export const mensagemFolgaAcimaDoLimite = (tipo: string, excesso: { semana: string; folgas: string[] }) => {
   const limite = limiteFolgasPorSemana(tipo) ?? 0;
-  return `Na escala ${tipo} cabe${limite > 1 ? 'm' : ''} ${limite === 1 ? 'uma folga' : `${limite} folgas`} por semana, e a semana de ${diaMesBR(excesso.semana)} ficaria com folga em ${excesso.folgas.map(diaMesBR).join(' e ')}. Marque um desses dias como trabalho antes, ou use a troca de dias.`;
+  return `Na escala ${tipo} cabe${limite > 1 ? 'm' : ''} ${limite === 1 ? 'uma folga' : `${limite} folgas`} por semana, e a semana de ${formatarDataBR(excesso.semana)} ficaria com folga em ${excesso.folgas.map(formatarDataBR).join(' e ')}. Marque um desses dias como trabalho antes, ou use a troca de dias.`;
 };

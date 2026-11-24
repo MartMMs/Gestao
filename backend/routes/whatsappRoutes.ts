@@ -18,8 +18,18 @@ export function createWhatsappRouter() {
 
   router.post('/whatsapp/qr/conectar', verificarSupervisorToken, apenasAdmin, async (req, res) => {
     try {
+      const estadoAntes = estadoWhatsappQr().status;
       await conectarWhatsappQr();
-      await registrarAuditoria(req, { acao: 'whatsapp.conectar', alvo: 'WhatsApp', antes: { conectado: false }, depois: { conectado: true } });
+      // Evita registrar eventos repetidos consecutivos de reconexão quando já estava conectado/iniciando
+      // ou quando o último registro de conexão no histórico já é whatsapp.conectar
+      const ultimoEvento = await prisma.registroAuditoria.findFirst({
+        where: { acao: { in: ['whatsapp.conectar', 'whatsapp.desconectar'] } },
+        orderBy: { criadoEm: 'desc' },
+        select: { acao: true },
+      });
+      if (estadoAntes === 'desconectado' && ultimoEvento?.acao !== 'whatsapp.conectar') {
+        await registrarAuditoria(req, { acao: 'whatsapp.conectar', alvo: 'WhatsApp', antes: { conectado: false }, depois: { conectado: true } });
+      }
       res.json(estadoWhatsappQr());
     } catch (erro) {
       console.error('[WHATSAPP] Falha ao iniciar a conexão:', erro instanceof Error ? erro.message : 'erro desconhecido');

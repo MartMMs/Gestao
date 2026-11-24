@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { EXIGENCIAS_HABILIDADE } from '../services/agendaService';
 import { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
@@ -132,6 +133,12 @@ const validarConfigEmpresa = (body: Record<string, unknown>): { erro: string; da
   if (body.exigirAnamnese !== undefined) {
     if (typeof body.exigirAnamnese !== 'boolean') return { erro: 'Campo exigirAnamnese inválido.' };
     dados.exigirAnamnese = body.exigirAnamnese;
+  }
+  if (body.exigenciaHabilidades !== undefined) {
+    if (!(EXIGENCIAS_HABILIDADE as readonly unknown[]).includes(body.exigenciaHabilidades)) {
+      return { erro: `Exigência de habilidades inválida. Use: ${EXIGENCIAS_HABILIDADE.join(', ')}.` };
+    }
+    dados.exigenciaHabilidades = body.exigenciaHabilidades as string;
   }
   for (const campo of CAMPOS_EMPRESA) {
     const valor = body[campo];
@@ -449,6 +456,7 @@ export function createEmpresaRouter(eventos: Eventos) {
       // Horário muda o que a agenda e o totem aceitam: fica no histórico (só registra se mudou)
       await registrarAuditoria(req, { acao: 'empresa.horario', alvo: 'Horário de funcionamento', antes: atual, depois: configAtualizada, campos: ['horaAbertura', 'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento'] });
       // Ligar ou desligar a ficha obrigatória muda quem consegue agendar: fica no histórico (só registra se mudou)
+      await registrarAuditoria(req, { acao: 'empresa.habilidades', alvo: 'Exigir habilidades nos agendamentos', antes: atual, depois: configAtualizada, campos: ['exigenciaHabilidades'] });
       await registrarAuditoria(req, { acao: 'empresa.anamnese', alvo: 'Ficha de anamnese obrigatória', antes: atual, depois: configAtualizada, campos: ['exigirAnamnese'] });
       // Só o evento da config: notificarMudanca() sem escopo fazia todas as telas baixarem todas as listas de uma vez
       // (agenda, clientes, equipe...) e travava Clientes e Relatórios. Nenhuma lista de ESCOPOS_MUDANCA muda com a

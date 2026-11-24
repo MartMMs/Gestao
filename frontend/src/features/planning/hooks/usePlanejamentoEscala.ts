@@ -1,12 +1,14 @@
+import { formatarDataBR } from '@shared/datasBR';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Employee, TurnoSwapRequest, TurnoSwapStatus, EmployeeUpdate } from '../../../types';
 import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import { aplicarAjusteEscala, gerarEscalaComRegras, type DiaEscala } from '../../../utils/escalaCalculator';
 import { categoriaDoDia, trabalhoAntesDeFolga, turnoDoDia } from '../utils/turnos';
-import { dataBR } from '@shared/agenda';
+
 import { analisarConformidadeCLT } from '../../../utils/cltValidator';
 import { participaDaEscala } from '../../../utils/formatters';
-import type { ScaleOverridePayload } from '../../../api';
+import { useGerarEscalaMes, type ScaleOverridePayload } from '../../../api';
+import { useAuth } from '../../../AuthContext';
 
 // Estado e regras da aba "Grade de Escalas" do supervisor (planejamento mensal/semanal, gerador e alertas CLT)
 
@@ -45,9 +47,10 @@ type UsePlanejamentoEscalaParams = {
 };
 
 export function usePlanejamentoEscala({
-  employees, scaleOverrides, turnoSwapRequests, onEditEmployee, onUpdateTurnoSwapRequestStatus, onSaveScaleOverride, setToastMessage, setErrorMessage,
+  employees, scaleOverrides, turnoSwapRequests, onUpdateTurnoSwapRequestStatus, onSaveScaleOverride, setToastMessage, setErrorMessage,
 }: UsePlanejamentoEscalaParams) {
   const todayStr = getLocalTodayString();
+  const gerarEscalaMes = useGerarEscalaMes(useAuth().token);
   const [selectedScaleEmployeeId, setSelectedScaleEmployeeId] = useState('');
   const [selectedScaleMonth, setSelectedScaleMonth] = useState(getLocalTodayString().slice(0, 7));
   const [selectedPlanningEmployeeId, setSelectedPlanningEmployeeId] = useState<string | null>(null);
@@ -82,6 +85,8 @@ export function usePlanejamentoEscala({
   const [scaleGeneratorCoverageTarget, setScaleGeneratorCoverageTarget] = useState(5);
   const [scaleGeneratorSundayFrequency, setScaleGeneratorSundayFrequency] = useState<'1x1' | '2x1'>('2x1');
   const [scaleGeneratorSearch, setScaleGeneratorSearch] = useState('');
+  // Turno gravado como turnoPadrao do colaborador: preenche os dias de trabalho da escala gerada (sem "s/ turno")
+  const [scaleGeneratorTurno, setScaleGeneratorTurno] = useState('');
   const planningMonthInputRef = useRef<HTMLInputElement | null>(null);
   const [planningOverrides, setPlanningOverrides] = useState<Record<string, ScaleOverridePayload>>({});
   const [suggestedPlanningKeys, setSuggestedPlanningKeys] = useState<string[]>([]);
@@ -395,6 +400,7 @@ export function usePlanejamentoEscala({
     if (!employee) return;
     setScaleGeneratorType(employee.tipoEscala || '6x1');
     setScaleGeneratorSundayOffs(employee.folgasDomingoNoMes ?? 2);
+    setScaleGeneratorTurno(employee.turnoPadrao || '');
   }, [activeNonAdminEmployees, isScaleGeneratorOpen, scaleGeneratorEmployeeId]);
 
   const handleGenerateScale = async () => {
@@ -402,27 +408,23 @@ export function usePlanejamentoEscala({
 
     setIsSavingPlanning(true);
     try {
-      const success = await onEditEmployee(scaleGeneratorEmployeeId, {
-        tipoEscala: scaleGeneratorType,
+      if (!scaleGeneratorTurno) return;
+      await gerarEscalaMes.mutateAsync({
+        colaboradorId: scaleGeneratorEmployeeId,
+        mes: scaleGeneratorMonth,
+        turno: scaleGeneratorTurno,
+        tipoEscala: scaleGeneratorType ?? '6x1',
         folgasDomingoNoMes: scaleGeneratorSundayOffs,
       });
+      setSelectedScaleEmployeeId(scaleGeneratorEmployeeId);
+      setSelectedScaleMonth(scaleGeneratorMonth);
+      setPlanningScaleType(scaleGeneratorType);
+      setPlanningSundayOffs(scaleGeneratorSundayOffs);
+      setPlanningCoverageTarget(scaleGeneratorCoverageTarget);
+      setPlanningSundayFrequency(scaleGeneratorSundayFrequency);
+      setIsScaleGeneratorOpen(false);
 
-      if (typeof success === 'string') {
-        setErrorMessage(success);
-        return;
-      }
-
-      if (success !== false) {
-        setSelectedScaleEmployeeId(scaleGeneratorEmployeeId);
-        setSelectedScaleMonth(scaleGeneratorMonth);
-        setPlanningScaleType(scaleGeneratorType);
-        setPlanningSundayOffs(scaleGeneratorSundayOffs);
-        setPlanningCoverageTarget(scaleGeneratorCoverageTarget);
-        setPlanningSundayFrequency(scaleGeneratorSundayFrequency);
-        setIsScaleGeneratorOpen(false);
-
-        setToastMessage('Escala gerada com sucesso.');
-      }
+      setToastMessage('Escala gerada com sucesso.');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Não foi possível gerar a escala.');
     } finally {
@@ -571,7 +573,7 @@ export function usePlanejamentoEscala({
           successCount += 1;
         } catch (error) {
           failedKeys.push(key);
-          motivos.push(`${dataBR(override.data)}: ${error instanceof Error ? error.message : 'falha ao salvar.'}`);
+          motivos.push(`${formatarDataBR(override.data)}: ${error instanceof Error ? error.message : 'falha ao salvar.'}`);
         }
       }
 
@@ -735,6 +737,8 @@ export function usePlanejamentoEscala({
     scaleGeneratorSundayFrequency,
     setScaleGeneratorSundayFrequency,
     scaleGeneratorSearch,
+    scaleGeneratorTurno,
+    setScaleGeneratorTurno,
     setScaleGeneratorSearch,
     planningMonthInputRef,
     setPlanningOverrides,

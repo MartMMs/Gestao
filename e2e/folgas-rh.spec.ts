@@ -78,6 +78,13 @@ test.describe('RH — folgas', () => {
       await item.getByRole('button', { name: 'Mudar folga' }).click();
 
       const dialogo = page.getByRole('dialog', { name: 'Mudar folga' });
+      // Acessibilidade: o foco entra no modal, o Esc fecha e o foco volta para o botão que abriu; depois reabre
+      const botaoMudar = item.getByRole('button', { name: 'Mudar folga' });
+      await expect.poll(() => dialogo.evaluate((d) => d.contains(document.activeElement))).toBe(true);
+      await page.keyboard.press('Escape');
+      await expect(dialogo).toBeHidden();
+      await expect(botaoMudar).toBeFocused();
+      await botaoMudar.click();
       await dialogo.getByLabel('Novo dia de folga').selectOption({ value: novo });
       await dialogo.getByRole('button', { name: 'Mudar folga' }).click();
       await expect(dialogo).toBeHidden();
@@ -132,14 +139,15 @@ const apagarTurnosDeTeste = async (request: APIRequestContext, nome: string) => 
 };
 
 test.describe('RH — turnos padrão', () => {
-  test('API: todos leem; só supervisão e administração criam e excluem; horário repetido é recusado', async ({ request }) => {
+  test('API: só supervisão e administração leem, criam e excluem (RH); horário repetido é recusado', async ({ request }) => {
     const nome = `Turno Papeis ${Date.now() % 100000}`;
     const inicio = horarioAleatorio();
     const fim = somarHoras(inicio, 6);
     try {
+      // Turnos padrão são configuração do RH (Pacote 2): recepção usa /escala/operacional
       for (const conta of [CONTAS.colaboradora, CONTAS.recepcao, CONTAS.supervisor, CONTAS.admin]) {
         const lidos = await request.get(`${apiBase()}/turnos`, { headers: await authHeaders(request, conta) });
-        expect(lidos.status(), conta).toBe(200);
+        expect(lidos.status(), conta).toBe(conta === CONTAS.supervisor || conta === CONTAS.admin ? 200 : 403);
       }
       for (const conta of [CONTAS.colaboradora, CONTAS.recepcao]) {
         expect((await request.post(`${apiBase()}/turnos`, { headers: await authHeaders(request, conta), data: { nome, inicio, fim } })).status(), conta).toBe(403);

@@ -142,7 +142,7 @@ export const escolherProfissionalESala = async (
   });
   let terapeuta: (typeof candidatos)[number] | undefined;
   for (const colab of candidatos) {
-    if (!(await validarDisponibilidadeProfissional(prisma, colab.id, inicio, servicos))) {
+    if (!(await validarDisponibilidadeProfissional(prisma, colab.id, inicio, servicos, { origem: 'totem' }))) {
       terapeuta = colab;
       break;
     }
@@ -265,7 +265,7 @@ export const criarAgendamentoTotem = async (
     // Sala só é ocupada pelo totem: a trava dela serializa duas reservas de profissionais diferentes na mesma sala
     await travarChave(tx, `sala:${sessao.salaId}`);
 
-    const indisponivel = await validarDisponibilidadeProfissional(tx, sessao.terapeutaId, inicio, servicos, { sessaoPropria: opcoes.sessionToken });
+    const indisponivel = await validarDisponibilidadeProfissional(tx, sessao.terapeutaId, inicio, servicos, { sessaoPropria: opcoes.sessionToken, origem: 'totem' });
     if (indisponivel) throw new HttpError(409, 'Este horário acabou de ser ocupado. Por favor, escolha outro horário.');
     if (await verificarConflitoSala(tx, sessao.salaId, inicio, duracaoTotal(servicos), opcoes.sessionToken)) {
       throw new HttpError(409, 'A sala deste horário acabou de ser ocupada. Por favor, escolha outro horário.');

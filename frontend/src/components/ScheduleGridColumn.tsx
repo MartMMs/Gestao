@@ -192,10 +192,10 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
       style={{ height: (endHour - startHour + 1) * hourHeight }}
     >
       {isUnavailable && (
-        <div className="absolute inset-0 pointer-events-none z-0 flex flex-col items-center justify-center opacity-30 grayscale">
-           <div className="sticky top-1/2 -translate-y-1/2 flex flex-col items-center justify-center text-on-surface-variant">
-             <span className="material-symbols-outlined text-4xl mb-2">event_busy</span>
-             <span className="text-xs font-bold uppercase tracking-widest bg-surface-container/80 px-3 py-1 rounded-full shadow-sm backdrop-blur-sm border border-outline-variant/20">Profissional Indisponível</span>
+        <div className="absolute inset-0 pointer-events-none z-20 flex flex-col items-center justify-center">
+           <div className="sticky top-1/2 -translate-y-1/2 flex flex-col items-center justify-center text-on-surface-variant bg-surface-container-lowest/95 px-4 py-3 rounded-2xl border border-outline-variant/25 shadow-sm">
+             <span className="material-symbols-outlined text-3xl mb-1 opacity-70">event_busy</span>
+             <span className="text-xs font-bold uppercase tracking-widest">Profissional Indisponível</span>
            </div>
         </div>
       )}

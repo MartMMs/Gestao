@@ -5,7 +5,7 @@ import { normalizarTelefone } from './validadores';
 
 export const VARIAVEIS_LEMBRETE = [
   { chave: 'nome', explicacao: 'Primeiro nome do cliente', exemplo: 'Maria' },
-  { chave: 'data', explicacao: 'Dia do atendimento', exemplo: '11/12' },
+  { chave: 'data', explicacao: 'Dia do atendimento', exemplo: '11/12/2026' },
   { chave: 'horario', explicacao: 'Hora do atendimento', exemplo: '10:30' },
   { chave: 'dia da semana', explicacao: 'Dia da semana do atendimento', exemplo: 'quinta-feira' },
   { chave: 'numero da reserva', explicacao: 'Código da reserva, para mostrar na recepção', exemplo: 'AG-1A2B3C' },

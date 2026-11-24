@@ -23,7 +23,9 @@ model Colaborador {
   turnoPadrao   String?
   folgasDomingoNoMes Int?     @default(2)
   cargaHorariaSemanal Int?    @default(40)
-  habilidades   String[]      @default([])
+  // Legado (texto livre): copiado para "habilidadesCadastradas" na migration 20261121120000_habilidades; não é mais lido
+  habilidadesLegado String[]  @default([]) @map("habilidades")
+  habilidadesCadastradas Habilidade[] @relation("ColaboradorHabilidades")
   papel         String        @default("collaborator")
   ativo         Boolean       @default(true)
   diasTrabalho  String?       @default("1,2,3,4,5,6")
@@ -35,6 +37,19 @@ model Colaborador {
   bloqueios     Bloqueio[]
   trocasTurno   SolicitacaoTroca[]
   escalaOverrides EscalaOverride[]
+}
+
+// Habilidades cadastradas pela supervisão; arquivar (ativa = false) tira das regras sem apagar os vínculos
+model Habilidade {
+  id              String        @id @default(uuid())
+  nome            String
+  // nome em minúsculas e sem espaços sobrando: impede "Drenagem" e "drenagem" duplicadas
+  nomeNormalizado String        @unique
+  ativa           Boolean       @default(true)
+  criadoEm        DateTime      @default(now())
+  atualizadoEm    DateTime      @updatedAt
+  colaboradores   Colaborador[] @relation("ColaboradorHabilidades")
+  servicos        Servico[]     @relation("ServicoHabilidades")
 }
 
 model Cliente {
@@ -65,7 +80,9 @@ model Servico {
   comissaoPercentual   Float?
   modoElegibilidade    String        @default("livre")
   cargosPermitidos     String[]      @default([])
-  habilidadesPermitidas String[]     @default([])
+  // Legado (texto livre): copiado para "habilidadesExigidas" na migration 20261121120000_habilidades; não é mais lido
+  habilidadesPermitidasLegado String[] @default([]) @map("habilidadesPermitidas")
+  habilidadesExigidas  Habilidade[]  @relation("ServicoHabilidades")
   profissionaisPermitidos String[]   @default([])
   // Inativo: some do totem e de novos agendamentos, mas continua no histórico
   ativo                Boolean       @default(true)
@@ -206,6 +223,8 @@ model ConfiguracaoEmpresa {
   usarComissao         Boolean  @default(true)
   // Ligado: agendar (pela equipe) e cadastrar cliente exigem ficha de anamnese preenchida
   exigirAnamnese       Boolean  @default(false)
+  // Serviço "por habilidade": 'sempre' (totem e agenda exigem), 'apenas_totem' (agenda só avisa) ou 'desligado'
+  exigenciaHabilidades String   @default("sempre")
   // Horário de funcionamento: vale para a agenda da equipe, o totem e a grade. Limite = último início aceito (null = até fechar)
   horaAbertura          String   @default("09:00")
   horaFechamento        String   @default("21:00")

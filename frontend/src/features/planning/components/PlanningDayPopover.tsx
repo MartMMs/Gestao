@@ -1,4 +1,5 @@
-import { diaMesBR } from '@shared/agenda';
+import { formatarDataBR } from '@shared/datasBR';
+
 import React, { useMemo, useState } from 'react';
 import { Employee } from '../../../types';
 import { aplicarAjusteEscala, DiaEscala } from '../../../utils/escalaCalculator';
@@ -27,20 +28,20 @@ export interface PlanningDayPopoverProps {
 const TIPOS: { tipo: DiaEscala['tipo']; rotulo: string; icone: string }[] = [
   { tipo: 'trabalho', rotulo: 'Trabalho', icone: 'work' },
   { tipo: 'folga', rotulo: 'Folga', icone: 'event_busy' },
-  { tipo: 'fds', rotulo: 'FDS', icone: 'weekend' },
 ];
 
-const dataLonga = (data: string) => new Date(`${data}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
+const dataLonga = formatarDataBR;
 const unico = <T,>(valores: T[]) => (new Set(valores).size === 1 ? valores[0] : undefined);
 
 export function PlanningDayPopover({ dias, colaborador, escalaContexto, notaSalva, scaleByEmployee, onClose, onSave }: PlanningDayPopoverProps) {
   const emLote = dias.length > 1;
   // Valor comum aos dias; em lote com dias diferentes fica vazio ("vários") e só muda se o supervisor escolher
-  const tipoInicial = unico(dias.map((d) => d.tipo));
+  // Unifica FDS em Folga visualmente
+  const tipoInicial = unico(dias.map((d) => (d.tipo === 'fds' ? 'folga' : d.tipo)));
   const turnoInicial = unico(dias.map((d) => turnoDoDia(d)));
   const descricaoInicial = emLote ? '' : notaSalva || '';
 
-  const [tipo, setTipo] = useState(tipoInicial);
+  const [tipo, setTipo] = useState<DiaEscala['tipo'] | undefined>(tipoInicial);
   // "" = sem turno escolhido: o dia fica com o que tem (inclusive sem turno, quando a agenda aceita o horário da casa)
   const [turno, setTurno] = useState(turnoInicial ?? '');
   const [descricao, setDescricao] = useState(descricaoInicial);
@@ -66,7 +67,7 @@ export function PlanningDayPopover({ dias, colaborador, escalaContexto, notaSalv
 
   const avisosInterjornada = useMemo(() => analisarInterjornadaEscala(proposta).violacoes
     .filter((v) => datas.has(v.dataTurnoAtual) || datas.has(v.dataTurnoAnterior))
-    .map((v) => `Descanso de ${formatarHoras(v.descansoHoras)} entre ${diaMesBR(v.dataTurnoAnterior)} (${v.turnoAnterior}) e ${diaMesBR(v.dataTurnoAtual)} (${v.turnoAtual}). O mínimo é 11h (CLT, art. 66).`),
+    .map((v) => `Descanso de ${formatarHoras(v.descansoHoras)} entre ${formatarDataBR(v.dataTurnoAnterior)} (${v.turnoAnterior}) e ${formatarDataBR(v.dataTurnoAtual)} (${v.turnoAtual}). O mínimo é 11h (CLT, art. 66).`),
   [datas, proposta]);
 
   // Todas as semanas que a seleção toca, inteiras (inclusive dias do mês vizinho)
@@ -74,7 +75,7 @@ export function PlanningDayPopover({ dias, colaborador, escalaContexto, notaSalv
     const contrato = Number(colaborador?.cargaHorariaSemanal) > 0 ? Number(colaborador?.cargaHorariaSemanal) : 44;
     const semanas = new Set([...datas].map(inicioDaSemana));
     return [...horasPorSemana(proposta)].filter(([semana, total]) => semanas.has(semana) && total > contrato)
-      .map(([semana, total]) => `Semana de ${diaMesBR(semana)}: ${formatarHoras(total)}, ${formatarHoras(total - contrato)} acima do contrato de ${contrato}h.`);
+      .map(([semana, total]) => `Semana de ${formatarDataBR(semana)}: ${formatarHoras(total)}, ${formatarHoras(total - contrato)} acima do contrato de ${contrato}h.`);
   }, [colaborador?.cargaHorariaSemanal, datas, proposta]);
 
   const horasSelecao = proposta.filter((d) => datas.has(d.data)).reduce((soma, d) => soma + horasDoDia(d), 0);
@@ -111,7 +112,7 @@ export function PlanningDayPopover({ dias, colaborador, escalaContexto, notaSalv
   };
 
   if (dias.length === 0) return null;
-  const titulo = emLote ? `${diaMesBR(dias[0].data)} a ${diaMesBR(dias[dias.length - 1].data)}` : dataLonga(dias[0].data);
+  const titulo = emLote ? `${formatarDataBR(dias[0].data)} a ${formatarDataBR(dias[dias.length - 1].data)}` : dataLonga(dias[0].data);
 
   return (
     <ModalFormulario

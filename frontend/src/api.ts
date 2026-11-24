@@ -1,6 +1,6 @@
 import { CODIGO_VERSAO_DESATUALIZADA } from '@shared/statusAgendamento';
 import { keepPreviousData, useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { Appointment, Bloqueio, Client, Employee, EmployeeUpdate, Service, ServiceEligibilityMode, TurnoSwapRequest, TurnoSwapStatus, ConfiguracaoEmpresa } from './types';
+import { Appointment, Bloqueio, Client, Employee, EmployeeUpdate, Service, ServiceEligibilityMode, TurnoSwapRequest, TurnoSwapStatus, ConfiguracaoEmpresa, Habilidade } from './types';
 import { getApiUrl } from './config/api';
 import { redactSensitiveData } from '@shared/redact';
 import { CODIGO_CSRF, CODIGO_TROCAR_SENHA } from '@shared/codigosErro';
@@ -201,6 +201,7 @@ interface BackendEmployee {
   cargaHorariaSemanal?: number;
   folgasDomingoNoMes?: number;
   habilidades?: string[];
+  habilidadeIds?: string[];
   bloqueios?: Employee['bloqueios'];
 }
 
@@ -216,6 +217,7 @@ interface BackendService {
   modoElegibilidade?: string | null;
   cargosPermitidos?: string[] | null;
   habilidadesPermitidas?: string[] | null;
+  habilidadeIds?: string[] | null;
   profissionaisPermitidos?: string[] | null;
   categoria?: string | null;
   tempoHigienizacaoMin?: number | string | null;
@@ -310,6 +312,7 @@ const normalizeEmployee = (employee: BackendEmployee): Employee => {
     turnoPadrao: employee.turnoPadrao || null,
     cargaHorariaSemanal: typeof employee.cargaHorariaSemanal === 'number' ? employee.cargaHorariaSemanal : undefined,
     habilidades: Array.isArray(employee.habilidades) ? employee.habilidades : [],
+    habilidadeIds: Array.isArray(employee.habilidadeIds) ? employee.habilidadeIds : [],
     bloqueios: Array.isArray(employee.bloqueios) ? employee.bloqueios : [],
   };
 };
@@ -339,6 +342,7 @@ const normalizeService = (service: BackendService): Service => {
     modoElegibilidade: normalizeServiceEligibilityMode(service.modoElegibilidade),
     cargosPermitidos: Array.isArray(service.cargosPermitidos) ? service.cargosPermitidos.filter((value): value is string => typeof value === 'string') : [],
     habilidadesPermitidas: Array.isArray(service.habilidadesPermitidas) ? service.habilidadesPermitidas.filter((value): value is string => typeof value === 'string') : [],
+    habilidadeIds: Array.isArray(service.habilidadeIds) ? service.habilidadeIds.filter((value): value is string => typeof value === 'string') : [],
     profissionaisPermitidos: Array.isArray(service.profissionaisPermitidos) ? service.profissionaisPermitidos.filter((value): value is string => typeof value === 'string') : [],
     categoria: typeof service.categoria === 'string' ? service.categoria : '',
     tempoHigienizacaoMin: Number.isFinite(parsedHigiene) && parsedHigiene >= 0 ? parsedHigiene : 0,
@@ -630,7 +634,7 @@ export const useAddEmployee = (token: string | null) => {
           turnoPadrao: data.turnoPadrao,
           folgasDomingoNoMes: data.folgasDomingoNoMes,
           cargaHorariaSemanal: data.cargaHorariaSemanal,
-          habilidades: data.habilidades,
+          habilidadeIds: data.habilidadeIds,
           papel: data.role,
           diasTrabalho: data.diasTrabalho,
           senha: data.password,
@@ -669,7 +673,7 @@ export const useEditEmployee = (token: string | null) => {
           turnoPadrao: data.turnoPadrao,
           folgasDomingoNoMes: data.folgasDomingoNoMes,
           cargaHorariaSemanal: data.cargaHorariaSemanal,
-          habilidades: data.habilidades,
+          habilidadeIds: data.habilidadeIds,
           papel: data.role,
           diasTrabalho: data.diasTrabalho,
           senha: data.password,
@@ -748,6 +752,24 @@ export const useScaleOverrides = (
   enabled: !!token && (options?.enabled ?? true),
 });
 
+// Visão operacional somente leitura da escala (Recepção, Supervisão, Admin): apenas trabalho/folga e turno do mês
+export const useEscalaOperacional = (
+  token: string | null,
+  month?: string,
+  options?: QueryHookOptions,
+) => useQuery({
+  queryKey: ['scale-overrides', 'operacional', month || 'current'],
+  queryFn: async () => {
+    const suffix = month ? `?month=${encodeURIComponent(month)}` : '';
+    const result = await fetchApi(`/escala/operacional${suffix}`, token);
+    if (!Array.isArray(result)) return [];
+    return result
+      .map((item) => normalizeScaleOverridePayload(item))
+      .filter((item): item is ScaleOverridePayload => Boolean(item));
+  },
+  enabled: !!token && (options?.enabled ?? true),
+});
+
 // Desfaz férias/atestado/afastamento do RH: os dias voltam ao rodízio da escala
 export const useRemoverAusencia = (token: string | null) => {
   const queryClient = useQueryClient();
@@ -769,6 +791,19 @@ export const useSaveScaleOverride = (token: string | null) => {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['scale-overrides'] });
+    },
+  });
+};
+
+// Gera a escala de um mês gravando o turno escolhido em cada dia (não muda outros meses)
+export const useGerarEscalaMes = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { colaboradorId: string; mes: string; turno: string; tipoEscala: string; folgasDomingoNoMes: number }) =>
+      fetchApi('/escala/gerar-mes', token, { method: 'POST', body: JSON.stringify(data) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       queryClient.invalidateQueries({ queryKey: ['scale-overrides'] });
@@ -836,6 +871,41 @@ export const useDeleteTurno = (token: string | null) => {
   return useMutation({
     mutationFn: (id: string) => fetchApi(`/turnos/${id}`, token, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['turnos'] }),
+  });
+};
+
+// =======================
+// HABILIDADES (só supervisão e admin)
+// =======================
+export const useHabilidades = (token: string | null, incluirArquivadas = false) => useQuery({
+  queryKey: ['habilidades', incluirArquivadas],
+  queryFn: async () => {
+    const lista = await fetchApi(`/habilidades${incluirArquivadas ? '?incluirArquivadas=true' : ''}`, token);
+    return Array.isArray(lista) ? (lista as Habilidade[]) : [];
+  },
+  enabled: !!token,
+});
+
+// Habilidade muda quem pode atender: serviços e equipe trazem os nomes delas
+const invalidarHabilidades = (queryClient: ReturnType<typeof useQueryClient>) => {
+  for (const queryKey of [['habilidades'], ['services'], ['employees']]) queryClient.invalidateQueries({ queryKey });
+};
+
+export const useSalvarHabilidade = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, nome, ativa }: { id?: string; nome?: string; ativa?: true }) => fetchApi(id ? `/habilidades/${id}` : '/habilidades', token, {
+      method: id ? 'PUT' : 'POST', body: JSON.stringify({ nome, ativa }),
+    }) as Promise<Habilidade>,
+    onSuccess: () => invalidarHabilidades(queryClient),
+  });
+};
+
+export const useArquivarHabilidade = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => fetchApi(`/habilidades/${id}/arquivar`, token, { method: 'PATCH' }) as Promise<{ totalServicosAfetados: number }>,
+    onSuccess: () => invalidarHabilidades(queryClient),
   });
 };
 
@@ -960,3 +1030,17 @@ export const useUpdateCompanyConfig = (token: string | null) => {
     onSuccess: () => { void invalidarConfigEmpresa(queryClient); },
   });
 };
+export type TipoMeuDia = 'trabalho' | 'folga' | 'feriado' | 'ferias' | 'afastamento';
+export type MeuDia = { data: string; tipo: TipoMeuDia; turno: string | null; turnoNome: string | null; descricao: string | null };
+export type MinhaEscala = {
+  mes: string;
+  resumo: { hoje: MeuDia | null; amanha: MeuDia | null; proximaFolga: string | null; atualizadaEm: string | null };
+  dias: MeuDia[];
+};
+
+// Escala da pessoa logada (o servidor usa só a sessão). Fica sob 'scale-overrides' para o tempo real atualizar
+export const useMinhaEscala = (token: string | null, mes: string, ativo: boolean) => useQuery({
+  queryKey: ['scale-overrides', 'minha-escala', mes],
+  queryFn: async () => (await fetchApi(`/minha-escala?month=${encodeURIComponent(mes)}`, token)) as MinhaEscala,
+  enabled: !!token && ativo,
+});

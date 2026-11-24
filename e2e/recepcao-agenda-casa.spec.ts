@@ -12,5 +12,7 @@ test('recepção vê a agenda da casa, sem bloqueio e sem a agenda pessoal escon
   await expect(page.getByRole('heading', { name: 'Ana', level: 4 })).toBeVisible();
   await expect(page.getByRole('button', { name: /Bloqueio/i })).toHaveCount(0);
   await expect(page.getByText('Minha Agenda')).toHaveCount(0);
-  await expect(page.getByRole('combobox', { name: 'Portal' })).toHaveValue('receptionist');
+  // Sem seta de dropdown morta quando não há outro portal para alternar
+  await expect(page.getByRole('combobox', { name: 'Portal' })).toHaveCount(0);
+  await expect(page.locator('header').getByText('Portal da Recepção')).toBeVisible();
 });

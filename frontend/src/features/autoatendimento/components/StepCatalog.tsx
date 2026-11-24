@@ -88,7 +88,7 @@ export function StepCatalog({
   return (
     <div className="space-y-6">
       <div className="text-center max-w-xl mx-auto space-y-2">
-        <span className="text-[11px] font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-3 py-1 rounded-full">
+        <span className="text-xs font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-3 py-1 rounded-full">
           Etapa 1 de 4 · Escolha: {termoServico}
         </span>
         <h2 className="text-2xl sm:text-3xl font-headline text-primary">
@@ -102,7 +102,7 @@ export function StepCatalog({
       {/* Busca e Categorias */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="relative w-full sm:w-72">
-          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline-variant text-[18px]">
+          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">
             search
           </span>
           <input
@@ -110,7 +110,7 @@ export function StepCatalog({
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Buscar produto ou serviço..."
-            className="w-full pl-10 pr-4 py-2.5 bg-surface-container-low border border-outline-variant/30 text-xs sm:text-sm rounded-xl focus:ring-1 focus:ring-primary text-on-surface"
+            className="w-full pl-10 pr-4 py-2.5 min-h-11 bg-surface-container-low border border-outline-variant/30 text-xs sm:text-sm rounded-xl focus:ring-1 focus:ring-primary text-on-surface"
           />
         </div>
 
@@ -121,7 +121,7 @@ export function StepCatalog({
                 key={cat}
                 type="button"
                 onClick={() => setActiveCategory(cat)}
-                className={`px-3.5 py-1.5 rounded-full text-[11px] font-bold tracking-wider uppercase whitespace-nowrap transition-all ${
+                className={`px-3.5 min-h-11 rounded-full text-xs font-bold tracking-wider uppercase whitespace-nowrap transition-all ${
                   activeCategory === cat
                     ? 'bg-primary text-on-primary shadow-sm'
                     : 'bg-surface-container-low text-on-surface-variant hover:text-primary border border-outline-variant/20'
@@ -152,7 +152,6 @@ export function StepCatalog({
         {filteredServices.map((service) => {
           const isSelected = activeSelectedList.some((s) => s.id === service.id);
           const valorSinal = percentualSinal ? Math.round(service.preco * (percentualSinal / 100) * 100) / 100 : 0;
-          const tempoBuffer = service.tempoHigienizacaoMin || 15;
 
           return (
             <motion.div
@@ -175,14 +174,6 @@ export function StepCatalog({
                   : 'bg-surface-container-lowest border-outline-variant/25 hover:border-primary/40 shadow-sm'
               }`}
             >
-              {/* Badge visual de Selecionado no topo do Card */}
-              {isSelected && (
-                <div className="absolute top-0 right-0 bg-primary text-on-primary text-[11px] font-bold px-3 py-0.5 rounded-bl-xl uppercase tracking-wider flex items-center gap-1 shadow-xs">
-                  <span className="material-symbols-outlined text-[13px]">check</span>
-                  Adicionado
-                </div>
-              )}
-
               <div>
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-xs transition-colors ${
@@ -197,7 +188,7 @@ export function StepCatalog({
                       {formatarReais(service.preco)}
                     </span>
                     {percentualSinal ? (
-                      <p className="text-[11px] text-on-surface-variant font-medium">
+                      <p className="text-xs text-on-surface-variant font-medium">
                         Sinal de {formatarReais(valorSinal)}
                       </p>
                     ) : null}
@@ -217,9 +208,6 @@ export function StepCatalog({
                     <span className="material-symbols-outlined text-[15px]">schedule</span>
                   </div>
                   <span className="font-semibold">{service.duracao || 60} min</span>
-                  <span className="text-[11px] text-on-surface-variant/70">
-                    (+{tempoBuffer}m preparo)
-                  </span>
                 </div>
 
                 <span
@@ -266,7 +254,7 @@ export function StepCatalog({
                   className="inline-flex items-center gap-1.5 bg-primary/10 text-primary border border-primary/20 px-2.5 py-1 rounded-xl text-xs font-medium"
                 >
                   <span>{item.nome}</span>
-                  <span className="text-[11px] opacity-75">({item.duracao || 60}m · {formatarReais(item.preco)})</span>
+                  <span className="text-xs">({item.duracao || 60}m · {formatarReais(item.preco)})</span>
                   {onToggleService && (
                     <button
                       type="button"
@@ -274,10 +262,11 @@ export function StepCatalog({
                         e.stopPropagation();
                         onToggleService(item);
                       }}
-                      className="w-4 h-4 rounded-full hover:bg-primary/20 flex items-center justify-center text-primary cursor-pointer ml-0.5"
+                      className="w-11 h-11 -my-3 -mr-2 rounded-full hover:bg-primary/20 flex items-center justify-center text-primary cursor-pointer"
                       title={`Remover ${item.nome}`}
+                      aria-label={`Remover ${item.nome}`}
                     >
-                      <span className="material-symbols-outlined text-[13px]">close</span>
+                      <span className="material-symbols-outlined text-[18px]">close</span>
                     </button>
                   )}
                 </div>

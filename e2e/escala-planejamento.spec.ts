@@ -144,24 +144,20 @@ test.describe('Grade de Escalas', () => {
     }
   });
 
-  test('Padrão 12x36: pede confirmação, vira proposta e só grava em "Confirmar Escala"', async ({ page, request }) => {
-    const nome = `Escala Modelo ${sufixo()}`;
+  test('barra principal sem Padrão 12x36 nem Editar Grade; filtros e ações ficam nos menus compactos', async ({ page, request }) => {
+    const nome = `Escala Barra ${sufixo()}`;
     const id = await criarColaborador(request, nome);
     try {
       await abrirGrade(page, nome);
-      await page.getByRole('button', { name: /Padrão 12x36/ }).click();
-      await page.getByRole('button', { name: 'Montar proposta' }).click();
-      expect(await ajustesSalvos(request, id)).toHaveLength(0); // proposta ainda não gravada
-
-      await page.getByRole('button', { name: /Confirmar Escala/ }).click();
-      await expect(page.getByRole('button', { name: 'Descartar Proposta' })).toBeHidden({ timeout: 60_000 }); // gravou tudo
-      expect((await ajustesSalvos(request, id)).length).toBeGreaterThan(5);
-      const salvos = await ajustesSalvos(request, id);
-      for (const ajuste of salvos.filter((a) => a.tipo === 'trabalho')) expect(ajuste.turno).toBe('07:00-19:00');
-
-      // Recarregar não perde nada: está no servidor
-      await page.reload();
-      await expect.poll(async () => (await ajustesSalvos(request, id)).length).toBe(salvos.length);
+      await expect(page.getByRole('button', { name: /Padrão 12x36/i })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /Editar Grade/i })).toHaveCount(0);
+      await page.getByRole('button', { name: /Filtros/i }).click();
+      await expect(page.getByLabel('Status', { exact: true })).toBeVisible();
+      await expect(page.getByLabel('Turno', { exact: true })).toBeVisible();
+      await expect(page.getByLabel('Carga Semanal', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: /Ações/i }).click();
+      await expect(page.getByRole('button', { name: /Repetir mês anterior/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Edição em lote/i })).toBeVisible();
     } finally {
       await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: await authHeaders(request, CONTAS.admin) });
     }
@@ -182,21 +178,30 @@ const gravarDia = async (request: APIRequestContext, id: string, dataDia: string
   expect(r.ok(), await r.text()).toBeTruthy();
 };
 
+const abrirRepetirMesAnterior = async (page: Page) => {
+  await page.getByRole('button', { name: /Ações/i }).click();
+  await page.getByRole('button', { name: /Repetir mês anterior/i }).click();
+};
+
 test.describe('Grade de Escalas: propostas, troca e teclado', () => {
   test('Descartar Proposta volta a tela ao que está salvo e não grava nada', async ({ page, request }) => {
     const nome = `Escala Descarte ${sufixo()}`;
     const id = await criarColaborador(request, nome);
     try {
+      const [m1, m2] = [mesDaqui(1), mesDaqui(2)];
+      await gravarDia(request, id, `${m1}-14`, 'folga');
+      const alvoDia = Number(new Date(Date.UTC(Number(m1.slice(0, 4)), Number(m1.slice(5)) - 1, 14 + 28, 12)).toISOString().slice(8, 10));
       await abrirGrade(page, nome);
-      const antes = await dia(page, 10).getAttribute('aria-label');
-      await page.getByRole('button', { name: /Padrão 12x36/ }).click();
+      await page.getByTitle('Próximo mês').click(); // daqui a dois meses
+      const antes = await dia(page, alvoDia).getAttribute('aria-label');
+      await abrirRepetirMesAnterior(page);
       await page.getByRole('button', { name: 'Montar proposta' }).click();
-      await expect(dia(page, 10)).not.toHaveAttribute('aria-label', antes!); // proposta aparece na grade
+      await expect(dia(page, alvoDia)).not.toHaveAttribute('aria-label', antes!); // proposta aparece na grade
       await page.getByRole('button', { name: 'Descartar Proposta' }).click();
       await expect(page.getByRole('button', { name: 'Descartar Proposta' })).toBeHidden();
-      await expect(dia(page, 10)).toHaveAttribute('aria-label', antes!);
+      await expect(dia(page, alvoDia)).toHaveAttribute('aria-label', antes!);
       await page.reload();
-      expect(await ajustesSalvos(request, id)).toHaveLength(0);
+      expect(await ajustesDoMes(request, id, m2)).toHaveLength(0);
     } finally {
       await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: await authHeaders(request, CONTAS.admin) });
     }
@@ -210,7 +215,7 @@ test.describe('Grade de Escalas: propostas, troca e teclado', () => {
       await gravarDia(request, id, `${m1}-14`, 'folga');
       await abrirGrade(page, nome);
       await page.getByTitle('Próximo mês').click(); // daqui a dois meses
-      await page.getByRole('button', { name: /Repetir Mês Anterior/ }).click();
+      await abrirRepetirMesAnterior(page);
       await page.getByRole('button', { name: 'Montar proposta' }).click();
       expect(await ajustesDoMes(request, id, m2)).toHaveLength(0);
       await page.getByRole('button', { name: /Confirmar Escala/ }).click();
@@ -222,17 +227,17 @@ test.describe('Grade de Escalas: propostas, troca e teclado', () => {
     }
   });
 
-  test('trocar dias tocando em dois dias pede confirmação e grava a troca', async ({ page, request }) => {
+  test('trocar dias arrastando na Timeline pede confirmação e grava a troca', async ({ page, request }) => {
     const nome = `Escala Troca ${sufixo()}`;
     const id = await criarColaborador(request, nome);
     try {
       await gravarDia(request, id, data(12), 'folga');
       await gravarDia(request, id, data(13), 'trabalho');
       await abrirGrade(page, nome);
-      await page.getByRole('button', { name: /Editar Grade/ }).click();
-      await dia(page, 12).click();
-      await expect(page.getByText(/Dia 12 escolhido/)).toBeVisible();
-      await dia(page, 13).click();
+      await page.getByRole('button', { name: 'view_timeline Timeline' }).click();
+      const celula12 = page.getByTitle(new RegExp(`^${nome} \\| 12/`));
+      const celula13 = page.getByTitle(new RegExp(`^${nome} \\| 13/`));
+      await celula12.dragTo(celula13);
       await expect(page.getByRole('dialog')).toContainText(nome);
       await page.getByRole('button', { name: 'Trocar', exact: true }).click();
       await expect.poll(async () => {
@@ -268,24 +273,26 @@ test.describe('Grade de Escalas: propostas, troca e teclado', () => {
   });
 });
 
-test.describe('Grade de Escalas: Timeline em modo edição', () => {
-  test('clicar num dia pede confirmação: cancelar não grava, confirmar grava', async ({ page, request }) => {
+test.describe('Grade de Escalas: edição direta na Timeline', () => {
+  test('clicar num dia abre o editor direto sem trava Editar Grade: fechar não grava, salvar grava', async ({ page, request }) => {
     const nome = `Escala Timeline ${sufixo()}`;
     const id = await criarColaborador(request, nome);
     try {
       await trabalharNos(request, id, [15]);
       await abrirGrade(page, nome);
       await page.getByRole('button', { name: 'view_timeline Timeline' }).click();
-      await page.getByRole('button', { name: /Editar Grade/ }).click();
       const celula = page.getByTitle(new RegExp(`^${nome} \\| 15/`));
       await celula.click();
-      const dialogo = page.getByRole('dialog').filter({ hasText: 'Marcar folga?' });
-      await expect(dialogo).toContainText(nome);
-      await dialogo.getByRole('button', { name: 'Cancelar' }).click();
+      const dialogo = page.getByRole('dialog');
+      await expect(dialogo).toBeVisible();
+      await dialogo.getByRole('button', { name: 'Fechar' }).click();
+      await expect(dialogo).toBeHidden();
       expect((await ajustesSalvos(request, id)).find((a) => a.data === data(15))?.tipo).toBe('trabalho');
 
       await celula.click();
-      await page.getByRole('button', { name: 'Marcar folga', exact: true }).click();
+      await dialogo.getByRole('button', { name: 'Folga' }).click();
+      await dialogo.getByRole('button', { name: 'Salvar', exact: true }).click();
+      await expect(dialogo).toBeHidden();
       await expect.poll(async () => (await ajustesSalvos(request, id)).find((a) => a.data === data(15))?.tipo).toBe('folga');
     } finally {
       await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: await authHeaders(request, CONTAS.admin) });
@@ -297,8 +304,7 @@ test.describe('Grade de Escalas: replicar na Timeline', () => {
   const ultimoDia = new Date(Date.UTC(ano, mesAtual + 1, 0, 12)).getUTCDate(); // último dia do mês que vem
   const abrirTimelineEditando = async (page: Page, nome: string) => {
     await abrirGrade(page, nome);
-    await page.getByRole('button', { name: 'view_timeline Timeline' }).click();
-    await page.getByRole('button', { name: /Editar Grade/ }).click();
+    await page.getByRole('group', { name: 'Visualização da escala' }).getByRole('button', { name: /Timeline/i }).click();
   };
   const replicar = async (page: Page, nome: string, n: number) => {
     const celula = page.getByTitle(new RegExp(`^${nome} \\| ${String(n).padStart(2, '0')}/`));
@@ -368,15 +374,18 @@ test.describe('Grade de Escalas: replicar na Timeline', () => {
     const nome = `Escala ReplicarProposta ${sufixo()}`;
     const id = await criarColaborador(request, nome);
     try {
+      const [m1, m2] = [mesDaqui(1), mesDaqui(2)];
+      await gravarDia(request, id, `${m1}-14`, 'folga');
+      const alvoDia = Number(new Date(Date.UTC(Number(m1.slice(0, 4)), Number(m1.slice(5)) - 1, 14 + 28, 12)).toISOString().slice(8, 10));
       await abrirGrade(page, nome);
-      await page.getByRole('button', { name: /Padrão 12x36/ }).click();
+      await page.getByTitle('Próximo mês').click(); // daqui a dois meses
+      await abrirRepetirMesAnterior(page);
       await page.getByRole('button', { name: 'Montar proposta' }).click();
       await page.getByRole('button', { name: 'view_timeline Timeline' }).click();
-      await page.getByRole('button', { name: /Editar Grade/ }).click();
-      await replicar(page, nome, 3);
+      await replicar(page, nome, alvoDia);
       await expect(page.getByText(/ainda é uma proposta não gravada/)).toBeVisible();
       await expect(page.getByRole('dialog').filter({ hasText: 'Replicar este dia?' })).toHaveCount(0);
-      expect(await ajustesSalvos(request, id)).toHaveLength(0);
+      expect(await ajustesDoMes(request, id, m2)).toHaveLength(0);
     } finally {
       await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: await authHeaders(request, CONTAS.admin) });
     }

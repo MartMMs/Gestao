@@ -1,3 +1,4 @@
+import { formatarDataBR } from '@shared/datasBR';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Employee, Appointment } from '../../../types';
 import { useAuth } from '../../../AuthContext';
@@ -47,6 +48,9 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
   const { token } = useAuth();
   const { data: turnos = [] } = useTurnos(token);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [mostrarGargalos, setMostrarGargalos] = useState(false);
+  const [quinzena, setQuinzena] = useState<'mes' | 'q1' | 'q2'>('mes');
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [quickMenu, setQuickMenu] = useState<{
     employeeId: string;
     day: string;
@@ -59,11 +63,13 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
 
   const daysInMonth = new Date(year, monthNum, 0).getDate();
   const visibleDays = useMemo(() => {
-    const start = Math.max(1, dayRange?.start ?? 1);
-    const end = Math.min(daysInMonth, dayRange?.end ?? daysInMonth);
+    const baseStart = Math.max(1, dayRange?.start ?? 1);
+    const baseEnd = Math.min(daysInMonth, dayRange?.end ?? daysInMonth);
+    const start = quinzena === 'q2' ? Math.max(baseStart, 16) : baseStart;
+    const end = quinzena === 'q1' ? Math.min(baseEnd, 15) : baseEnd;
     if (end < start) return [] as number[];
     return Array.from({ length: end - start + 1 }, (_, index) => start + index);
-  }, [dayRange?.end, dayRange?.start, daysInMonth]);
+  }, [dayRange?.end, dayRange?.start, daysInMonth, quinzena]);
 
   const monthLabel = useMemo(() => {
     const label = new Date(year, monthNum - 1, 1).toLocaleDateString('pt-BR', {
@@ -203,9 +209,13 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
     return map;
   }, [daysInMonth, escalasByEmployee]);
 
-  // Cor e rótulo pela mesma regra do calendário (utils/turnos): uma classificação só para a grade inteira
+  // Cor e rótulo pela mesma regra do calendário (utils/turnos).
+  // Dias de trabalho sem turno definido ("s/ turno") usam estilo neutro discreto para destacar apenas turnos definidos.
   const getBackgroundColor = (dia: DiaEscala | undefined, isWeekend: boolean) => {
     const weekendClass = isWeekend ? 'ring-1 ring-inset ring-outline-variant/25' : '';
+    if (dia?.tipo === 'trabalho' && !turnoDoDia(dia)) {
+      return `bg-surface-container-low text-on-surface-variant hover:bg-surface-container ${weekendClass}`;
+    }
     const categoria = categoriaDoDia(dia);
     return `${categoria ? FUNDO_GANTT[categoria] : 'bg-surface-container-high text-on-surface'} ${weekendClass}`;
   };
@@ -213,7 +223,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
   const getCellIconAndLabel = (dia?: DiaEscala) => {
     if (!dia) return null;
     const visual = visualDoDia(dia);
-    if (dia.tipo !== 'trabalho') return { label: dia.feriadoNome ? 'FER' : dia.tipo === 'fds' ? 'FDS' : 'FOLGA', icon: visual.icone };
+    if (dia.tipo !== 'trabalho') return { label: dia.feriadoNome ? 'FER' : 'FOLGA', icon: visual.icone };
     const turno = turnoDoDia(dia);
     return { label: turno ? turno.split('-')[0] : 's/ turno', icon: visual.icone };
   };
@@ -244,40 +254,101 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
 
   return (
     <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 overflow-hidden shadow-sm">
-      <div className="px-4 py-3 border-b border-outline-variant/10 bg-surface-container-low flex items-center justify-between">
-        <h3 className="text-sm font-bold uppercase tracking-[0.15em] text-on-surface">Linha do Tempo de Escala</h3>
-        {!hideMonthBadge && onMonthChange && selectedMonth ? (
-          <div className="relative">
-            <button
-              type="button"
-              onClick={openMonthPicker}
-              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.15em] px-3 py-1 rounded-full bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
-            >
-              <span>{monthLabel}</span>
-              <span className="material-symbols-outlined text-[14px]">expand_more</span>
-            </button>
-            <input
-              ref={monthInputRef}
-              type="month"
-              value={selectedMonth}
-              onChange={(event) => onMonthChange(event.target.value)}
-              tabIndex={-1}
-              aria-hidden="true"
-              className="absolute w-0 h-0 opacity-0 pointer-events-none"
-            />
+      <div className="px-4 py-3 border-b border-outline-variant/10 bg-surface-container-low flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <h3 className="text-sm font-bold uppercase tracking-[0.15em] text-on-surface">Linha do Tempo de Escala</h3>
+          {!hideMonthBadge && onMonthChange && selectedMonth ? (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={openMonthPicker}
+                className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.15em] px-3 py-1 rounded-full bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
+              >
+                <span>{monthLabel}</span>
+                <span className="material-symbols-outlined text-[14px]">expand_more</span>
+              </button>
+              <input
+                ref={monthInputRef}
+                type="month"
+                value={selectedMonth}
+                onChange={(event) => onMonthChange(event.target.value)}
+                tabIndex={-1}
+                aria-hidden="true"
+                className="absolute w-0 h-0 opacity-0 pointer-events-none"
+              />
+            </div>
+          ) : !hideMonthBadge ? (
+            <span className="text-xs font-bold uppercase tracking-[0.15em] px-3 py-1 rounded-full bg-primary/20 text-primary">
+              {monthLabel}
+            </span>
+          ) : null}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center rounded-xl bg-surface-container p-0.5 border border-outline-variant/20" role="group" aria-label="Período da linha do tempo">
+            {([
+              ['mes', `1–${daysInMonth}`],
+              ['q1', '1–15'],
+              ['q2', `16–${daysInMonth}`],
+            ] as const).map(([valor, rotulo]) => (
+              <button
+                key={valor}
+                type="button"
+                aria-pressed={quinzena === valor}
+                onClick={() => setQuinzena(valor)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                  quinzena === valor ? 'bg-primary text-on-primary shadow-xs' : 'text-on-surface-variant hover:text-primary'
+                }`}
+              >
+                {rotulo}
+              </button>
+            ))}
           </div>
-        ) : !hideMonthBadge ? (
-          <span className="text-xs font-bold uppercase tracking-[0.15em] px-3 py-1 rounded-full bg-primary/20 text-primary">
-            {monthLabel}
-          </span>
-        ) : null}
+
+          {quinzena === 'mes' && (
+            <div className="inline-flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => scrollContainerRef.current?.scrollBy({ left: -420, behavior: 'smooth' })}
+                aria-label="Rolar dias para a esquerda"
+                title="Rolar para a esquerda"
+                className="w-8 h-8 rounded-lg border border-outline-variant/20 bg-surface-container-lowest text-on-surface-variant hover:text-primary flex items-center justify-center"
+              >
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">chevron_left</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollContainerRef.current?.scrollBy({ left: 420, behavior: 'smooth' })}
+                aria-label="Rolar dias para a direita"
+                title="Rolar para a direita"
+                className="w-8 h-8 rounded-lg border border-outline-variant/20 bg-surface-container-lowest text-on-surface-variant hover:text-primary flex items-center justify-center"
+              >
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">chevron_right</span>
+              </button>
+            </div>
+          )}
+
+          <button
+            type="button"
+            aria-pressed={mostrarGargalos}
+            onClick={() => setMostrarGargalos((prev) => !prev)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold uppercase tracking-wider transition-colors ${
+              mostrarGargalos
+                ? 'bg-primary/15 text-primary border-primary/30'
+                : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/20 hover:text-primary'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[15px]" aria-hidden="true">monitoring</span>
+            {mostrarGargalos ? 'Ocultar gargalos' : 'Ver gargalos'}
+          </button>
+        </div>
       </div>
 
       {/* Header com dias */}
-      <div className="overflow-x-auto custom-scrollbar">
+      <div ref={scrollContainerRef} className="overflow-x-auto custom-scrollbar">
         <div className="min-w-fit">
           {/* Cabeçalho da tabela */}
-          <div className="flex flex-col sticky left-0 z-10">
+          <div className="flex flex-col">
             <div className="flex items-center">
               <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-xs sm:text-sm text-on-surface sticky left-0 z-20 truncate">
                 Colaborador
@@ -325,7 +396,8 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
               </div>
             </div>
 
-            {/* Heatmap summary (Gargalos de Demanda) */}
+            {/* Heatmap summary (Gargalos de Demanda) — recolhido por padrão */}
+            {mostrarGargalos && (
             <div className="flex items-center">
               <div className="w-28 sm:w-48 shrink-0 bg-surface-container-low border-r border-outline-variant/10 p-2 sm:p-3 font-bold text-[10px] sm:text-[11px] uppercase tracking-tighter sm:tracking-[0.15em] text-on-surface-variant sticky left-0 z-20 truncate" title="Sinaliza gargalos cruzando agenda com cobertura">
                 Gargalos (Demanda)
@@ -370,6 +442,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
                 })}
               </div>
             </div>
+            )}
 
             {/* Dias do mês */}
             <div className="flex items-center">
@@ -471,12 +544,13 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
                               }
                             }}
                             onClick={() => {
-                              if (isEditable && onQuickToggleDay) {
-                                onQuickToggleDay(emp.id, cellDate, dia);
+                              if (onClick) {
+                                onClick(emp.id, cellDate);
                                 return;
                               }
-
-                              onClick?.(emp.id, cellDate);
+                              if (isEditable && onQuickToggleDay) {
+                                onQuickToggleDay(emp.id, cellDate, dia);
+                              }
                             }}
                             onContextMenu={(event) => {
                               if (!isEditable) return;
@@ -491,7 +565,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
                             className={`relative w-12 h-12 flex flex-col items-center justify-center rounded-lg transition-all cursor-pointer border ${
                               borderClass
                             } ${isSuggested ? 'border-dashed opacity-90' : ''} hover:border-primary/50 ${isDragTarget ? 'ring-2 ring-primary/80 shadow-md' : ''} ${getBackgroundColor(dia, meta.isWeekend)}`}
-                            title={`${emp.name} | ${dia?.data?.split('-').reverse().join('/') || ''} | ${dia?.tipo?.toUpperCase() || 'TRABALHO'}${dia?.tipo === 'trabalho' && dia?.turno ? ` (${dia.turno})` : ''}${dia?.descricao ? ` - ${dia.descricao}` : ''}${hasCltAlert ? ' | ALERTA CLT' : ''}${isSuggested ? ' | Sugestão automática' : ''}`}
+                            title={`${emp.name} | ${formatarDataBR(dia?.data) || ''} | ${dia?.tipo === 'fds' ? 'FOLGA' : (dia?.tipo?.toUpperCase() || 'TRABALHO')}${dia?.tipo === 'trabalho' && dia?.turno ? ` (${dia.turno})` : ''}${dia?.descricao ? ` - ${dia.descricao}` : ''}${hasCltAlert ? ' | ALERTA CLT' : ''}${isSuggested ? ' | Sugestão automática' : ''}`}
                           >
                             {(() => {
                               const cellData = getCellIconAndLabel(dia);
@@ -546,14 +620,12 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
           <span className="w-4 h-4 rounded bg-surface-container border border-amber-400 flex items-center justify-center text-[10px] font-black text-amber-400">!</span>
           <span className="text-[11px] text-on-surface-variant font-bold">Alerta CLT</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-error-container border border-error/30 flex items-center justify-center text-[10px] font-black text-error animate-pulse"><span className="material-symbols-outlined text-[11px]">warning</span></span>
-          <span className="text-[11px] text-on-surface-variant font-bold">Gargalo de Demanda</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded bg-orange-100 border border-orange-300 flex items-center justify-center text-[10px] font-black text-orange-800"><span className="material-symbols-outlined text-[11px]">health_and_safety</span></span>
-          <span className="text-[11px] text-on-surface-variant font-bold">Sem Hab. Vital</span>
-        </div>
+        {mostrarGargalos && (
+          <div className="flex items-center gap-2">
+            <span className="w-4 h-4 rounded bg-error-container border border-error/30 flex items-center justify-center text-[10px] font-black text-error animate-pulse"><span className="material-symbols-outlined text-[11px]">warning</span></span>
+            <span className="text-[11px] text-on-surface-variant font-bold">Gargalo de Demanda</span>
+          </div>
+        )}
       </div>
 
       {isEditable && quickMenu && (
@@ -566,7 +638,7 @@ export function TimelineGantt({ employees, appointments, month, dayRange, select
               {employees.find((e) => e.id === quickMenu.employeeId)?.name?.split(' ')[0]}
             </p>
             <p className="text-[10px] text-on-surface-variant mt-0.5">
-              {quickMenu.day.split('-').reverse().join('/')}
+              {formatarDataBR(quickMenu.day)}
             </p>
           </div>
           {/* Turnos padrão (Regras e Turnos) + folga; rótulo curto, nome e horário no title */}

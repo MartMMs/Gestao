@@ -1,12 +1,12 @@
+import { formatarDataBR } from '@shared/datasBR';
 import { HorarioFuncionamentoCard } from '../features/company/components/HorarioFuncionamentoCard';
 import { valorDoAtendimento } from '../utils/valorAtendimento';
-import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { normalizarTexto } from '@shared/validadores';
+import React, { useEffect, useMemo, useState } from 'react';
 import { NO_SCALE_OVERRIDES } from '../features/scale/components/SupervisorEscalaTab';
 import { useToast } from '../hooks/useToast';
 import { useModal } from '../hooks/useModal';
 import { motion } from 'motion/react';
-import { Appointment, Bloqueio, Client, Employee, Service, TurnoSwapRequest, TurnoSwapStatus, ServiceEligibilityMode, EmployeeUpdate } from '../types';
+import { Appointment, Bloqueio, Client, Employee, Service, TurnoSwapRequest, TurnoSwapStatus, EmployeeUpdate } from '../types';
 import { getLocalTodayString } from '../features/appointments/utils/appointmentCore';
 import { SupervisorDashboardTab } from '../features/dashboard/components';
 import { SupervisorClientesTab } from '../features/clients/components';
@@ -15,59 +15,11 @@ import { SupervisorEscalaTab } from '../features/scale/components';
 import { ModuloRH, SupervisorPlanejamentoTab } from '../features/planning/components';
 import { periodosDeAusencia } from '../features/planning/utils/ausencias';
 import { usePlanejamentoEscala, type ScaleOverridePayload } from '../features/planning/hooks/usePlanejamentoEscala';
-import { SupervisorServicosTab } from '../features/services/components';
+import { ServicosTab, type ServicePayload } from '../features/services/components';
 import { AutoatendimentoAdminTab } from '../features/autoatendimento/components';
 import { RelatorioFinanceiroTab } from '../features/reports/components';
 import { type DiaEscala } from '../utils/escalaCalculator';
-import { atendeNaAgenda, formatarReais } from '../utils/formatters';
-
-type ServicePayload = {
-  nome: string;
-  preco: number | string;
-  duracao: number | string;
-  icone?: string;
-  descricao?: string;
-  modoElegibilidade?: ServiceEligibilityMode;
-  cargosPermitidos?: string[];
-  habilidadesPermitidas?: string[];
-  profissionaisPermitidos?: string[];
-  categoria?: string;
-  tempoHigienizacaoMin?: number | string;
-  comissaoPercentual?: number | string;
-};
-
-const normalizeServiceSearch = normalizarTexto;
-
-const normalizeRuleList = (value: string): string[] => Array.from(new Set(value
-  .split(',')
-  .map((entry) => entry.trim())
-  .filter(Boolean)));
-
-const appendRuleToken = (currentValue: string, nextToken: string): string => {
-  const merged = Array.from(new Set([...normalizeRuleList(currentValue), nextToken.trim()].filter(Boolean)));
-  return merged.join(', ');
-};
-
-const getEligibilitySummary = (service: Service): string => {
-  const mode = service.modoElegibilidade || 'livre';
-
-  if (mode === 'cargo') {
-    const cargos = Array.isArray(service.cargosPermitidos) ? service.cargosPermitidos.filter(Boolean) : [];
-    return cargos.length > 0 ? `Somente cargos: ${cargos.join(', ')}` : 'Restrito por cargo';
-  }
-
-  if (mode === 'habilidade') {
-    const habilidades = Array.isArray(service.habilidadesPermitidas) ? service.habilidadesPermitidas.filter(Boolean) : [];
-    return habilidades.length > 0 ? `Somente habilidades: ${habilidades.join(', ')}` : 'Restrito por habilidade';
-  }
-
-  if (mode === 'profissional') {
-    const profissionais = Array.isArray(service.profissionaisPermitidos) ? service.profissionaisPermitidos.filter(Boolean) : [];
-    return profissionais.length > 0 ? `Somente profissionais: ${profissionais.join(', ')}` : 'Restrito por profissional';
-  }
-
-  return 'Disponível para qualquer profissional';
-};
+import { formatarReais } from '../utils/formatters';
 
 type AppointmentCreatePayload = Omit<Appointment, 'id' | 'status'> & {
   cpf?: string;
@@ -148,29 +100,10 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
   const [viewingEmployee, setViewingEmployee] = useState<Employee | null>(null);
   const [viewingEmployeeTab, setViewingEmployeeTab] = useState<'dashboard' | 'jornada' | 'ocorrencias'>('dashboard');
   // Estado para controlar o Modal de Exclusão de Serviço
-  const [serviceToDelete, setServiceToDelete] = useState<string | null>(null);
-  const [isDeletingService, setIsDeletingService] = useState(false);
 
   // Estado para controlar o filtro do histórico no modal
   const [historyFilter, setHistoryFilter] = useState<'all' | '7days' | 'month'>('all');
   
-  // New Service Form
-  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
-  const [newServiceName, setNewServiceName] = useState('');
-  const [newServicePrice, setNewServicePrice] = useState('');
-  const [newServiceDuration, setNewServiceDuration] = useState('60');
-  const SERVICE_ICONS = ['design_services', 'event_available', 'content_cut', 'medical_services', 'fitness_center', 'spa'];
-  const [newServiceIcon, setNewServiceIcon] = useState(SERVICE_ICONS[0]);
-  const [newServiceDescription, setNewServiceDescription] = useState('');
-  const [serviceEligibilityMode, setServiceEligibilityMode] = useState<ServiceEligibilityMode>('livre');
-  const [newServiceCategoria, setNewServiceCategoria] = useState('');
-  const [newServiceTempoHigienizacao, setNewServiceTempoHigienizacao] = useState('0');
-  const [newServiceComissao, setNewServiceComissao] = useState('');
-  const [serviceAllowedCargosInput, setServiceAllowedCargosInput] = useState('');
-  const [serviceAllowedSkillsInput, setServiceAllowedSkillsInput] = useState('');
-  const [serviceAllowedProfessionalsInput, setServiceAllowedProfessionalsInput] = useState('');
-  const [serviceSearchTerm, setServiceSearchTerm] = useState('');
-  const deferredServiceSearchTerm = useDeferredValue(serviceSearchTerm);
 
   // Estado para controlar o Toast de sucesso
   const { toastMessage, setToastMessage } = useToast();
@@ -190,41 +123,10 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
     setErrorMessage,
   });
   const {
-    setShowTopAlerts,
-    setPlanningViewMode,
-    setEmployeeSearchTerm,
     planningOverridesList,
     cltRealtimeAlerts,
     ajustesSalvos,
   } = planejamento;
-
-  // Função para formatar minutos em texto legível (ex: 1h 30m)
-  const formatDuration = (minutes: number) => {
-    if (!minutes) return '0 min';
-    const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
-    if (h > 0 && m > 0) return `${h}h ${m}m`;
-    if (h > 0) return `${h}h`;
-    return `${m}m`;
-  };
-
-
-  // Escuta o comando de Quick Fix vindo do Sino Global
-  useEffect(() => {
-    const handleQuickResolve = (e: Event) => {
-      const customEvent = e as CustomEvent<{ employeeId: string }>;
-      const { employeeId } = customEvent.detail;
-      const emp = employees.find(el => el.id === employeeId);
-      if (emp) {
-        setActiveTab('planejamento');
-        setPlanningViewMode('timeline');
-        setEmployeeSearchTerm(emp.name); // Isola o funcionário na tela
-        setShowTopAlerts(true); // Garante que os avisos internos da aba fiquem visíveis
-      }
-    };
-    window.addEventListener('quick-resolve-clt', handleQuickResolve);
-    return () => window.removeEventListener('quick-resolve-clt', handleQuickResolve);
-  }, [employees]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -268,96 +170,8 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
     return true;
   }).sort((a, b) => new Date(`${b.date}T${b.time}`).getTime() - new Date(`${a.date}T${a.time}`).getTime()) : [];
 
-  // Função de criar serviço
-  const handleServiceSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
-
-    const payload: ServicePayload = {
-      nome: newServiceName,
-      preco: newServicePrice,
-      duracao: newServiceDuration,
-      icone: newServiceIcon,
-      descricao: newServiceDescription,
-      modoElegibilidade: serviceEligibilityMode,
-      categoria: newServiceCategoria,
-      tempoHigienizacaoMin: newServiceTempoHigienizacao,
-      comissaoPercentual: newServiceComissao,
-      cargosPermitidos: serviceEligibilityMode === 'cargo' ? normalizeRuleList(serviceAllowedCargosInput) : [],
-      habilidadesPermitidas: serviceEligibilityMode === 'habilidade' ? normalizeRuleList(serviceAllowedSkillsInput) : [],
-      profissionaisPermitidos: serviceEligibilityMode === 'profissional' ? normalizeRuleList(serviceAllowedProfessionalsInput) : [],
-    };
-
-    try {
-      let success;
-      if (editingServiceId) {
-        success = await onEditService(editingServiceId, payload);
-      } else {
-        success = await onAddService(payload);
-      }
-
-      if (typeof success === 'string') {
-        setErrorMessage(success);
-        return;
-      }
-
-      if (success === false) {
-        setErrorMessage('Não foi possível salvar o serviço. Tente novamente.');
-        return;
-      }
-
-      setToastMessage(editingServiceId ? 'Serviço atualizado com sucesso!' : 'Serviço adicionado ao menu!');
-      cancelServiceEdit();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Erro ao salvar serviço.');
-    }
-  };
-
-  const cancelServiceEdit = () => {
-    setEditingServiceId(null);
-    setNewServiceName('');
-    setNewServicePrice('');
-    setNewServiceDuration('60');
-    setNewServiceIcon(SERVICE_ICONS[0]);
-    setNewServiceDescription('');
-    setServiceEligibilityMode('livre');
-    setNewServiceCategoria('');
-    setNewServiceTempoHigienizacao('0');
-    setNewServiceComissao('');
-    setServiceAllowedCargosInput('');
-    setServiceAllowedSkillsInput('');
-    setServiceAllowedProfessionalsInput('');
-  };
-
   const todayStr = getLocalTodayString();
 
-  const filteredServices = useMemo(() => {
-    const search = normalizeServiceSearch(deferredServiceSearchTerm);
-    if (!search) return services;
-
-    return services.filter((service) => {
-      return [service.nome, service.descricao, service.icone]
-        .filter(Boolean)
-        .some((value) => normalizeServiceSearch(String(value)).includes(search));
-    });
-  }, [services, deferredServiceSearchTerm]);
-
-  const availableCargos = useMemo(() => Array.from(new Set(employees
-    .map((employee) => (employee.cargo || employee.specialty || '').trim())
-    .filter(Boolean)))
-    .sort((a, b) => a.localeCompare(b)), [employees]);
-
-  const availableSkills = useMemo(() => Array.from(new Set(employees
-    .flatMap((employee) => Array.isArray(employee.habilidades) ? employee.habilidades : [])
-    .map((skill) => String(skill).trim())
-    .filter(Boolean)))
-    .sort((a, b) => a.localeCompare(b)), [employees]);
-
-  const availableProfessionals = useMemo(() => Array.from(new Set(employees
-    .filter((emp) => atendeNaAgenda(emp))
-    .map((employee) => (employee.name || '').trim())
-    .filter(Boolean)))
-    .sort((a, b) => a.localeCompare(b)), [employees]);
 
   const { viewingEmployeeRevenue, viewingEmployeeNoShows, viewingEmployeeSemBaixa } = useMemo(() => {
     if (!viewingEmployee) return { viewingEmployeeRevenue: 0, viewingEmployeeNoShows: 0, viewingEmployeeSemBaixa: 0 };
@@ -375,7 +189,6 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
     return { viewingEmployeeRevenue: revenue, viewingEmployeeNoShows: noShows, viewingEmployeeSemBaixa: semBaixa };
   }, [viewingEmployee, appointments, services]);
 
-  useModal(!!serviceToDelete, () => { if (!isDeletingService) setServiceToDelete(null); });
   useModal(!!viewingEmployee, () => setViewingEmployee(null));
 
   return (
@@ -389,7 +202,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                 <p className="text-sm text-on-surface-variant font-body">
                   {activeModule === 'operacional' 
                     ? (activeTab === 'escala' ? 'Agenda operacional da recepção em tempo real.' : 'Gestão operacional com foco em produtividade e qualidade.') 
-                    : 'Gestão da equipe, controle de ponto e jornadas contratuais.'}
+                    : 'Gestão da equipe, escalas e jornadas contratuais.'}
                 </p>
           </div>
               
@@ -443,7 +256,6 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
             services={services}
             clients={clients}
             scaleOverrides={planningOverridesList}
-            onOpenUpcomingAppointments={onOpenUpcomingAppointments}
             onReassignAppointment={onReassign}
             onAddAppointment={onAddAppointment}
             isAddingAppointment={isAddingAppointment}
@@ -486,67 +298,22 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
           onSaveScaleOverride={onSaveScaleOverride}
           setToastMessage={setToastMessage}
           setErrorMessage={setErrorMessage}
-          onViewEmployee={setViewingEmployee}
+          onViewEmployee={(emp) => {
+            setViewingEmployee(emp);
+            setViewingEmployeeTab(emp.role === 'admin' ? 'ocorrencias' : 'dashboard');
+          }}
         />
       )}
 
       {/* NOVA ABA: MENU DE SERVIÇOS (Inspirada no HTML enviado) */}
       {activeTab === 'servicos' && (
-        <SupervisorServicosTab
+        <ServicosTab
           services={services}
-          filteredServices={filteredServices}
-          serviceSearchTerm={serviceSearchTerm}
-          setServiceSearchTerm={setServiceSearchTerm}
-          editingServiceId={editingServiceId}
-          cancelServiceEdit={cancelServiceEdit}
-          handleServiceSubmit={handleServiceSubmit}
-          formatDuration={formatDuration}
-          getEligibilitySummary={getEligibilitySummary}
-          onEditServiceCard={(srv) => {
-            setEditingServiceId(srv.id);
-            setNewServiceName(srv.nome);
-            setNewServicePrice(String(srv.preco));
-            setNewServiceDuration(String(srv.duracao || 60));
-            setNewServiceIcon(srv.icone || SERVICE_ICONS[0]);
-            setNewServiceDescription(srv.descricao || '');
-            setServiceEligibilityMode(srv.modoElegibilidade || 'livre');
-            setNewServiceCategoria(srv.categoria || '');
-            setNewServiceTempoHigienizacao(String(srv.tempoHigienizacaoMin || 0));
-            setNewServiceComissao(srv.comissaoPercentual !== undefined && srv.comissaoPercentual !== null ? String(srv.comissaoPercentual) : '');
-            setServiceAllowedCargosInput((srv.cargosPermitidos || []).join(', '));
-            setServiceAllowedSkillsInput((srv.habilidadesPermitidas || []).join(', '));
-            setServiceAllowedProfessionalsInput((srv.profissionaisPermitidos || []).join(', '));
-          }}
-          onDeleteServiceCard={setServiceToDelete}
-          serviceIcons={SERVICE_ICONS}
-          newServiceIcon={newServiceIcon}
-          setNewServiceIcon={setNewServiceIcon}
-          newServiceName={newServiceName}
-          setNewServiceName={setNewServiceName}
-          newServicePrice={newServicePrice}
-          setNewServicePrice={setNewServicePrice}
-          newServiceDuration={newServiceDuration}
-          setNewServiceDuration={setNewServiceDuration}
-          serviceEligibilityMode={serviceEligibilityMode}
-          setServiceEligibilityMode={setServiceEligibilityMode}
-          newServiceCategoria={newServiceCategoria}
-          setNewServiceCategoria={setNewServiceCategoria}
-          newServiceTempoHigienizacao={newServiceTempoHigienizacao}
-          setNewServiceTempoHigienizacao={setNewServiceTempoHigienizacao}
-          newServiceComissao={newServiceComissao}
-          setNewServiceComissao={setNewServiceComissao}
-          serviceAllowedCargosInput={serviceAllowedCargosInput}
-          setServiceAllowedCargosInput={setServiceAllowedCargosInput}
-          serviceAllowedSkillsInput={serviceAllowedSkillsInput}
-          setServiceAllowedSkillsInput={setServiceAllowedSkillsInput}
-          serviceAllowedProfessionalsInput={serviceAllowedProfessionalsInput}
-          setServiceAllowedProfessionalsInput={setServiceAllowedProfessionalsInput}
-          availableCargos={availableCargos}
-          availableSkills={availableSkills}
-          availableProfessionals={availableProfessionals}
-          appendRuleToken={appendRuleToken}
-          newServiceDescription={newServiceDescription}
-          setNewServiceDescription={setNewServiceDescription}
+          employees={employees}
+          onAddService={onAddService}
+          onEditService={onEditService}
+          onDeleteService={onDeleteService}
+          avisar={(msg, tipo) => (tipo === 'erro' ? setErrorMessage(msg) : setToastMessage(msg))}
         />
       )}
 
@@ -569,49 +336,6 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
 
       {activeTab === 'relatorios' && <RelatorioFinanceiroTab />}
 
-        {/* Modal de Confirmação de Exclusão de Serviço */}
-        {serviceToDelete && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div 
-              role="dialog" aria-modal="true" aria-label="Excluir serviço"
-              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-              className="bg-surface-container-lowest p-8 rounded-3xl shadow-xl max-w-md w-full border border-outline-variant/20"
-            >
-              <div className="text-center mb-6">
-                <div className="w-16 h-16 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="material-symbols-outlined text-3xl text-error">warning</span>
-                </div>
-                <h2 className="text-2xl font-headline text-error mb-2">Excluir Serviço?</h2>
-                <p className="text-on-surface-variant text-sm">
-                  Tem certeza que deseja excluir este serviço do menu? Ele não estará mais disponível para novos agendamentos. Esta ação não pode ser desfeita.
-                </p>
-              </div>
-              
-              <div className="flex gap-3">
-                <button disabled={isDeletingService} onClick={() => setServiceToDelete(null)} className="flex-1 py-3 rounded-xl font-bold text-sm uppercase tracking-wider text-on-surface-variant hover:bg-surface-container transition-colors disabled:opacity-50">
-                  Cancelar
-                </button>
-                <button disabled={isDeletingService} onClick={async () => {
-                    if (isDeletingService) return;
-                    setIsDeletingService(true);
-                    try {
-                      await onDeleteService(serviceToDelete);
-                      setToastMessage('Serviço excluído com sucesso!');
-                    } catch (error) {
-                      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível excluir o serviço.');
-                    } finally {
-                      setIsDeletingService(false);
-                      setServiceToDelete(null);
-                    }
-                  }} className="flex-1 flex items-center justify-center gap-2 bg-error text-white py-3 rounded-xl font-bold text-sm uppercase tracking-wider hover:bg-error/90 transition-colors shadow-sm disabled:opacity-50">
-                  <span className="material-symbols-outlined text-[18px]">delete</span>
-                  {isDeletingService ? 'Excluindo...' : 'Excluir'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
         {/* Modal de Detalhes e Histórico do Colaborador */}
         {viewingEmployee && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -633,7 +357,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                 </button>
               </div>
 
-          {cltRealtimeAlerts.find(a => a.id === viewingEmployee.id) && (
+          {viewingEmployee.role !== 'admin' && cltRealtimeAlerts.find(a => a.id === viewingEmployee.id) && (
             <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl mb-6 flex items-start gap-3">
               <span className="material-symbols-outlined text-amber-500 mt-0.5">warning</span>
               <div>
@@ -644,12 +368,16 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
           )}
 
           <div className="flex gap-6 mb-6 border-b border-outline-variant/20">
-            <button onClick={() => setViewingEmployeeTab('dashboard')} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors ${viewingEmployeeTab === 'dashboard' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant hover:text-on-surface'}`}>Dashboard</button>
-            <button onClick={() => setViewingEmployeeTab('jornada')} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors ${viewingEmployeeTab === 'jornada' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant hover:text-on-surface'}`}>Regras de Jornada</button>
+            {viewingEmployee.role !== 'admin' && (
+              <>
+                <button onClick={() => setViewingEmployeeTab('dashboard')} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors ${viewingEmployeeTab === 'dashboard' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant hover:text-on-surface'}`}>Dashboard</button>
+                <button onClick={() => setViewingEmployeeTab('jornada')} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors ${viewingEmployeeTab === 'jornada' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant hover:text-on-surface'}`}>Regras de Jornada</button>
+              </>
+            )}
             <button onClick={() => setViewingEmployeeTab('ocorrencias')} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors ${viewingEmployeeTab === 'ocorrencias' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant hover:text-on-surface'}`}>Ocorrências (RH)</button>
           </div>
 
-          {viewingEmployeeTab === 'dashboard' && (
+          {viewingEmployee.role !== 'admin' && viewingEmployeeTab === 'dashboard' && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                  <div className="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10">
@@ -704,7 +432,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                     {filteredHistory.map(app => (
                         <tr key={app.id} className="border-t border-outline-variant/10 hover:bg-surface/50 transition-colors">
                           <td className="py-3 px-4 text-sm text-on-surface-variant whitespace-nowrap">
-                            {app.date?.split('-').reverse().join('/') || ''} <br/> <span className="font-bold">{app.time}</span>
+                            {formatarDataBR(app.date) || ''} <br/> <span className="font-bold">{app.time}</span>
                           </td>
                           <td className="py-3 px-4 text-sm text-on-surface font-medium">
                             {app.clientName}
@@ -738,7 +466,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
             </>
           )}
 
-          {viewingEmployeeTab === 'jornada' && (
+          {viewingEmployee.role !== 'admin' && viewingEmployeeTab === 'jornada' && (
             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
               <h3 className="text-lg font-headline text-primary mb-4">Configuração Contratual</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -770,7 +498,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
               </div>
               {total === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center border border-outline-variant/20 rounded-2xl border-dashed">
-                  <span className="material-symbols-outlined text-4xl text-outline-variant mb-2">task_alt</span>
+                  <span className="material-symbols-outlined text-4xl text-on-surface-variant mb-2">task_alt</span>
                   <p className="text-sm font-bold text-on-surface-variant">Dossiê Limpo</p>
                   <p className="text-xs text-on-surface-variant/70">Nenhuma falta, atestado ou férias registrados recentemente.</p>
                 </div>
@@ -788,7 +516,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                         </div>
                       </div>
                       <p className="text-xs font-bold uppercase tracking-widest text-on-surface text-right">
-                        {p.inicio.split('-').reverse().join('/')}{p.fim !== p.inicio ? ` a ${p.fim.split('-').reverse().join('/')}` : ''}
+                        {formatarDataBR(p.inicio)}{p.fim !== p.inicio ? ` a ${formatarDataBR(p.fim)}` : ''}
                       </p>
                     </div>
                   ))}
@@ -804,7 +532,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs font-bold uppercase tracking-widest text-on-surface">{bloq.data.split('-').reverse().join('/')}</p>
+                        <p className="text-xs font-bold uppercase tracking-widest text-on-surface">{formatarDataBR(bloq.data)}</p>
                       </div>
                     </div>
                   ))}

@@ -66,10 +66,16 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
 - **Painel da TV em subdominio:** `tv.<seu-dominio>` (ou o host de `VITE_TV_HOST`) abre direto no painel de chamada.
 - **Auditoria LGPD:** relatorio "Acessos ao historico de clientes" (quem abriu o historico de qual cliente, IP e quando).
 - **Pagamento e WhatsApp pre-prontos:** adapters HTTP genericos, desligados por padrao (ver "Integracoes" abaixo).
+- **Habilidades cadastradas:** sub-aba "Habilidades" na Equipe (admin e supervisao): criar, renomear, arquivar (avisa
+  quantos servicos ativos usam) e reativar. Servico com a regra "Por habilidade" escolhe habilidades da lista (basta o
+  profissional ter uma); o cadastro do colaborador tambem usa a lista. Chave "Exigir habilidades nos agendamentos" no
+  Empresa & Segmento: **Exigir sempre** (totem e agenda; agenda recusa com 422), **So no totem** (agenda aceita e mostra
+  aviso amarelo) ou **Desligado**. A aba Servicos e a mesma para admin e supervisao. `GET /turnos` passou a ser so da
+  supervisao (recepcao usa `/escala/operacional`).
 
 > **Antes de subir esta versao:** faca backup do banco e rode `cd backend && npx prisma migrate deploy`
 > (migrations de auditoria, comissao proporcional, troca de senha obrigatoria, consentimento do totem, usuario de acesso,
-> horario padrao do colaborador `turnoPadrao` referencia de pagamento `referenciaPagamento`, horario de funcionamento da empresa, folga de dia inteiro 00:00-23:59, mensagens de lembrete do WhatsApp `mensagensLembrete` e confirmação/opt-out do WhatsApp `lembretePedeConfirmacao`, `naoReceberWhatsapp`, `clienteAvisouAusenciaEm`).
+> horario padrao do colaborador `turnoPadrao` referencia de pagamento `referenciaPagamento`, horario de funcionamento da empresa, folga de dia inteiro 00:00-23:59, mensagens de lembrete do WhatsApp `mensagensLembrete` e confirmação/opt-out do WhatsApp `lembretePedeConfirmacao`, `naoReceberWhatsapp`, `clienteAvisouAusenciaEm`; habilidades cadastradas `20261121120000_habilidades`: tabela `Habilidade`, vinculos com colaboradores e servicos copiados das listas de texto antigas, que ficam intactas no banco, e `exigenciaHabilidades`, padrao `sempre`, igual ao comportamento anterior).
 > Veja os detalhes completos em [docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md](docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md).
 
 ## Guias detalhados
@@ -159,16 +165,9 @@ cd backend && npx prisma migrate deploy
 
 ## Cabecalhos do servidor do frontend (producao)
 
-O build ja traz a CSP em `<meta>`, mas a protecao contra iframe (clickjacking) so funciona como cabecalho HTTP.
-No nginx que serve o `dist/`:
-
-```nginx
-add_header Content-Security-Policy "frame-ancestors 'none'" always;
-add_header X-Frame-Options DENY always;
-add_header X-Content-Type-Options nosniff always;
-```
-
-Defina `VITE_API_URL` no build de producao: sem ela, a CSP libera a porta 3333 de qualquer host.
+A CSP e os cabecalhos de seguranca ficam so no nginx ([docs/nginx-https.conf.example](docs/nginx-https.conf.example) e os
+trechos em [docs/nginx/](docs/nginx/)); o build nao leva `<meta>` de CSP. A CSP comeca em `Report-Only` nos dois sites:
+depois de uma semana sem avisos no console, troque para `Content-Security-Policy`.
 
 ## Producao: HTTPS e isolamento do totem
 
@@ -181,18 +180,46 @@ no proprio endereco (`/api`):
 - `painel.suaempresa.com` e `tv.suaempresa.com` (equipe): API inteira. Bloco pronto (comentado) para restringir por IP
   ou Cloudflare Access.
 
-1. DNS dos tres hosts para o servidor; certificado: `sudo certbot certonly --nginx -d agendar.suaempresa.com -d painel.suaempresa.com -d tv.suaempresa.com`.
+1. Copie os trechos comuns: `sudo cp docs/nginx/gestao-*.conf /etc/nginx/snippets/`.
+   DNS dos tres hosts para o servidor; certificado: `sudo certbot certonly --nginx -d agendar.suaempresa.com -d painel.suaempresa.com -d tv.suaempresa.com`.
 2. `.env` do backend: `NODE_ENV=production`, `TRUST_PROXY=1`, `REDIS_URL`,
    `CORS_ORIGINS=https://agendar.suaempresa.com,https://painel.suaempresa.com,https://tv.suaempresa.com`.
 3. `.env` do build: `VITE_API_URL=/api`, `VITE_SOCKET_URL=/`, `VITE_AUTOATENDIMENTO_HOST=agendar.suaempresa.com`,
    `VITE_TV_HOST=tv.suaempresa.com`, `VITE_AUTOATENDIMENTO_URL=https://agendar.suaempresa.com`.
-4. Deploy: `SERVICO_API=gestao-api ./scripts/deploy-producao.sh` (confere o `.env`, `pg_dump` em `./backups`,
-   `npm ci`, `prisma migrate deploy`, build limpo sem source maps, reinicia e espera `/health` = ok).
+4. Deploy: `SERVICO_API=gestao-api ./scripts/deploy-producao.sh` (`SERVICO_API` obrigatoria e `sudo` sem senha
+   para o `systemctl`). Ordem: le o `.env` sem executa-lo, `pg_dump` conferido em `./backups` (senha fora da linha
+   de comando), `npm ci` e build numa copia isolada (`.deploy-*`, a API segue no ar), so entao para a API, roda
+   `prisma migrate deploy`, troca `node_modules` e `frontend/dist` (a versao anterior fica em `*.anterior`), sobe e
+   espera o `/health` responder com o commit novo (`{"status":"ok","versao":"<commit>"}`). Se falhar, o script diz
+   a etapa, se a migration pode ter rodado e o roteiro de volta (commit anterior, `.anterior` e restauracao do backup).
+   Arquivos de controle (fora do git): `.versao-publicada` (ultimo commit publicado com sucesso), `.deploy-pendente`
+   (deploy trocou arquivos e nao confirmou o `/health`: bloqueia o proximo ate alguem conferir a API e apagar) e
+   `backend/.versao` (versao mostrada no `/health`; `APP_VERSAO` no ambiente da API tem prioridade).
 5. `sudo nginx -t && sudo systemctl reload nginx`; o certbot renova sozinho (`sudo certbot renew --dry-run`).
 
 Teste local dos dois fluxos: `npm run dev:all` e abra `http://autoatendimento.localhost:3000` (so o totem; qualquer
 caminho, inclusive `/login`, abre o inicio do totem) e `http://localhost:3000` (portal). Em DEV `/totem` tambem abre o totem.
 Use subdominio, nao caminho (`painel.x.com/agendar`): so outra origem isola a sessao da equipe.
+
+## Apresentacao pelo Cloudflare Tunnel (sistema rodando no seu PC)
+
+Publica `painel.<dominio>` (equipe) e `agendar.<dominio>` (so o totem, mesmo bloqueio 404 do nginx) sem servidor e sem
+abrir porta. A raiz do dominio (ex.: portfolio) nao muda. O dominio precisa estar com o DNS na Cloudflare.
+A API sobe em modo producao (sem watch) e **so num banco de demonstracao**: o script recusa o banco do `.env` e exige
+`demo` no nome. O build sobrescreve o `frontend/dist` do PC.
+
+Uma vez: Redis local ligado, `cloudflared` instalado, tunel criado (credencial em `~/.cloudflared/<id>.json`) com os
+CNAMEs `painel` e `agendar` apontando para `<id>.cfargotunnel.com`, e o banco de demonstracao preparado:
+
+```bash
+createdb gestao_demo
+DATABASE_URL=postgresql://usuario:senha@localhost:5432/gestao_demo npm --prefix backend run prisma:deploy
+DATABASE_URL=postgresql://usuario:senha@localhost:5432/gestao_demo npm --prefix backend run seed
+```
+
+A cada apresentacao (Ctrl+C encerra so o que o script subiu):
+`DOMINIO=<dominio> DATABASE_URL_DEMO=postgresql://usuario:senha@localhost:5432/gestao_demo ./scripts/apresentacao.sh`.
+Com mais de um tunel em `~/.cloudflared`, informe `TUNEL=<id>`. O tunel so abre depois do `/health` da API responder.
 
 ## Pagamentos do autoatendimento
 

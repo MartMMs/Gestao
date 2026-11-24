@@ -29,8 +29,8 @@ test.describe('Autoatendimento - Modo Admin, Agendamento Sem Pagamento & Mobile'
     // Supervisor vê a cobrança em texto, sem poder alterá-la (decisão do administrador)
     await expect(page.getByText(/alterado só pelo administrador/i)).toBeVisible();
 
-    // Salva as demais configurações
-    await page.getByRole('button', { name: /Salvar Alterações/i }).click();
+    // Salva as demais configurações (botão único unificado)
+    await page.getByRole('button', { name: /Salvar Configurações/i }).click();
     await expect(page.getByText(/Configurações salvas e aplicadas/i)).toBeVisible({ timeout: 10_000 });
   });
 

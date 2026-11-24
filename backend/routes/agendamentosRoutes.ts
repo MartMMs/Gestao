@@ -1,3 +1,4 @@
+import { formatarDataBR } from '../../shared/datasBR';
 import { Router, Request } from 'express';
 import { Prisma, type Cliente } from '@prisma/client';
 import { prisma } from '../db';
@@ -6,7 +7,7 @@ import { HttpError, ipDoCliente, responderErro, type Notificar } from '../lib/ht
 import { transacaoComTravas, travarAgenda, travarAgendamento, travarChave } from '../lib/transacao';
 import { NOME_CLIENTE_REMOVIDO, clienteComMesmoNome, mensagemNomeDuplicado, travarNomeCliente } from '../lib/clientes';
 import { ORIGEM_COLABORADOR, ORIGEM_TOTEM, ORIGEM_TOTEM_CHECKIN, clientesComAcessoSaude, podeVerSaude, prepararAgendamento } from '../lib/privacidade';
-import { atendimentoSobrepostoDoCliente, validarDisponibilidadeProfissional } from '../services/agendaService';
+import { atendimentoSobrepostoDoCliente, avisoDeHabilidade, validarDisponibilidadeProfissional } from '../services/agendaService';
 import { buscarServicosPorNome } from '../services/servicoService';
 import { erroNomeCliente, limparTexto } from '../../shared/clientes';
 import { getEmpresaConfig } from '../services/configService';
@@ -79,7 +80,7 @@ const conferirVersao = (atualizadoEm: Date, versao: string) => {
 // sumiria do cadastro na exclusão, mas ficaria no histórico)
 const alvoDoAtendimento = (ag: { data: Date; cliente?: { codigo: number } | null; colaborador?: { nome: string } | null }) => {
   const { data, horario } = partesNoFuso(ag.data);
-  return `Atendimento do cliente #${ag.cliente?.codigo ?? '?'} com ${ag.colaborador?.nome ?? 'profissional'} em ${data.split('-').reverse().join('/')} ${horario}`;
+  return `Atendimento do cliente #${ag.cliente?.codigo ?? '?'} com ${ag.colaborador?.nome ?? 'profissional'} em ${formatarDataBR(data)} ${horario}`;
 };
 
 // Mesma pessoa não está em dois lugares ao mesmo tempo (regra da agenda interna em services/agendaService)
@@ -383,11 +384,23 @@ export function createAgendamentosRouter(notificar: Notificar) {
       if (clienteIdBruto !== undefined && (typeof clienteIdBruto !== 'string' || !UUID_REGEX.test(clienteIdBruto))) {
         throw new HttpError(400, 'Parâmetro "clienteId" inválido.');
       }
+      const profissionalIdBruto = req.query.profissionalId ?? req.query.colaboradorId;
+      if (profissionalIdBruto !== undefined && (typeof profissionalIdBruto !== 'string' || !UUID_REGEX.test(profissionalIdBruto))) {
+        throw new HttpError(400, 'Parâmetro "profissionalId" inválido.');
+      }
+      const usuarioId = getUsuario(req)?.id;
+      // Colaborador só consulta os próprios atendimentos: rejeita tentativa de filtrar por outro profissional
+      if (!gerenciaAgenda(req) && profissionalIdBruto && profissionalIdBruto !== usuarioId) {
+        throw new HttpError(403, 'Você só pode consultar os seus próprios atendimentos.', CODIGO_FORA_DA_AGENDA);
+      }
       const clienteId = clienteIdBruto ?? '';
       const filtroPeriodo = clienteId ? { clienteId } : { data: { gte: lerDesde(req.query.desde) } };
+      const filtroProfissional = gerenciaAgenda(req)
+        ? (profissionalIdBruto ? { colaboradorId: profissionalIdBruto } : {})
+        : { colaboradorId: usuarioId };
       const agendamentos = await prisma.agendamento.findMany({
         where: {
-          ...(gerenciaAgenda(req) ? {} : { colaboradorId: getUsuario(req)?.id }),
+          ...filtroProfissional,
           // Status vazio é tratado como "scheduled" (padrão da coluna). Agenda e histórico mostram ativos,
           // concluídos e faltas (a falta fica visível e pode ser reaberta); só os cancelados ficam de fora.
           OR: [{ status: { in: ['scheduled', 'completed', 'no_show'] } }, { status: null }],
@@ -456,7 +469,9 @@ export function createAgendamentosRouter(notificar: Notificar) {
       });
 
       notificar();
-      res.status(201).json(prepararAgendamento(novo, req, await clientesComAcessoSaude(req)));
+      // Modo "só no totem": a agenda aceita profissional sem a habilidade e devolve o aviso para a tela mostrar
+      const avisoHabilidade = await avisoDeHabilidade(prisma, novo.colaboradorId, novo.servicos);
+      res.status(201).json({ ...prepararAgendamento(novo, req, await clientesComAcessoSaude(req)), ...(avisoHabilidade ? { avisoHabilidade } : {}) });
     } catch (error) {
       responderErro(res, error, 'Erro ao salvar agendamento');
     }
@@ -582,7 +597,8 @@ export function createAgendamentosRouter(notificar: Notificar) {
       });
 
       notificar();
-      res.json(prepararAgendamento(atualizado, req, await clientesComAcessoSaude(req)));
+      const avisoHabilidade = await avisoDeHabilidade(prisma, atualizado.colaboradorId, atualizado.servicos);
+      res.json({ ...prepararAgendamento(atualizado, req, await clientesComAcessoSaude(req)), ...(avisoHabilidade ? { avisoHabilidade } : {}) });
     } catch (error) {
       responderErro(res, error, 'Erro ao atualizar agendamento');
     }

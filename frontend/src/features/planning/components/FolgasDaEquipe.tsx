@@ -1,8 +1,9 @@
+import { formatarDataBR } from '@shared/datasBR';
 import { useMemo, useState } from 'react';
 import type { ScaleSwapPayload } from '../../../api';
 import { useAuth } from '../../../AuthContext';
 import { useModal } from '../../../hooks/useModal';
-import { dataBR, diaMesBR } from '@shared/agenda';
+
 import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import type { DiaEscala } from '../../../utils/escalaCalculator';
 import type { usePlanejamentoEscala } from '../hooks/usePlanejamentoEscala';
@@ -50,7 +51,7 @@ export function FolgasDaEquipe({ planejamento, onSwapScaleDays }: {
         to: { colaboradorId: trocando.colaboradorId, data: destino, snapshot: retrato(trocando.colaboradorId, diaDestino) },
       });
       if (ok === false) return;
-      setToastMessage(`Folga de ${trocando.nome} trocada: ${dataBR(trocando.data)} → ${dataBR(destino)}.`);
+      setToastMessage(`Folga de ${trocando.nome} trocada: ${formatarDataBR(trocando.data)} → ${formatarDataBR(destino)}.`);
       setTrocando(null);
     } catch (erro) {
       setErrorMessage(erro instanceof Error ? erro.message : 'Não foi possível trocar a folga.');
@@ -70,7 +71,7 @@ export function FolgasDaEquipe({ planejamento, onSwapScaleDays }: {
           <button type="button" onClick={() => setDiaDaSemana((d) => semanaVizinha(d, -1))} aria-label="Semana anterior" className="p-2 rounded-xl border border-outline-variant/30 hover:bg-surface-container">
             <span className="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_left</span>
           </button>
-          <span className="text-sm font-bold text-on-surface tabular-nums" aria-live="polite">{dataBR(datas[0])} a {dataBR(datas[6])}</span>
+          <span className="text-sm font-bold text-on-surface tabular-nums" aria-live="polite">{formatarDataBR(datas[0])} a {formatarDataBR(datas[6])}</span>
           <button type="button" onClick={() => setDiaDaSemana((d) => semanaVizinha(d, 1))} aria-label="Próxima semana" className="p-2 rounded-xl border border-outline-variant/30 hover:bg-surface-container">
             <span className="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
           </button>
@@ -85,7 +86,7 @@ export function FolgasDaEquipe({ planejamento, onSwapScaleDays }: {
           const folgas = porDia.get(data) ?? [];
           return (
             <li key={data} className={`py-3 grid gap-2 sm:grid-cols-[9rem_1fr] ${data === hoje ? 'bg-primary/5 -mx-3 px-3 rounded-xl' : ''}`}>
-              <p className="text-sm font-bold text-on-surface">{NOMES_DIA[i]} <span className="font-normal text-on-surface-variant tabular-nums">{diaMesBR(data)}</span>{data === hoje && <span className="ml-1 text-xs text-primary">(hoje)</span>}{feriados.get(data) && <span className="block text-xs font-normal text-on-surface-variant">Feriado: {feriados.get(data)}</span>}</p>
+              <p className="text-sm font-bold text-on-surface">{NOMES_DIA[i]} <span className="font-normal text-on-surface-variant tabular-nums">{formatarDataBR(data)}</span>{data === hoje && <span className="ml-1 text-xs text-primary">(hoje)</span>}{feriados.get(data) && <span className="block text-xs font-normal text-on-surface-variant">Feriado: {feriados.get(data)}</span>}</p>
               {folgas.length === 0 ? (
                 <p className="text-sm text-on-surface-variant">{feriados.get(data) ? 'Ninguém de folga além do feriado.' : 'Ninguém de folga.'}</p>
               ) : (
@@ -110,11 +111,11 @@ export function FolgasDaEquipe({ planejamento, onSwapScaleDays }: {
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !salvando) setTrocando(null); }}>
           <div role="dialog" aria-modal="true" aria-labelledby="troca-folga-titulo" className="bg-surface-container-lowest rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-xl">
             <h3 id="troca-folga-titulo" className="text-lg font-bold text-on-surface">Trocar folga de {trocando.nome}</h3>
-            <p className="text-sm text-on-surface-variant">A folga de {NOMES_DIA[datas.indexOf(trocando.data)].toLowerCase()} {dataBR(trocando.data)} passa para o dia escolhido, e esse dia vira dia de trabalho no lugar.</p>
+            <p className="text-sm text-on-surface-variant">A folga de {NOMES_DIA[datas.indexOf(trocando.data)].toLowerCase()} {formatarDataBR(trocando.data)} passa para o dia escolhido, e esse dia vira dia de trabalho no lugar.</p>
             <label className="block text-xs font-bold text-on-surface-variant">
               Novo dia de folga
               <select value={destino} onChange={(e) => setDestino(e.target.value)} className="mt-1 w-full h-11 px-3 bg-surface-container-low border border-outline-variant/20 rounded-xl text-sm font-normal text-on-surface">
-                {trocando.destinos.map((d) => <option key={d.data} value={d.data}>{NOMES_DIA[datas.indexOf(d.data)]} {dataBR(d.data)}</option>)}
+                {trocando.destinos.map((d) => <option key={d.data} value={d.data}>{NOMES_DIA[datas.indexOf(d.data)]} {formatarDataBR(d.data)}</option>)}
               </select>
             </label>
             <div className="flex justify-end gap-2">

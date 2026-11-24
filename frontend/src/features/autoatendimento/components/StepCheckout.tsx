@@ -1,3 +1,4 @@
+import { dataHumana } from './StepIdentification';
 import React, { useEffect, useState } from 'react';
 import { AutoatendimentoReservaSession, Voucher } from '../../../types';
 import { confirmarPagamentoAutoatendimento, type DadosClienteTotem } from '../services/autoatendimentoService';
@@ -121,7 +122,7 @@ export function StepCheckout({
   return (
     <div className="space-y-6">
       <div className="text-center max-w-xl mx-auto space-y-2">
-        <span className="text-[11px] font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-3 py-1 rounded-full">
+        <span className="text-xs font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-3 py-1 rounded-full">
           Etapa 4 de 4 · {isSemPagamento ? 'Confirmação do Agendamento' : 'Garantia da Reserva'}
         </span>
         <h2 className="text-2xl sm:text-3xl font-headline text-primary">
@@ -151,27 +152,27 @@ export function StepCheckout({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-b border-outline-variant/15 py-4 text-xs">
             <div>
-              <span className="text-outline-variant uppercase text-[11px] font-bold block">Produtos / Serviços</span>
+              <span className="text-on-surface-variant uppercase text-xs font-bold block">Produtos / Serviços</span>
               <span className="font-bold text-on-surface text-sm">{reservation.servicoNome} ({reservation.duracao} min)</span>
             </div>
             <div>
-              <span className="text-outline-variant uppercase text-[11px] font-bold block">Data & Horário</span>
-              <span className="font-bold text-primary text-sm">{reservation.data} às {reservation.horario}</span>
+              <span className="text-on-surface-variant uppercase text-xs font-bold block">Data & Horário</span>
+              <span className="font-bold text-primary text-sm">{dataHumana(reservation.data)} às {reservation.horario}</span>
             </div>
             <div>
-              <span className="text-outline-variant uppercase text-[11px] font-bold block">Espaço / Sala</span>
+              <span className="text-on-surface-variant uppercase text-xs font-bold block">Espaço / Sala</span>
               <span className="font-bold text-on-surface">{reservation.salaNome}</span>
             </div>
             <div>
-              <span className="text-outline-variant uppercase text-[11px] font-bold block">Profissional Responsável</span>
+              <span className="text-on-surface-variant uppercase text-xs font-bold block">Profissional Responsável</span>
               <span className="font-bold text-on-surface">{reservation.terapeutaNome}</span>
             </div>
             <div>
-              <span className="text-outline-variant uppercase text-[11px] font-bold block">Cliente</span>
+              <span className="text-on-surface-variant uppercase text-xs font-bold block">Cliente</span>
               <span className="font-bold text-on-surface">{clientData.nome} ({clientData.telefone})</span>
             </div>
             <div>
-              <span className="text-outline-variant uppercase text-[11px] font-bold block">Valor Total a Pagar na Recepção</span>
+              <span className="text-on-surface-variant uppercase text-xs font-bold block">Valor Total a Pagar na Recepção</span>
               <span className="font-bold text-emerald-600 text-base">{formatarReais(reservation.valorTotal)}</span>
             </div>
           </div>
@@ -202,7 +203,7 @@ export function StepCheckout({
                 </>
               )}
             </button>
-            <p className="text-center text-[11px] text-on-surface-variant">
+            <p className="text-center text-xs text-on-surface-variant">
               Emitiremos seu voucher oficial digital com orientações de chegada e política de cancelamento.
             </p>
           </div>
@@ -229,7 +230,7 @@ export function StepCheckout({
               />
             </div>
 
-            <p className="text-[11px] text-on-surface-variant">
+            <p className="text-xs text-on-surface-variant">
               Após {Math.round(totalSeconds / 60)} minutos, o horário será liberado automaticamente para outros clientes.
             </p>
           </div>
@@ -262,7 +263,7 @@ export function StepCheckout({
               <p className="text-2xl font-bold font-headline text-on-surface mb-1">
                 {formatarReais(reservation.valorSinal)}
               </p>
-              <p className="text-[11px] text-on-surface-variant">
+              <p className="text-xs text-on-surface-variant">
                 Garante a sala e o profissional agora. O restante de {formatarReais(valorRestante)} é pago na recepção.
               </p>
             </div>
@@ -286,7 +287,7 @@ export function StepCheckout({
               <p className="text-2xl font-bold font-headline text-on-surface mb-1">
                 {formatarReais(reservation.valorTotal)}
               </p>
-              <p className="text-[11px] text-on-surface-variant">
+              <p className="text-xs text-on-surface-variant">
                 Experiência completa 100% quitada antecipadamente. Ao chegar, basta apresentar seu comprovante.
               </p>
             </div>
@@ -343,7 +344,7 @@ export function StepCheckout({
                   fill="currentColor"
                 />
               </svg>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-primary mt-1">
+              <span className="text-xs font-bold uppercase tracking-wider text-primary mt-1">
                 PIX BACEN
               </span>
             </div>
@@ -351,7 +352,7 @@ export function StepCheckout({
             <div className="flex-1 space-y-3 w-full">
               <div>
                 <p className="text-xs font-bold text-on-surface">Escaneie o QR Code ou copie o código</p>
-                <p className="text-[11px] text-on-surface-variant">
+                <p className="text-xs text-on-surface-variant">
                   Abra o aplicativo do seu banco, escolha <strong>Pix Copia e Cola</strong> e efetue o pagamento de <strong>{formatarReais(valorCobrado)}</strong>.
                 </p>
               </div>
@@ -361,7 +362,7 @@ export function StepCheckout({
                   type="text"
                   readOnly
                   value={pixCode ?? 'Código Pix indisponível no momento'}
-                  className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 text-[11px] font-mono text-on-surface-variant truncate select-all"
+                  className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 text-xs font-mono text-on-surface-variant truncate select-all"
                 />
                 <button
                   type="button"
@@ -397,7 +398,7 @@ export function StepCheckout({
                     </>
                   )}
                 </button>
-                <p className="mt-2 text-[11px] text-on-surface-variant text-center">
+                <p className="mt-2 text-xs text-on-surface-variant text-center">
                   Sua reserva fica registrada como aguardando pagamento até o banco confirmar o PIX.
                 </p>
               </div>

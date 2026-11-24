@@ -178,7 +178,4 @@ export const validarHorarioAgendamento = (
 export const intervalosSobrepoem = (inicioA: number, fimA: number, inicioB: number, fimB: number) =>
   inicioA < fimB && inicioB < fimA;
 
-/** AAAA-MM-DD → DD/MM/AAAA */
-export const dataBR = (data: string) => data.split('-').reverse().join('/');
-/** AAAA-MM-DD → DD/MM */
-export const diaMesBR = (data: string) => data.slice(5, 10).split('-').reverse().join('/');
+// Datas para exibição: shared/datasBR.ts (formatarDataBR e afins)

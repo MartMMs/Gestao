@@ -2,62 +2,16 @@ import { HorarioFuncionamentoCard } from '../features/company/components/Horario
 import React, { useState } from 'react';
 import { useToast } from '../hooks/useToast';
 import { motion } from 'motion/react';
-import { Appointment, Client, Employee, Service, ServiceEligibilityMode, EmployeeUpdate } from '../types';
+import { Appointment, Client, Employee, Service, EmployeeUpdate } from '../types';
 import { SupervisorDashboardTab } from '../features/dashboard/components';
 import { SupervisorClientesTab } from '../features/clients/components';
 import { SupervisorEquipeTab } from '../features/team/components';
-import { SupervisorServicosTab } from '../features/services/components';
+import { ServicosTab, type ServicePayload } from '../features/services/components';
 import { AutoatendimentoAdminTab } from '../features/autoatendimento/components';
 import { WhatsappLembretesTab } from '../features/appointments/components';
 import { CompanySettingsTab } from '../features/company/components/CompanySettingsTab';
 import { RelatorioFinanceiroTab } from '../features/reports/components';
 import { useCompanyConfig } from '../api';
-
-type ServicePayload = {
-  nome: string;
-  preco: number | string;
-  duracao: number | string;
-  icone?: string;
-  descricao?: string;
-  modoElegibilidade?: ServiceEligibilityMode;
-  cargosPermitidos?: string[];
-  habilidadesPermitidas?: string[];
-  profissionaisPermitidos?: string[];
-  categoria?: string;
-  tempoHigienizacaoMin?: number | string;
-  comissaoPercentual?: number | string;
-};
-
-const normalizeRuleList = (value: string): string[] => Array.from(new Set(value
-  .split(',')
-  .map((entry) => entry.trim())
-  .filter(Boolean)));
-
-const appendRuleToken = (currentValue: string, nextToken: string): string => {
-  const merged = Array.from(new Set([...normalizeRuleList(currentValue), nextToken.trim()].filter(Boolean)));
-  return merged.join(', ');
-};
-
-const getEligibilitySummary = (service: Service): string => {
-  const mode = service.modoElegibilidade || 'livre';
-
-  if (mode === 'cargo') {
-    const cargos = Array.isArray(service.cargosPermitidos) ? service.cargosPermitidos.filter(Boolean) : [];
-    return cargos.length > 0 ? `Somente cargos: ${cargos.join(', ')}` : 'Restrito por cargo';
-  }
-
-  if (mode === 'habilidade') {
-    const habilidades = Array.isArray(service.habilidadesPermitidas) ? service.habilidadesPermitidas.filter(Boolean) : [];
-    return habilidades.length > 0 ? `Somente habilidades: ${habilidades.join(', ')}` : 'Restrito por habilidade';
-  }
-
-  if (mode === 'profissional') {
-    const profissionais = Array.isArray(service.profissionaisPermitidos) ? service.profissionaisPermitidos.filter(Boolean) : [];
-    return profissionais.length > 0 ? `Somente profissionais: ${profissionais.join(', ')}` : 'Restrito por profissional';
-  }
-
-  return 'Disponível para qualquer profissional';
-};
 
 interface AdminViewProps {
   employees: Employee[];
@@ -77,15 +31,6 @@ interface AdminViewProps {
   onDeleteClient?: (id: string) => void;
   token?: string | null;
 }
-
-const SERVICE_ICONS = ['design_services', 'event_available', 'content_cut', 'medical_services', 'fitness_center', 'spa', 'storefront', 'brush', 'dry_cleaning'];
-
-const normalizeServiceSearch = (value: string): string =>
-  value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
 
 export function AdminView({
   employees,
@@ -107,23 +52,6 @@ export function AdminView({
   const { data: companyConfig } = useCompanyConfig(token);
   const [activeTab, setActiveTab] = useState<'empresa' | 'servicos' | 'totem' | 'equipe' | 'dashboard' | 'clientes' | 'relatorios'>('empresa');
 
-  // Gestão de Serviços
-  const [serviceSearchTerm, setServiceSearchTerm] = useState('');
-  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
-  const [newServiceName, setNewServiceName] = useState('');
-  const [newServicePrice, setNewServicePrice] = useState('');
-  const [newServiceDuration, setNewServiceDuration] = useState('60');
-  const [newServiceIcon, setNewServiceIcon] = useState(SERVICE_ICONS[0]);
-  const [newServiceDescription, setNewServiceDescription] = useState('');
-  const [serviceEligibilityMode, setServiceEligibilityMode] = useState<ServiceEligibilityMode>('livre');
-  const [newServiceCategoria, setNewServiceCategoria] = useState('');
-  const [newServiceTempoHigienizacao, setNewServiceTempoHigienizacao] = useState('0');
-  const [newServiceComissao, setNewServiceComissao] = useState('');
-  const [serviceAllowedCargosInput, setServiceAllowedCargosInput] = useState('');
-  const [serviceAllowedSkillsInput, setServiceAllowedSkillsInput] = useState('');
-  const [serviceAllowedProfessionalsInput, setServiceAllowedProfessionalsInput] = useState('');
-
-
   // Toast
   const { toastMessage, setToastMessage } = useToast();
 
@@ -137,88 +65,6 @@ export function AdminView({
   const mostrarErro = (msg: string | null) => {
     if (msg) setToastMessage(null);
     setErroPainel(msg);
-  };
-
-  const filteredServices = services.filter((s) => {
-    const q = normalizeServiceSearch(serviceSearchTerm);
-    if (!q) return true;
-    return [s.nome, s.categoria, s.descricao, s.icone]
-      .filter(Boolean)
-      .some((val) => normalizeServiceSearch(String(val)).includes(q));
-  });
-
-  const availableCargos = Array.from(new Set(employees.map((e) => e.cargo || e.specialty).filter(Boolean)));
-  const availableSkills = Array.from(new Set(employees.flatMap((e) => e.habilidades || []).filter(Boolean)));
-  const availableProfessionals = employees.map((e) => e.name);
-
-  const handleServiceSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const payload: ServicePayload = {
-      nome: newServiceName,
-      preco: newServicePrice,
-      duracao: newServiceDuration,
-      icone: newServiceIcon,
-      descricao: newServiceDescription,
-      modoElegibilidade: serviceEligibilityMode,
-      categoria: newServiceCategoria,
-      tempoHigienizacaoMin: newServiceTempoHigienizacao,
-      comissaoPercentual: newServiceComissao,
-      cargosPermitidos: serviceEligibilityMode === 'cargo' ? normalizeRuleList(serviceAllowedCargosInput) : [],
-      habilidadesPermitidas: serviceEligibilityMode === 'habilidade' ? normalizeRuleList(serviceAllowedSkillsInput) : [],
-      profissionaisPermitidos: serviceEligibilityMode === 'profissional' ? normalizeRuleList(serviceAllowedProfessionalsInput) : [],
-    };
-
-    // Os handlers devolvem true ou a mensagem de erro; em erro, mantém o formulário preenchido
-    const resultado = editingServiceId
-      ? await onEditService(editingServiceId, payload)
-      : await onAddService(payload);
-    if (typeof resultado === 'string' || resultado === false) {
-      mostrarErro(typeof resultado === 'string' ? resultado : 'Não foi possível salvar o serviço.');
-      return;
-    }
-    showToast(editingServiceId ? 'Serviço atualizado com sucesso!' : 'Novo serviço adicionado ao cardápio com sucesso!');
-    cancelServiceEdit();
-  };
-
-  const cancelServiceEdit = () => {
-    setEditingServiceId(null);
-    setNewServiceName('');
-    setNewServicePrice('');
-    setNewServiceDuration('60');
-    setNewServiceIcon(SERVICE_ICONS[0]);
-    setNewServiceDescription('');
-    setServiceEligibilityMode('livre');
-    setNewServiceCategoria('');
-    setNewServiceTempoHigienizacao('0');
-    setNewServiceComissao('');
-    setServiceAllowedCargosInput('');
-    setServiceAllowedSkillsInput('');
-    setServiceAllowedProfessionalsInput('');
-  };
-
-  const onEditServiceCard = (service: Service) => {
-    setEditingServiceId(service.id);
-    setNewServiceName(service.nome);
-    setNewServicePrice(String(service.preco));
-    setNewServiceDuration(String(service.duracao));
-    setNewServiceIcon(service.icone || SERVICE_ICONS[0]);
-    setNewServiceDescription(service.descricao || '');
-    setServiceEligibilityMode(service.modoElegibilidade || 'livre');
-    setNewServiceCategoria(service.categoria || '');
-    setNewServiceTempoHigienizacao(String(service.tempoHigienizacaoMin || 0));
-    setNewServiceComissao(service.comissaoPercentual !== undefined ? String(service.comissaoPercentual) : '');
-    setServiceAllowedCargosInput((service.cargosPermitidos || []).join(', '));
-    setServiceAllowedSkillsInput((service.habilidadesPermitidas || []).join(', '));
-    setServiceAllowedProfessionalsInput((service.profissionaisPermitidos || []).join(', '));
-  };
-
-
-  const formatDuration = (min: number) => {
-    const h = Math.floor(min / 60);
-    const m = min % 60;
-    if (h > 0 && m > 0) return `${h}h ${m}min`;
-    if (h > 0) return `${h}h`;
-    return `${m}min`;
   };
 
   return (
@@ -371,48 +217,13 @@ export function AdminView({
       {activeTab === 'relatorios' && <RelatorioFinanceiroTab />}
 
       {activeTab === 'servicos' && (
-        <SupervisorServicosTab
+        <ServicosTab
           services={services}
-          filteredServices={filteredServices}
-          serviceSearchTerm={serviceSearchTerm}
-          setServiceSearchTerm={setServiceSearchTerm}
-          editingServiceId={editingServiceId}
-          cancelServiceEdit={cancelServiceEdit}
-          handleServiceSubmit={handleServiceSubmit}
-          formatDuration={formatDuration}
-          getEligibilitySummary={getEligibilitySummary}
-          onEditServiceCard={onEditServiceCard}
-          onDeleteServiceCard={onDeleteService}
-          confirmarExclusao
-          serviceIcons={SERVICE_ICONS}
-          newServiceIcon={newServiceIcon}
-          setNewServiceIcon={setNewServiceIcon}
-          newServiceName={newServiceName}
-          setNewServiceName={setNewServiceName}
-          newServicePrice={newServicePrice}
-          setNewServicePrice={setNewServicePrice}
-          newServiceDuration={newServiceDuration}
-          setNewServiceDuration={setNewServiceDuration}
-          serviceEligibilityMode={serviceEligibilityMode}
-          setServiceEligibilityMode={setServiceEligibilityMode}
-          newServiceCategoria={newServiceCategoria}
-          setNewServiceCategoria={setNewServiceCategoria}
-          newServiceTempoHigienizacao={newServiceTempoHigienizacao}
-          setNewServiceTempoHigienizacao={setNewServiceTempoHigienizacao}
-          newServiceComissao={newServiceComissao}
-          setNewServiceComissao={setNewServiceComissao}
-          serviceAllowedCargosInput={serviceAllowedCargosInput}
-          setServiceAllowedCargosInput={setServiceAllowedCargosInput}
-          serviceAllowedSkillsInput={serviceAllowedSkillsInput}
-          setServiceAllowedSkillsInput={setServiceAllowedSkillsInput}
-          serviceAllowedProfessionalsInput={serviceAllowedProfessionalsInput}
-          setServiceAllowedProfessionalsInput={setServiceAllowedProfessionalsInput}
-          availableCargos={availableCargos}
-          availableSkills={availableSkills}
-          availableProfessionals={availableProfessionals}
-          appendRuleToken={appendRuleToken}
-          newServiceDescription={newServiceDescription}
-          setNewServiceDescription={setNewServiceDescription}
+          employees={employees}
+          onAddService={onAddService}
+          onEditService={onEditService}
+          onDeleteService={onDeleteService}
+          avisar={(msg, tipo) => (tipo === 'erro' ? mostrarErro(msg) : showToast(msg))}
         />
       )}
 

@@ -1,3 +1,4 @@
+import { formatarDataBR } from '../../shared/datasBR';
 import { Router, Request } from 'express';
 import { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
@@ -12,6 +13,7 @@ import { transacaoComTravas, travarAgenda } from '../lib/transacao';
 import { prepararBloqueio } from '../lib/privacidade';
 import { INVALIDAR_SESSOES, PAPEIS_ATENDIMENTO, validarSenha } from '../lib/usuarios';
 import { validarDisponibilidadeProfissional } from '../services/agendaService';
+import { SELECT_HABILIDADE, colaboradorComHabilidades, validarHabilidadeIds } from '../services/habilidadeService';
 import { partesNoFuso, TURNO_REGEX } from '../../shared/agenda';
 import { ESCOPOS } from '../../shared/escopos';
 import { EMAIL_REGEX, MENSAGEM_USUARIO_INVALIDO, USUARIO_REGEX, normalizarNome } from '../../shared/validadores';
@@ -119,11 +121,6 @@ const lerCamposEscala = (body: Record<string, unknown>) => {
     }
     dados[campo] = numero;
   }
-  if (body.habilidades !== undefined) {
-    dados.habilidades = Array.isArray(body.habilidades)
-      ? body.habilidades.filter((h): h is string => typeof h === 'string' && h.trim() !== '').map((h) => h.trim())
-      : [];
-  }
   return dados;
 };
 
@@ -134,7 +131,9 @@ export function createColaboradoresRouter(eventos: Eventos) {
   router.get('/colaboradores', verificarToken, async (req, res) => {
     try {
       // Colaboradores desativados (removidos com histórico) não aparecem na equipe
-      const equipe = await prisma.colaborador.findMany({ where: { ativo: true }, include: { bloqueios: true }, orderBy: { nome: 'asc' } });
+      const equipe = (await prisma.colaborador.findMany({
+        where: { ativo: true }, include: { bloqueios: true, habilidadesCadastradas: SELECT_HABILIDADE }, orderBy: { nome: 'asc' },
+      })).map(colaboradorComHabilidades);
       // Usuário de acesso (login) e "senha provisória pendente" só para quem gerencia contas: para os demais seriam a
       // lista de alvos de quem tenta adivinhar senhas. A própria conta sempre vê os seus
       if (usuarioEhSupervisor(req)) return res.json(equipe);
@@ -171,6 +170,8 @@ export function createColaboradoresRouter(eventos: Eventos) {
       await garantirNomeLivre(nome);
 
       const camposEscala = lerCamposEscala(req.body);
+      // Admin não atende: fica fora de habilidades (e da escala)
+      const habilidadeIds = papel === 'admin' ? undefined : await validarHabilidadeIds(prisma, req.body.habilidadeIds);
       // A tela não pede mais especialidade: sem ela, vale o cargo (a especialidade é o rótulo da lista e do totem)
       const especialidade = (camposEscala.especialidade as string | undefined) || (camposEscala.cargo as string | undefined) || '';
       const novoColaborador = await prisma.colaborador.create({
@@ -190,10 +191,12 @@ export function createColaboradoresRouter(eventos: Eventos) {
           // Senha provisória vista pela supervisão: a pessoa escolhe a dela no primeiro acesso
           trocarSenha: true,
           ativo: true,
+          ...(habilidadeIds?.length ? { habilidadesCadastradas: { connect: habilidadeIds.map((hid) => ({ id: hid })) } } : {}),
         } as Prisma.ColaboradorCreateInput,
+        include: { habilidadesCadastradas: SELECT_HABILIDADE },
       });
       notificar();
-      res.status(201).json(novoColaborador);
+      res.status(201).json(colaboradorComHabilidades(novoColaborador));
     } catch (error) {
       responderErro(res, traduzirConflito(error), 'Erro ao criar colaborador');
     }
@@ -249,6 +252,11 @@ export function createColaboradoresRouter(eventos: Eventos) {
         dados.papel = req.body.papel;
       }
       const rebaixaAdmin = alvo.papel === 'admin' && dados.papel !== undefined && dados.papel !== 'admin';
+      // Habilidades: lista completa (substitui). Quem fica admin sai de todas (admin não atende)
+      const papelFinal = (dados.papel as string | undefined) ?? alvo.papel;
+      const atuais = (await prisma.habilidade.findMany({ where: { colaboradores: { some: { id } } }, select: { id: true } })).map((h) => h.id);
+      const habilidadeIds = papelFinal === 'admin' ? [] : await validarHabilidadeIds(prisma, req.body.habilidadeIds, atuais);
+      if (habilidadeIds !== undefined) dados.habilidadesCadastradas = { set: habilidadeIds.map((hid) => ({ id: hid })) };
       if (req.body.senha) {
         // A própria senha tem um caminho só (com auditoria e sessão nova): POST /api/minha-senha
         if (propriaConta) return res.status(400).json({ erro: 'A sua própria senha não muda pelo cadastro da equipe. Peça a outro supervisor ou administrador para redefini-la.' });
@@ -280,13 +288,13 @@ export function createColaboradoresRouter(eventos: Eventos) {
           if (!(await tx.colaborador.count({ where: { papel: 'admin', ativo: true, id: { not: id } } }))) {
             throw new HttpError(400, 'Esta é a única conta de administrador ativa. Promova outra pessoa a administrador antes de mudar esta.');
           }
-          return tx.colaborador.update({ where: { id }, data: dados, omit: { versaoToken: false } });
+          return tx.colaborador.update({ where: { id }, data: dados, omit: { versaoToken: false }, include: { habilidadesCadastradas: SELECT_HABILIDADE } });
         })
-        : await prisma.colaborador.update({ where: { id }, data: dados, omit: { versaoToken: false } });
+        : await prisma.colaborador.update({ where: { id }, data: dados, omit: { versaoToken: false }, include: { habilidadesCadastradas: SELECT_HABILIDADE } });
       // Papel mudou: o socket reconecta sozinho e entra nas salas do papel novo (senão um supervisor promovido a
       // admin seguiria recebendo avisos de supervisor, e quem perdeu a recepção seguiria recebendo os dela)
       if (dados.versaoToken || dados.papel !== undefined) eventos.encerrarSessoesDoUsuario(id);
-      const { versaoToken, ...colaboradorPublico } = colaboradorAtualizado;
+      const { versaoToken, ...colaboradorPublico } = colaboradorComHabilidades(colaboradorAtualizado);
       // Própria conta com credencial nova: a sessão desta aba é trocada por uma nova (como em /minha-senha), em vez de
       // cair como "sessão expirada"; a antiga e as das outras abas/aparelhos deixam de valer
       if (propriaConta && dados.versaoToken) {
@@ -356,7 +364,7 @@ export function createColaboradoresRouter(eventos: Eventos) {
           const { count } = await tx.agendamento.updateMany({ where: { id: ag.id, colaboradorId: id, status: 'scheduled' }, data: { status: 'cancelled' } });
           if (count === 0) continue;
           const { data, horario } = partesNoFuso(ag.data);
-          canceladosLista.push(`${data.split('-').reverse().join('/')} às ${horario} (${ag.cliente?.nome ?? 'cliente'})`);
+          canceladosLista.push(`${formatarDataBR(data)} às ${horario} (${ag.cliente?.nome ?? 'cliente'})`);
         }
         const cancelados = canceladosLista.length;
 

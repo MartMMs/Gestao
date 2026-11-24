@@ -4,7 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import type { Eventos } from '../lib/eventos';
 import { ESCOPOS } from '../../shared/escopos';
-import { diaMesDe, horaDe } from '../../shared/datasBR';
+import { formatarDataBR, horaDe } from '../../shared/datasBR';
 import { telefoneDoWhatsapp, telefoneParaResposta } from '../../shared/mensagemLembrete';
 import { variantesTelefone } from '../../shared/validadores';
 import { redactSensitiveData } from '../../shared/redact';
@@ -103,7 +103,7 @@ export const tratarMensagemRecebida = (eventos: Eventos) => async (jid: string, 
       console.log(`[WhatsApp Webhook] Resposta "Não" de ${mascararTelefone(telefone)} | Agendamento encontrado: ${ag ? agendamentoId : 'não (já cancelado, concluído, avisado ou telefone mudou)'}`);
       if (!ag) return false;
       eventos.notificarMudanca(ESCOPOS.agenda);
-      eventos.avisarAusencia({ agendamentoId, cliente: ag.cliente.nome, data: diaMesDe(ag.data), horario: horaDe(ag.data), colaboradorId: ag.colaboradorId });
+      eventos.avisarAusencia({ agendamentoId, cliente: ag.cliente.nome, data: formatarDataBR(ag.data), horario: horaDe(ag.data), colaboradorId: ag.colaboradorId });
       return true;
     },
   });

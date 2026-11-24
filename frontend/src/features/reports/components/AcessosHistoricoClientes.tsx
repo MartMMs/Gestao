@@ -1,3 +1,4 @@
+import { formatarDataHoraBR } from '@shared/datasBR';
 import React, { useState } from 'react';
 import { useAcessosHistorico, useEmployees, type FiltroAcessosHistorico } from '../../../api';
 import { useAuth } from '../../../AuthContext';
@@ -68,7 +69,7 @@ export function AcessosHistoricoClientes() {
             <tbody className="divide-y divide-outline-variant/10">
               {data.itens.map((a) => (
                 <tr key={a.id}>
-                  <td className="py-1.5 pr-3 whitespace-nowrap">{new Date(a.criadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</td>
+                  <td className="py-1.5 pr-3 whitespace-nowrap">{formatarDataHoraBR(a.criadoEm)}</td>
                   <td className="py-1.5 pr-3">{a.colaboradorNome}</td>
                   <td className="py-1.5 pr-3">{a.clienteNome}</td>
                   <td className="py-1.5 pr-3 tabular-nums">{a.ip ?? '—'}</td>

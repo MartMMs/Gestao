@@ -269,7 +269,7 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
             </h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span className="text-[11px] sm:text-xs uppercase tracking-widest text-on-surface-variant/90 font-bold">
+              <span className="text-xs uppercase tracking-widest text-on-surface-variant/90 font-bold">
                 Totem Autoatendimento
               </span>
             </div>
@@ -280,7 +280,7 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
           <button
             type="button"
             onClick={handleRestart}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant/30 text-xs font-semibold text-on-surface-variant hover:text-primary hover:border-primary/40 bg-surface-container transition-all cursor-pointer shadow-xs shrink-0 self-start sm:self-auto active:scale-95"
+            className="inline-flex items-center gap-2 px-4 py-2 min-h-11 rounded-full border border-outline-variant/30 text-xs font-semibold text-on-surface-variant hover:text-primary hover:border-primary/40 bg-surface-container transition-all cursor-pointer shadow-xs shrink-0 self-start sm:self-auto active:scale-95"
             title="Recomeçar"
           >
             <span className="material-symbols-outlined text-base">restart_alt</span>
@@ -291,7 +291,7 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
           <button
             type="button"
             onClick={handleExitToPortal}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant/30 text-xs font-semibold text-on-surface-variant hover:text-primary hover:border-primary/40 bg-surface-container transition-all cursor-pointer shadow-xs shrink-0 self-start sm:self-auto active:scale-95"
+            className="inline-flex items-center gap-2 px-4 py-2 min-h-11 rounded-full border border-outline-variant/30 text-xs font-semibold text-on-surface-variant hover:text-primary hover:border-primary/40 bg-surface-container transition-all cursor-pointer shadow-xs shrink-0 self-start sm:self-auto active:scale-95"
             title="Voltar ao Portal"
           >
             <span className="material-symbols-outlined text-base">arrow_back</span>
@@ -437,6 +437,7 @@ export function AutoatendimentoView({ onExitToPortal }: AutoatendimentoViewProps
                   reservation={reservation}
                   nomeEmpresa={empresa?.nomeEmpresa}
                   segmento={empresa?.segmento}
+                  whatsappAtivo={empresa?.whatsappAtivo}
                   onSubmit={handleIdentificationSubmit}
                   onBack={handleStepBackFromId}
                 />

@@ -3,6 +3,7 @@ import { useAuth } from '../../../AuthContext';
 import { motion } from 'motion/react';
 import { ConfiguracaoEmpresa } from '../../../types';
 import { useCompanyConfig, useUpdateCompanyConfig } from '../../../api';
+import { ConfirmDialog } from '../../../components/ConfirmDialog';
 
 /** Cor do banco quando ninguém escolheu (mantém o tema original do sistema) */
 export const COR_PADRAO = '#0f766e';
@@ -129,6 +130,8 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
 
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [presetsAberto, setPresetsAberto] = useState(false);
+  const [presetPendente, setPresetPendente] = useState<PresetConfig | null>(null);
 
   // Config que o formulário mostrou por último e config nova vinda de outro aparelho enquanto havia edição aqui:
   // trocar o formulário calado apagava o que a pessoa estava digitando
@@ -219,47 +222,84 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
         )}
       </div>
 
-      {/* 1. Presets Rápidos com 1 Clique */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="material-symbols-outlined text-primary text-xl">auto_fix_high</span>
-          <h3 className="text-sm font-bold uppercase tracking-wider text-on-surface">
-            Modelos de Negócio Prontos (Presets em 1 Clique)
-          </h3>
-        </div>
-        <p className="text-xs text-on-surface-variant">
-          Clique em um dos segmentos abaixo para preencher automaticamente as terminologias e configurações ideais:
-        </p>
+      {/* 1. Modelos de Negócio Prontos — recolhido por padrão para evitar troca acidental */}
+      <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-low overflow-hidden">
+        <button
+          type="button"
+          aria-expanded={presetsAberto}
+          onClick={() => setPresetsAberto((v) => !v)}
+          className="w-full px-5 py-3.5 flex items-center justify-between gap-3 text-left hover:bg-surface-container transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="material-symbols-outlined text-primary text-xl shrink-0" aria-hidden="true">auto_fix_high</span>
+            <div className="min-w-0">
+              <span className="text-xs font-bold uppercase tracking-wider text-on-surface block">
+                Alterar modelo de negócio
+              </span>
+              <span className="text-xs text-on-surface-variant block truncate">
+                Segmento atual: <strong>{PRESETS.find((p) => p.segmento === form.segmento)?.nome || form.segmento || 'Geral'}</strong>
+              </span>
+            </div>
+          </div>
+          <span className="material-symbols-outlined text-on-surface-variant shrink-0" aria-hidden="true">
+            {presetsAberto ? 'expand_less' : 'expand_more'}
+          </span>
+        </button>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          {PRESETS.map((preset) => {
-            const isCurrent = form.segmento === preset.segmento;
-            return (
-              <button
-                key={preset.id}
-                type="button"
-                onClick={() => applyPreset(preset)}
-                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative overflow-hidden group flex flex-col justify-between ${
-                  isCurrent
-                    ? 'bg-surface-container-high border-primary ring-2 ring-primary/40 shadow-md'
-                    : 'bg-surface-container-low border-outline-variant/20 hover:border-outline-variant/50 hover:bg-surface-container'
-                }`}
-              >
-                <div>
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 bg-gradient-to-br ${preset.cor} border`}>
-                    <span className="material-symbols-outlined text-[20px]">{preset.icone}</span>
-                  </div>
-                  <h4 className="font-bold text-xs text-on-surface leading-tight mb-1">{preset.nome}</h4>
-                  <p className="text-[11px] text-on-surface-variant line-clamp-2">{preset.slogan}</p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-outline-variant/15 text-[11px] text-primary font-bold">
-                  {preset.termoProfissional} · {preset.termoEspaco}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        {presetsAberto && (
+          <div className="px-5 pb-5 pt-2 border-t border-outline-variant/15 space-y-3">
+            <p className="text-xs text-on-surface-variant">
+              Escolha um modelo pronto para preencher automaticamente o segmento, slogan, ícone e terminologias. Será solicitada confirmação antes de aplicar.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              {PRESETS.map((preset) => {
+                const isCurrent = form.segmento === preset.segmento;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => setPresetPendente(preset)}
+                    className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative overflow-hidden group flex flex-col justify-between ${
+                      isCurrent
+                        ? 'bg-surface-container-high border-primary ring-2 ring-primary/40 shadow-md'
+                        : 'bg-surface-container-lowest border-outline-variant/20 hover:border-outline-variant/50 hover:bg-surface-container'
+                    }`}
+                  >
+                    <div>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 bg-gradient-to-br ${preset.cor} border`}>
+                        <span className="material-symbols-outlined text-[20px]">{preset.icone}</span>
+                      </div>
+                      <h4 className="font-bold text-xs text-on-surface leading-tight mb-1">{preset.nome}</h4>
+                      <p className="text-[11px] text-on-surface-variant line-clamp-2">{preset.slogan}</p>
+                    </div>
+                    <div className="mt-3 pt-2 border-t border-outline-variant/15 text-[11px] text-primary font-bold">
+                      {preset.termoProfissional} · {preset.termoEspaco}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(presetPendente)}
+        title={presetPendente ? `Aplicar modelo "${presetPendente.nome}"?` : ''}
+        description="Isso substituirá o nome, slogan, ícone e terminologias no formulário abaixo (você ainda precisará clicar em Salvar para confirmar no servidor)."
+        confirmLabel="Aplicar modelo"
+        cancelLabel="Cancelar"
+        icon="auto_fix_high"
+        tone="primary"
+        onClose={() => setPresetPendente(null)}
+        onConfirm={() => {
+          if (presetPendente) {
+            applyPreset(presetPendente);
+            setPresetsAberto(false);
+          }
+          setPresetPendente(null);
+        }}
+      />
 
       {/* 2. Formulário de Configuração Detalhado */}
       <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -482,6 +522,32 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
               </span>
             </span>
           </label>
+
+          <fieldset className="bg-surface-container-low border border-outline-variant/30 rounded-2xl p-4">
+            <legend className="sr-only">Exigir habilidades nos agendamentos</legend>
+            <span aria-hidden="true" className="block text-sm font-bold text-on-surface">Exigir habilidades nos agendamentos</span>
+            <span className="block text-xs text-on-surface-variant mb-2">Vale para serviços com a regra "Por habilidade".</span>
+            {([
+              ['sempre', 'Exigir sempre', 'O totem só oferece quem tem a habilidade e a agenda da equipe recusa quem não tem.'],
+              ['apenas_totem', 'Só no totem', 'O totem só oferece quem tem a habilidade; na agenda da equipe dá para agendar com um aviso amarelo.'],
+              ['desligado', 'Desligado', 'Nenhum agendamento exige habilidade (as regras dos serviços ficam guardadas).'],
+            ] as const).map(([valor, rotulo, texto]) => (
+              <label key={valor} className="flex items-start gap-3 py-1.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="exigenciaHabilidades"
+                  value={valor}
+                  checked={(form.exigenciaHabilidades ?? 'sempre') === valor}
+                  onChange={() => setForm({ ...form, exigenciaHabilidades: valor })}
+                  className="mt-1 accent-primary"
+                />
+                <span>
+                  <span className="block text-sm font-bold text-on-surface">{rotulo}</span>
+                  <span className="block text-xs text-on-surface-variant">{texto}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
 
           {configDeFora && (
             <p role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-on-surface">

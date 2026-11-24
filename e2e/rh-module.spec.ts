@@ -62,7 +62,20 @@ test.describe('Módulo de RH: permissões por função', () => {
     try {
       await abrirGrade(supervisor.page);
       await expect(supervisor.page.getByRole('button', { name: '+ Nova Escala' })).toBeVisible();
-      await expect(supervisor.page.getByRole('button', { name: /Editar Grade/i })).toBeVisible();
+      // Modal "Gerar escala": foco no primeiro campo, Tab preso dentro, Esc fecha e devolve o foco ao botão
+      const gerar = supervisor.page.getByRole('button', { name: '+ Nova Escala' });
+      await gerar.click();
+      const modal = supervisor.page.getByRole('dialog', { name: 'Gerar escala' });
+      await expect.poll(() => modal.evaluate((d) => d.contains(document.activeElement))).toBe(true);
+      for (let i = 0; i < 30; i += 1) await supervisor.page.keyboard.press('Tab');
+      await expect.poll(() => modal.evaluate((d) => d.contains(document.activeElement))).toBe(true);
+      await supervisor.page.keyboard.press('Escape');
+      await expect(modal).toBeHidden();
+      await expect.poll(() => gerar.evaluate((b) => b === document.activeElement)).toBe(true);
+      await expect(supervisor.page.getByRole('button', { name: /Editar Grade/i })).toHaveCount(0);
+      await expect(supervisor.page.getByRole('button', { name: /Padrão 12x36/i })).toHaveCount(0);
+      await expect(supervisor.page.getByRole('button', { name: /Filtros/i })).toBeVisible();
+      await expect(supervisor.page.getByRole('button', { name: /Ações/i })).toBeVisible();
 
       for (const { page } of [admin, recepcao, profissional]) {
         await expect(page.getByRole('button', { name: /Acessar Módulo RH/i })).toHaveCount(0);
@@ -72,7 +85,7 @@ test.describe('Módulo de RH: permissões por função', () => {
       // Profissional só consulta a própria escala, sem nenhum botão de gravar
       await profissional.page.getByRole('button', { name: /Ver Minha Escala/i }).click();
       const minhaEscala = profissional.page.getByRole('dialog');
-      await expect(minhaEscala.getByText(/feita somente pela supervisão/i)).toBeVisible();
+      await expect(minhaEscala.getByText(/feitas pela supervisão/i)).toBeVisible();
       await expect(minhaEscala.getByRole('button', { name: /Salvar|Editar|Nova Escala/i })).toHaveCount(0);
 
       // E a API recusa mesmo que alguém monte o pedido na mão

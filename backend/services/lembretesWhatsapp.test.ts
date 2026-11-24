@@ -40,7 +40,7 @@ describe('resposta ao lembrete pelo WhatsApp', () => {
     expect(args.where.id).toBe('ag-amanha');
     expect(args.data.clienteAvisouAusenciaEm).toBeInstanceOf(Date);
     // Aviso com o profissional do atendimento (as salas do socket mandam só para recepção, supervisão e ele, nunca admin: eventos.test.ts)
-    expect(eventos.avisarAusencia).toHaveBeenCalledWith({ agendamentoId: 'ag-amanha', cliente: 'Maria Cliente', data: '19/11', horario: '18:15', colaboradorId: 'helena' });
+    expect(eventos.avisarAusencia).toHaveBeenCalledWith({ agendamentoId: 'ag-amanha', cliente: 'Maria Cliente', data: '19/11/2026', horario: '18:15', colaboradorId: 'helena' });
     expect(eventos.notificarMudanca).toHaveBeenCalled();
     expect(responder).toHaveBeenCalledWith(RESPOSTA_NAO);
     expect(redis.has('wa-confirmacao:62982345678')).toBe(false); // não vale duas vezes

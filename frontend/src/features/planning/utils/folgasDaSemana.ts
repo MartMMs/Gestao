@@ -32,7 +32,7 @@ export const rotuloDaFolga = (dia: DiaEscala) => {
   // Ausência do RH vem antes do feriado: férias num feriado continuam sendo férias daquela pessoa
   if (ehAusencia(dia.descricao)) return MOTIVOS_AUSENCIA.find((m) => dia.descricao!.startsWith(m)) ?? 'Ausência';
   if (dia.feriadoNome) return `Feriado (${dia.feriadoNome})`;
-  return dia.tipo === 'fds' ? 'FDS' : 'Folga';
+  return 'Folga';
 };
 
 export function folgasDaSemana(

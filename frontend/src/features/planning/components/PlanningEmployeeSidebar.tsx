@@ -110,7 +110,7 @@ export function PlanningEmployeeSidebar({ employees, selectedEmployeeId, onSelec
                     {employee.cargo || employee.specialty || 'Profissional'} • {employee.tipoEscala || '6x1'}
                   </span>
                   {/* O motivo fica visível (e lido pelo leitor de tela), não só num tooltip */}
-                  <span className={`block text-[11px] mt-1 ${conforme ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'} ${selecionado ? '' : 'line-clamp-1'}`}>
+                  <span className={`block text-xs mt-1 ${conforme ? 'text-green-800 dark:text-green-400' : 'text-red-700 dark:text-red-400'} ${selecionado ? '' : 'line-clamp-1'}`}>
                     {conforme ? '✓ ' : ''}{motivo}
                   </span>
                 </span>

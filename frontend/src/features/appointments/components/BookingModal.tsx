@@ -31,7 +31,8 @@ const normalizeStringList = (value: unknown): string[] => {
     .filter(Boolean)));
 };
 
-const isEmployeeEligibleForService = (employee: Employee, service: Service): boolean => {
+// checarHabilidade = false: a regra "por habilidade" não barra (exigência desligada ou só no totem)
+const isEmployeeEligibleForService = (employee: Employee, service: Service, checarHabilidade = true): boolean => {
   const mode = normalizeEligibilityMode(service.modoElegibilidade);
   if (mode === 'livre') return true;
 
@@ -49,10 +50,12 @@ const isEmployeeEligibleForService = (employee: Employee, service: Service): boo
     return allowedCargos.includes(employeeCargo);
   }
 
-  const allowedSkills = normalizeStringList(service.habilidadesPermitidas).map((skill) => normalizeSearch(skill));
-  if (allowedSkills.length === 0) return true;
-  const employeeSkills = new Set((employee.habilidades || []).map((skill) => normalizeSearch(String(skill))));
-  return allowedSkills.some((skill) => employeeSkills.has(skill));
+  // Mesma regra do servidor: basta uma das habilidades ativas exigidas (sem nenhuma ativa, não restringe)
+  if (!checarHabilidade) return true;
+  const exigidas = normalizeStringList(service.habilidadeIds);
+  if (exigidas.length === 0) return true;
+  const doProfissional = new Set(employee.habilidadeIds || []);
+  return exigidas.some((id) => doProfissional.has(id));
 };
 
 type BookingDraft = {
@@ -263,10 +266,20 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     return services.filter((service) => bookService.includes(service.nome));
   }, [bookService, services]);
 
+  const exigenciaHabilidades = useCompanyConfig(useAuth().token).data?.exigenciaHabilidades ?? 'sempre';
   const eligibleEmployees = useMemo(() => {
     if (selectedServiceDefinitions.length === 0) return teamEmployees;
-    return teamEmployees.filter((employee) => selectedServiceDefinitions.every((service) => isEmployeeEligibleForService(employee, service)));
-  }, [teamEmployees, selectedServiceDefinitions]);
+    const checar = exigenciaHabilidades === 'sempre';
+    return teamEmployees.filter((employee) => selectedServiceDefinitions.every((service) => isEmployeeEligibleForService(employee, service, checar)));
+  }, [teamEmployees, selectedServiceDefinitions, exigenciaHabilidades]);
+  // Modo "só no totem": quem não tem a habilidade pode ser escolhido aqui, mas vem depois dos habilitados e com aviso
+  const semHabilidade = useMemo(() => new Set(exigenciaHabilidades !== 'apenas_totem' ? [] : eligibleEmployees
+    .filter((employee) => !selectedServiceDefinitions.every((service) => isEmployeeEligibleForService(employee, service)))
+    .map((employee) => employee.id)), [eligibleEmployees, selectedServiceDefinitions, exigenciaHabilidades]);
+  const eligibleOrdenados = useMemo(() => semHabilidade.size === 0 ? eligibleEmployees : [
+    ...eligibleEmployees.filter((employee) => !semHabilidade.has(employee.id)),
+    ...eligibleEmployees.filter((employee) => semHabilidade.has(employee.id)).map((employee) => ({ ...employee, name: `${employee.name} · sem habilidade` })),
+  ], [eligibleEmployees, semHabilidade]);
 
   const selectedEmployeeIsEligible = useMemo(() => {
     if (selectedServiceDefinitions.length === 0) return true;
@@ -276,13 +289,13 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   const employeeSelectOptions = useMemo(() => {
     if (selectedServiceDefinitions.length === 0) return teamEmployees;
     if (eligibleEmployees.length === 0) return teamEmployees;
-    if (selectedEmployeeIsEligible) return eligibleEmployees;
+    if (selectedEmployeeIsEligible) return eligibleOrdenados;
 
     const currentEmployee = teamEmployees.find((employee) => employee.id === bookEmp);
-    if (!currentEmployee) return eligibleEmployees;
+    if (!currentEmployee) return eligibleOrdenados;
 
-    return [{ ...currentEmployee, name: `${currentEmployee.name} (não apto)` }, ...eligibleEmployees];
-  }, [selectedServiceDefinitions.length, teamEmployees, eligibleEmployees, selectedEmployeeIsEligible, bookEmp]);
+    return [{ ...currentEmployee, name: `${currentEmployee.name} (não apto)` }, ...eligibleOrdenados];
+  }, [selectedServiceDefinitions.length, teamEmployees, eligibleEmployees, eligibleOrdenados, selectedEmployeeIsEligible, bookEmp]);
 
   const employeeEligibilityHint = useMemo(() => {
     if (selectedServiceDefinitions.length === 0) {
@@ -567,10 +580,10 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {clientMode === 'search' && (
             <div ref={clientSearchWrapperRef}>
-              <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Buscar Cliente</label>
+              <label htmlFor="reserva-1" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Buscar Cliente</label>
               <div className="relative">
-                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline-variant text-[18px]">search</span>
-                <input
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">search</span>
+                <input id="reserva-1"
                   type="text"
                   value={clientSearchTerm}
                   onFocus={() => setIsClientSearchOpen(true)}
@@ -634,8 +647,8 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
           )}
           {clientMode === 'new' ? (
             <div>
-              <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Nome do Cliente</label>
-              <input
+              <label htmlFor="reserva-2" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Nome do Cliente</label>
+              <input id="reserva-2"
                 required
                 type="text"
                 value={bookName}
@@ -661,12 +674,12 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
           {canShowBookingDetails && (
             <>
               <div>
-                <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Telefone</label>
-                <input type="text" value={bookPhone} onChange={e => setBookPhone(formatPhone(e.target.value))} maxLength={15} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm" placeholder="(00) 00000-0000" />
+                <label htmlFor="reserva-3" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Telefone</label>
+                <input id="reserva-3" type="text" value={bookPhone} onChange={e => setBookPhone(formatPhone(e.target.value))} maxLength={15} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm" placeholder="(00) 00000-0000" />
               </div>
               <div>
-                <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">CPF</label>
-                <input type="text" value={bookCpf} onChange={e => setBookCpf(formatCpf(e.target.value))} maxLength={14} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm" placeholder="000.000.000-00" />
+                <label htmlFor="reserva-4" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">CPF</label>
+                <input id="reserva-4" type="text" value={bookCpf} onChange={e => setBookCpf(formatCpf(e.target.value))} maxLength={14} className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm" placeholder="000.000.000-00" />
               </div>
             </>
           )}
@@ -714,6 +727,11 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
               </button>
             )}
           />
+        )}
+        {canShowBookingDetails && semHabilidade.has(bookEmp) && (
+          <p role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-on-surface">
+            Este profissional não tem a habilidade exigida pelo serviço. A agenda permite (exigência só no totem), mas confira antes de confirmar.
+          </p>
         )}
       </ModalFormulario>
       {verFicha && clienteEscolhido && (

@@ -1,15 +1,19 @@
+import { formatarDataBR } from '../../shared/datasBR';
 import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
-import { getUsuario, usuarioEhSupervisor, verificarSupervisorToken, verificarToken } from '../auth';
+import { getUsuario, usuarioEhSupervisor, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
+import { PAPEIS_ATENDIMENTO } from '../lib/usuarios';
 import { HttpError, responderErro, type Notificar } from '../lib/http';
 import { transacaoComTravas, travarAgenda, travarChave } from '../lib/transacao';
-import { dataValida, diaMesBR, horarioParaMinutos, partesNoFuso, TURNO_PADRAO, TURNO_REGEX } from '../../shared/agenda';
+import { dataValida, horarioParaMinutos, partesNoFuso, TURNO_PADRAO, TURNO_REGEX } from '../../shared/agenda';
 import { agendamentosDoDia } from '../services/agendaService';
 import { aplicarAjusteEscala, folgaAcimaDoLimite, gerarEscalaComRegras, limiteFolgasPorSemana, mensagemFolgaAcimaDoLimite, segundaDaSemana, type TipoEscala as TipoContrato } from '../../shared/escala';
 import { analisarConformidadeCLT } from '../../shared/clt';
 import { MOTIVOS_AUSENCIA } from '../../shared/escala';
 import { registrarAuditoria } from '../lib/auditoria';
+import { montarMinhaEscala } from '../services/minhaEscalaService';
+import { planejarMesGerado } from '../services/gerarMesService';
 
 type TipoEscala = 'trabalho' | 'folga' | 'fds';
 type DiaEscala = { tipo: TipoEscala; turno: string | null; descricao: string | null };
@@ -49,9 +53,9 @@ const gravarDiaValidado = async (tx: Prisma.TransactionClient, colaboradorId: st
   // A mesma trava da marcação: sem ela, uma marcação simultânea entraria num dia que está virando folga
   await travarAgenda(tx, colaboradorId);
   if (data < partesNoFuso(new Date()).data) {
-    throw new HttpError(409, `Não é possível alterar a escala de ${data.split('-').reverse().join('/')}: a data já passou.`);
+    throw new HttpError(409, `Não é possível alterar a escala de ${formatarDataBR(data)}: a data já passou.`);
   }
-  const dataBr = data.split('-').reverse().join('/');
+  const dataBr = formatarDataBR(data);
   if (dia.tipo !== 'trabalho') {
     const marcados = await agendamentosDoDia(tx, data, { colaboradorId });
     if (marcados.length > 0) {
@@ -145,6 +149,138 @@ const garantirColaborador = async (colaboradorId: unknown) => {
 
 export function createEscalaRouter(notificar: Notificar) {
   const router = Router();
+
+  // Visão operacional somente leitura (Recepção, Supervisão e Admin): apenas status de trabalho/folga e turno do mês,
+  // sem motivos sensíveis do RH (atestado, licença) nem dados contratuais/administrativos.
+  router.get('/escala/operacional', verificarToken, async (req, res) => {
+    try {
+      if (!usuarioGerenciaAgenda(req)) {
+        return res.status(403).json({ erro: 'Acesso restrito à recepção e supervisão.' });
+      }
+      const monthRaw = typeof req.query.month === 'string' ? req.query.month.trim() : '';
+      const month = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : partesNoFuso(new Date()).data.slice(0, 7);
+      const [ano, mes] = month.split('-').map(Number);
+      const de = `${month}-01`;
+      const ate = new Date(Date.UTC(ano, mes, 0)).toISOString().slice(0, 10);
+
+      const profissionais = await prisma.colaborador.findMany({
+        where: { ativo: true, papel: { in: PAPEIS_ATENDIMENTO } },
+        select: { id: true, tipoEscala: true, folgasDomingoNoMes: true, turnoPadrao: true },
+      });
+
+      const overrides = await prisma.escalaOverride.findMany({
+        where: { data: { gte: de, lte: ate }, colaboradorId: { in: profissionais.map((p) => p.id) } },
+        select: { colaboradorId: true, data: true, tipo: true, turno: true },
+      });
+      const overridesPorColab = new Map<string, Map<string, { tipo: TipoEscala; turno: string | null }>>();
+      for (const o of overrides) {
+        let mapa = overridesPorColab.get(o.colaboradorId);
+        if (!mapa) {
+          mapa = new Map();
+          overridesPorColab.set(o.colaboradorId, mapa);
+        }
+        mapa.set(o.data, { tipo: normalizarTipo(o.tipo), turno: o.turno });
+      }
+
+      const inicioGeracao = new Date(Date.UTC(ano, mes - 2, 1)).toISOString().slice(0, 10);
+      const totalDias = Math.round((Date.parse(ate) - Date.parse(inicioGeracao)) / 86_400_000) + 1;
+
+      const resultado: Array<{ colaboradorId: string; data: string; tipo: 'trabalho' | 'folga'; turno: string | null }> = [];
+      for (const prof of profissionais) {
+        const ajustes = overridesPorColab.get(prof.id);
+        const tipoContrato: TipoContrato = TIPOS_CONTRATO.includes(prof.tipoEscala as TipoContrato)
+          ? (prof.tipoEscala as TipoContrato)
+          : '6x1';
+        const dias = gerarEscalaComRegras(
+          { tipo: tipoContrato, dataInicio: inicioGeracao },
+          totalDias,
+          { folgasDomingoNoMes: prof.folgasDomingoNoMes ?? 2, turnoPadrao: prof.turnoPadrao },
+        ).filter((d) => d.data >= de && d.data <= ate);
+
+        for (const dia of dias) {
+          const ajuste = ajustes?.get(dia.data);
+          const efetivo = aplicarAjusteEscala(dia, ajuste ? { tipo: ajuste.tipo as TipoEscala, turno: ajuste.turno ?? undefined } : undefined);
+          const tipoOperacional: 'trabalho' | 'folga' = efetivo.tipo === 'trabalho' ? 'trabalho' : 'folga';
+          resultado.push({
+            colaboradorId: prof.id,
+            data: efetivo.data,
+            tipo: tipoOperacional,
+            turno: tipoOperacional === 'trabalho' ? (efetivo.turno ?? null) : null,
+          });
+        }
+      }
+
+      res.json(resultado);
+    } catch (error) {
+      responderErro(res, error, 'Erro ao buscar disponibilidade operacional da escala');
+    }
+  });
+
+  // Escala da própria pessoa logada. O colaborador vem SÓ da sessão: nenhum id da query/corpo é lido (sem IDOR)
+  router.get('/minha-escala', verificarToken, async (req, res) => {
+    try {
+      const usuario = getUsuario(req);
+      if (!usuario) return res.status(401).json({ erro: 'Sessão inválida.' });
+      const monthRaw = typeof req.query.month === 'string' ? req.query.month.trim() : '';
+      const hoje = partesNoFuso(new Date()).data;
+      const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(monthRaw) ? monthRaw : hoje.slice(0, 7);
+      const [ano, mes] = month.split('-').map(Number);
+      const de = `${month}-01`;
+      const ate = new Date(Date.UTC(ano, mes, 0)).toISOString().slice(0, 10);
+      const c = await prisma.$transaction((tx) => contratoDe(tx, usuario.id));
+      if (!c) return res.json({ mes: month, resumo: { hoje: null, amanha: null, proximaFolga: null, atualizadaEm: null }, dias: [] });
+      // Janela: o mês pedido e de hoje até ~6 semanas à frente (próxima folga e turno de amanhã mesmo vendo outro mês)
+      const inicio = de < hoje ? de : hoje;
+      const limite = somarDias(hoje, 45);
+      const fim = ate > limite ? ate : limite;
+      const [dias, turnos, ultimo] = await Promise.all([
+        prisma.$transaction((tx) => malhaEfetiva(tx, c, inicio, fim)),
+        prisma.turno.findMany({ select: { nome: true, inicio: true, fim: true } }),
+        prisma.escalaOverride.findFirst({ where: { colaboradorId: c.id }, orderBy: { atualizadoEm: 'desc' }, select: { atualizadoEm: true } }),
+      ]);
+      const nomes = new Map(turnos.map((t) => [`${t.inicio}-${t.fim}`, t.nome]));
+      res.json(montarMinhaEscala(dias, month, hoje, nomes, ultimo?.atualizadoEm ?? null));
+    } catch (error) {
+      responderErro(res, error, 'Erro ao buscar sua escala');
+    }
+  });
+
+  // Gera a escala de UM mês e grava cada dia com o turno escolhido (snapshot): outros meses ficam como estavam.
+  // Férias/afastamentos do mês são preservados. O contrato (tipo e domingos) é atualizado no cadastro; o turno não.
+  router.post('/escala/gerar-mes', verificarSupervisorToken, async (req, res) => {
+    try {
+      const colaboradorId = await garantirColaborador(req.body?.colaboradorId);
+      const { mes, turno, tipoEscala } = req.body ?? {};
+      const folgasDomingoNoMes = Number(req.body?.folgasDomingoNoMes);
+      if (typeof mes !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) return res.status(400).json({ erro: 'Mês inválido.' });
+      if (typeof turno !== 'string' || !TURNO_REGEX.test(turno)) return res.status(400).json({ erro: 'Escolha um turno válido.' });
+      if (!TIPOS_CONTRATO.includes(tipoEscala)) return res.status(400).json({ erro: 'Tipo de escala inválido.' });
+      if (!Number.isInteger(folgasDomingoNoMes) || folgasDomingoNoMes < 0 || folgasDomingoNoMes > 5) {
+        return res.status(400).json({ erro: 'Folgas aos domingos no mês deve ficar entre 0 e 5.' });
+      }
+      const hoje = partesNoFuso(new Date()).data;
+      const gravados = await transacaoComTravas(async (tx) => {
+        await travarChave(tx, `escala-mes:${colaboradorId}:${mes}`);
+        await tx.colaborador.update({ where: { id: colaboradorId }, data: { tipoEscala, folgasDomingoNoMes } });
+        const existentes = await tx.escalaOverride.findMany({
+          where: { colaboradorId, data: { startsWith: mes } },
+          select: { data: true, tipo: true, descricao: true },
+        });
+        const plano = planejarMesGerado({ tipoEscala, folgasDomingoNoMes, mes, turno, hoje, existentes });
+        for (const { data, dia } of plano) {
+          await travarChave(tx, `escala:${chaveEscala(colaboradorId, data)}`);
+          if (data < hoje) await gravarDia(tx, colaboradorId, data, dia);
+          else await gravarDiaValidado(tx, colaboradorId, data, dia);
+        }
+        return plano.length;
+      });
+      await registrarAuditoria(req, { acao: 'escala.gerar_mes', alvo: `Colaborador ${colaboradorId}`, antes: {}, depois: { mes, turno, tipoEscala, folgasDomingoNoMes, dias: gravados } });
+      notificar();
+      res.json({ mes, dias: gravados });
+    } catch (error) {
+      responderErro(res, error, 'Erro ao gerar a escala');
+    }
+  });
 
   router.get('/escala/overrides', verificarSupervisorToken, async (req, res) => {
     try {
@@ -370,7 +506,7 @@ export function createEscalaRouter(notificar: Notificar) {
           await travarAgenda(tx, atual.colaboradorId);
           const marcados = await agendamentosDoDia(tx, atual.dataOriginal, { colaboradorId: atual.colaboradorId });
           if (marcados.length > 0) {
-            throw new HttpError(409, `O colaborador tem ${marcados.length} atendimento(s) em ${atual.dataOriginal.split('-').reverse().join('/')}. Realoque-os antes de aprovar a troca.`);
+            throw new HttpError(409, `O colaborador tem ${marcados.length} atendimento(s) em ${formatarDataBR(atual.dataOriginal)}. Realoque-os antes de aprovar a troca.`);
           }
         }
 

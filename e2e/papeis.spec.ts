@@ -10,14 +10,21 @@ const GESTAO: string[] = [CONTAS.admin, CONTAS.supervisor];
 const OPERACAO: string[] = [CONTAS.recepcao, CONTAS.colaboradora];
 
 test.describe('Papéis — API', () => {
-  test('clientes: só supervisão e administração cadastram, importam e veem o e-mail; todos recebem o aviso de ficha', async ({ request }) => {
+  test('clientes: recepção pode cadastrar mas não importar nem editar e-mail; colaborador não cadastra nem importa', async ({ request }) => {
     const nome = nomeClienteTeste('Papeis Cliente');
+    const nomeRecepcao = nomeClienteTeste('Papeis Recepcao');
     try {
-      for (const conta of OPERACAO) {
-        const headers = await authHeaders(request, conta);
-        expect((await request.post(`${apiBase()}/clientes`, { headers, data: { nome } })).status(), conta).toBe(403);
-        expect((await request.post(`${apiBase()}/clientes/importar`, { headers, data: { linhas: [{ nome }] } })).status(), conta).toBe(403);
-      }
+      // Colaborador não cadastra nem importa
+      const colabHeaders = await authHeaders(request, CONTAS.colaboradora);
+      expect((await request.post(`${apiBase()}/clientes`, { headers: colabHeaders, data: { nome } })).status(), 'colaboradora post').toBe(403);
+      expect((await request.post(`${apiBase()}/clientes/importar`, { headers: colabHeaders, data: { linhas: [{ nome }] } })).status(), 'colaboradora importar').toBe(403);
+
+      // Recepção pode cadastrar novo cliente (+ Novo cliente), mas continua bloqueada de importar planilha
+      const recepcaoHeaders = await authHeaders(request, CONTAS.recepcao);
+      const criadoRecepcao = await request.post(`${apiBase()}/clientes`, { headers: recepcaoHeaders, data: { nome: nomeRecepcao, telefone: '11999990001' } });
+      expect(criadoRecepcao.status(), await criadoRecepcao.text()).toBe(201);
+      expect((await request.post(`${apiBase()}/clientes/importar`, { headers: recepcaoHeaders, data: { linhas: [{ nome }] } })).status(), 'recepcao importar').toBe(403);
+
       const criado = await request.post(`${apiBase()}/clientes`, { headers: await authHeaders(request, CONTAS.supervisor), data: { nome, email: 'papeis@teste.com' } });
       expect(criado.status(), await criado.text()).toBe(201);
       const { id } = await criado.json();
@@ -34,10 +41,11 @@ test.describe('Papéis — API', () => {
         expect(cliente?.temAnamnese, conta).toBe(false);
         expect(cliente?.email ?? null, conta).toBe(GESTAO.includes(conta) ? 'papeis@teste.com' : null);
       }
-      // Edição do e-mail: só a supervisão (a recepção não altera dados cadastrais)
-      expect((await request.put(`${apiBase()}/clientes/${id}`, { headers: await authHeaders(request, CONTAS.recepcao), data: { email: 'outro@teste.com' } })).status()).toBe(403);
+      // Edição do e-mail: só a supervisão (a recepção não altera dados cadastrais sensíveis como e-mail)
+      expect((await request.put(`${apiBase()}/clientes/${id}`, { headers: recepcaoHeaders, data: { email: 'outro@teste.com' } })).status()).toBe(403);
     } finally {
       await apagarClienteDeTeste(request, nome);
+      await apagarClienteDeTeste(request, nomeRecepcao);
     }
   });
 
@@ -76,16 +84,23 @@ test.describe('Papéis — API', () => {
 });
 
 test.describe('Papéis — tela de clientes', () => {
-  for (const conta of OPERACAO) {
-    test(`${conta}: sem "Novo cliente" e "Importar planilha"`, async ({ page }) => {
-      await page.goto('/');
-      await loginPelaTela(page, conta);
-      await page.getByRole('button', { name: 'Clientes', exact: true }).click();
-      await expect(page.getByRole('heading', { name: 'Base de Clientes' })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Novo cliente' })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Importar planilha' })).toHaveCount(0);
-    });
-  }
+  test('recepção vê "+ Novo cliente" e não vê "Importar planilha"', async ({ page }) => {
+    await page.goto('/');
+    await loginPelaTela(page, CONTAS.recepcao);
+    await page.getByRole('button', { name: 'Clientes', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Base de Clientes' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Novo cliente/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Importar planilha' })).toHaveCount(0);
+  });
+
+  test('colaborador: sem "Novo cliente" e sem "Importar planilha"', async ({ page }) => {
+    await page.goto('/');
+    await loginPelaTela(page, CONTAS.colaboradora);
+    await page.getByRole('button', { name: 'Clientes', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Base de Clientes' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Novo cliente/i })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Importar planilha' })).toHaveCount(0);
+  });
 
   for (const conta of GESTAO) {
     test(`${conta}: com "Novo cliente" e "Importar planilha"`, async ({ page }) => {

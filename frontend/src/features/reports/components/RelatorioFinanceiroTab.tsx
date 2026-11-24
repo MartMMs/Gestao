@@ -1,3 +1,5 @@
+import { formatarDataHoraBR } from '@shared/datasBR';
+import { formatarDataBR } from '@shared/datasBR';
 import React, { useMemo, useState } from 'react';
 import { formatarReais } from '../../../utils/formatters';
 import { motion } from 'motion/react';
@@ -6,7 +8,6 @@ import { useAuth } from '../../../AuthContext';
 import { periodoRapido } from '../../../utils/periodos';
 import { AcessosHistoricoClientes } from './AcessosHistoricoClientes';
 
-const dataBr = (iso: string) => iso.split('-').reverse().join('/');
 
 // CSV com ponto e vírgula e vírgula decimal: abre direto no Excel em português
 const baixarCsv = (relatorio: RelatorioFinanceiro) => {
@@ -31,6 +32,7 @@ const baixarCsv = (relatorio: RelatorioFinanceiro) => {
 const STATUS_ROTULO: Record<string, string> = { completed: 'Concluído', no_show: 'Falta', cancelled: 'Cancelado', sem_baixa: 'Sem baixa' };
 
 const ACAO_ROTULO: Record<string, string> = {
+  'servico.criado': 'Serviço criado',
   'servico.alterado': 'Serviço alterado',
   'servico.tirado_de_linha': 'Serviço tirado de linha',
   'servico.reativado': 'Serviço voltou ao catálogo',
@@ -38,17 +40,56 @@ const ACAO_ROTULO: Record<string, string> = {
   'totem.cobranca': 'Cobrança do totem',
   'empresa.comissao': 'Comissão da empresa',
   'empresa.anamnese': 'Exigência de anamnese',
+  'empresa.habilidades': 'Exigência de habilidades nos agendamentos',
+  'habilidade.criada': 'Habilidade criada',
+  'habilidade.alterada': 'Habilidade renomeada',
+  'habilidade.reativada': 'Habilidade reativada',
+  'habilidade.arquivada': 'Habilidade arquivada',
   'empresa.horario': 'Horário de funcionamento',
   'cliente.anamnese': 'Ficha de anamnese',
   'agendamento.reaberto': 'Atendimento reaberto',
+  'agendamento.realocado': 'Atendimento realocado',
   'agendamento.valores': 'Valor do atendimento alterado',
   'agendamento.excluido': 'Atendimento excluído',
-  'servico.criado': 'Serviço criado',
+  'escala.ausencia.remover': 'Ausência removida da escala',
+  'conta.senha': 'Troca de senha',
+  'whatsapp.conectar': 'WhatsApp conectado',
+  'whatsapp.desconectar': 'WhatsApp desconectado',
+  'whatsapp.mensagens': 'Mensagens de lembrete (WhatsApp)',
 };
 
 const CAMPO_ROTULO: Record<string, string> = {
-  preco: 'preço', comissaoPercentual: 'comissão (%)', nome: 'nome', duracao: 'duração (min)', ativo: 'ativo',
-  exigirPagamento: 'cobrança online', percentualSinal: 'sinal (%)', usarComissao: 'usar comissão', exigirAnamnese: 'exigir ficha de anamnese', fichaAnamnese: 'ficha preenchida', existe: 'existe', status: 'situação', valorTotal: 'valor', valorComissao: 'comissão',
+  preco: 'preço',
+  comissaoPercentual: 'comissão (%)',
+  nome: 'nome',
+  duracao: 'duração (min)',
+  ativo: 'ativo',
+  exigirPagamento: 'cobrança online',
+  percentualSinal: 'sinal (%)',
+  usarComissao: 'usar comissão',
+  exigirAnamnese: 'exigir ficha de anamnese',
+  exigenciaHabilidades: 'exigir habilidades',
+  ativa: 'ativa',
+  modoElegibilidade: 'quem pode atender',
+  habilidadesPermitidas: 'habilidades exigidas',
+  fichaAnamnese: 'ficha preenchida',
+  existe: 'existe',
+  status: 'situação',
+  valorTotal: 'valor',
+  valorComissao: 'comissão',
+  profissional: 'profissional',
+  horaAbertura: 'abertura',
+  horaFechamento: 'fechamento',
+  horaLimiteAgendamento: 'último horário',
+  diasFuncionamento: 'dias de funcionamento',
+  conectado: 'conectado',
+  quantidade: 'modelos configurados',
+  pedeConfirmacao: 'pedir confirmação',
+  trocarSenha: 'senha provisória pendente',
+  motivo: 'motivo',
+  inicio: 'início',
+  fim: 'fim',
+  dias: 'dias',
 };
 
 const valorLegivel = (campo: string, v: unknown) => {
@@ -57,6 +98,9 @@ const valorLegivel = (campo: string, v: unknown) => {
   if (v === null || v === undefined) return '—';
   if ((campo === 'preco' || campo === 'valorTotal' || campo === 'valorComissao') && typeof v === 'number') return formatarReais(v);
   if (campo === 'status') return v === 'scheduled' ? 'Agendado' : STATUS_ROTULO[String(v)] ?? String(v);
+  if (campo === 'exigenciaHabilidades') return ({ sempre: 'exigir sempre', apenas_totem: 'só no totem', desligado: 'desligado' } as Record<string, string>)[String(v)] ?? String(v);
+  if (campo === 'modoElegibilidade') return ({ livre: 'qualquer profissional', cargo: 'por cargo', habilidade: 'por habilidade', profissional: 'profissionais escolhidos' } as Record<string, string>)[String(v)] ?? String(v);
+  if (Array.isArray(v)) return v.length ? v.join(', ') : 'nenhuma';
   return String(v);
 };
 
@@ -88,7 +132,7 @@ function DetalheProfissional({ colaboradorId, de, ate, usarComissao }: { colabor
       <tbody>
         {data.atendimentos.map((a) => (
           <tr key={a.id} className="border-t border-outline-variant/10">
-            <td className="py-2 px-3 tabular-nums">{dataBr(a.data)} {a.horario}</td>
+            <td className="py-2 px-3 tabular-nums">{formatarDataBR(a.data)} {a.horario}</td>
             <td className="py-2 px-3">{a.cliente} <span className="font-mono text-on-surface-variant">#{a.clienteCodigo}</span></td>
             <td className="py-2 px-3">{a.servicos.join(', ')}</td>
             <td className="py-2 px-3">
@@ -112,7 +156,7 @@ function HistoricoAlteracoes() {
   return (
     <div className="bg-surface-container-lowest border border-outline-variant/10 rounded-3xl p-5">
       <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant mb-1">Histórico de alterações</h3>
-      <p className="text-xs text-on-surface-variant mb-3">Preços, comissões, serviços fora de linha e cobrança do totem: quem mudou e quando.</p>
+      <p className="text-xs text-on-surface-variant mb-3">Serviços, preços, horários, cobrança do totem, WhatsApp, escala e alterações de conta: quem mudou e quando.</p>
       {isLoading && <p className="text-xs text-on-surface-variant">Carregando...</p>}
       {error && (
         <p role="alert" className="text-xs text-error">
@@ -126,7 +170,7 @@ function HistoricoAlteracoes() {
           <li key={r.id} className="py-2 text-xs">
             <div className="flex flex-wrap justify-between gap-2">
               <span className="font-bold text-on-surface">{ACAO_ROTULO[r.acao] ?? r.acao} · {r.alvo}</span>
-              <span className="text-on-surface-variant">{new Date(r.criadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })} · {r.usuarioNome}</span>
+              <span className="text-on-surface-variant">{formatarDataHoraBR(r.criadoEm)} · {r.usuarioNome}</span>
             </div>
             <p className="text-on-surface-variant mt-0.5">
               {Object.keys(r.depois ?? {}).map((campo) => (
@@ -217,14 +261,14 @@ export function RelatorioFinanceiroTab() {
 
       {data && (
         <>
-          <p className="text-xs text-on-surface-variant">Período: {dataBr(data.periodo.de)} a {dataBr(data.periodo.ate)}</p>
+          <p className="text-xs text-on-surface-variant">Período: {formatarDataBR(data.periodo.de)} a {formatarDataBR(data.periodo.ate)}</p>
           {data.totais.semBaixa > 0 && (
             <p role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-on-surface">
               {data.totais.semBaixa === 1 ? '1 atendimento' : `${data.totais.semBaixa} atendimentos`} sem baixa no período: o horário passou e
               ninguém concluiu nem marcou falta. Eles ficam fora do faturamento e da comissão até você concluir ou marcar falta na agenda.
             </p>
           )}
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
+          <div className={`grid gap-3 ${cartoes.length <= 5 ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-7'}`}>
             {cartoes.map((c) => (
               <div key={c.rotulo} className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-4">
                 <span className="material-symbols-outlined text-primary text-[20px]">{c.icone}</span>
@@ -275,8 +319,11 @@ export function RelatorioFinanceiroTab() {
                     <td className="py-3 px-4 text-right tabular-nums">{p.concluidos}</td>
                     <td className="py-3 px-4 min-w-48">
                       <div className="flex items-center gap-2">
-                        <div className="h-2 rounded-full bg-primary/70" style={{ width: `${Math.max(2, (p.faturamento / maiorFaturamento) * 100)}%`, maxWidth: '8rem' }} />
-                        <span className="tabular-nums">{formatarReais(p.faturamento)}</span>
+                        <div
+                          className={`h-2 rounded-full ${p.faturamento > 0 ? 'bg-primary/70' : 'bg-outline-variant/30'}`}
+                          style={{ width: p.faturamento > 0 ? `${Math.max(4, (p.faturamento / maiorFaturamento) * 100)}%` : '0.5rem', maxWidth: '8rem' }}
+                        />
+                        <span className={`tabular-nums ${p.faturamento > 0 ? 'text-on-surface' : 'text-on-surface-variant'}`}>{formatarReais(p.faturamento)}</span>
                       </div>
                     </td>
                     {data.usarComissao && <td className="py-3 px-4 text-right tabular-nums">{formatarReais(p.comissao)}</td>}

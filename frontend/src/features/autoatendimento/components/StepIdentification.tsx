@@ -1,3 +1,4 @@
+import { formatarDataComDiaSemanaBR } from '@shared/datasBR';
 import React, { useEffect, useState } from 'react';
 import { AutoatendimentoReservaSession } from '../../../types';
 import { formatPhone, formatCpf } from '../../../utils/formatters';
@@ -7,12 +8,17 @@ import { textoConsentimento } from '@shared/consentimento';
 import { LinksDocumentosLegais } from '../../../components/DocumentosLegais';
 import type { DadosClienteTotem } from '../services/autoatendimentoService';
 
+// "2026-11-21" -> "sáb, 21/11" (meio-dia UTC: o dia não muda com o fuso)
+export const dataHumana = (data: string) => formatarDataComDiaSemanaBR(data);
+
 interface StepIdentificationProps {
   reservation: AutoatendimentoReservaSession;
   // Nome da empresa no texto do consentimento (quem trata os dados)
   nomeEmpresa?: string;
   // Segmento da empresa: decide quais perguntas aparecem (as de saúde e as de spa não servem para todo negócio)
   segmento?: string;
+  // A API tem provedor de WhatsApp: só então prometemos voucher e lembretes por mensagem
+  whatsappAtivo?: boolean;
   onSubmit: (data: DadosClienteTotem) => void;
   onBack: () => void;
 }
@@ -31,7 +37,7 @@ export const limparRascunhoIdentificacao = () => {
   rascunho = null;
 };
 
-export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmit, onBack }: StepIdentificationProps) {
+export function StepIdentification({ reservation, nomeEmpresa, segmento, whatsappAtivo, onSubmit, onBack }: StepIdentificationProps) {
   const { saude, spa } = perguntasDoSegmento(segmento);
   const termo = textoConsentimento(nomeEmpresa, saude);
   const salvo = rascunho;
@@ -113,7 +119,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="text-center max-w-xl mx-auto space-y-2">
-        <span className="text-[11px] font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-3 py-1 rounded-full">
+        <span className="text-xs font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-3 py-1 rounded-full">
           Etapa 3 de 4 · {saude ? 'Identificação e Saúde' : 'Identificação'}
         </span>
         <h2 className="text-2xl sm:text-3xl font-headline text-primary">
@@ -129,10 +135,10 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
         <div className="flex items-center gap-2">
           <span className="material-symbols-outlined text-primary text-[18px]">lock</span>
           <span className="text-on-surface">
-            Horário pré-reservado: <strong>{reservation.data} às {reservation.horario}</strong> ({reservation.servicoNome})
+            Horário pré-reservado: <strong>{dataHumana(reservation.data)} às {reservation.horario}</strong> ({reservation.servicoNome})
           </span>
         </div>
-        <span className="text-[11px] text-primary font-bold">
+        <span className="text-xs text-primary font-bold">
           {reservation.salaNome} · {reservation.terapeutaNome}
         </span>
       </div>
@@ -146,12 +152,14 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2">
-            <label className="block text-xs font-bold text-on-surface-variant mb-1.5">
+            <label htmlFor="totem-nome" className="block text-xs font-bold text-on-surface-variant mb-1.5">
               Nome Completo *
             </label>
             <input
+              id="totem-nome"
               type="text"
               required
+              autoComplete="name"
               value={nome}
               onChange={(e) => {
                 setNome(e.target.value);
@@ -164,11 +172,14 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-on-surface-variant mb-1.5">
+            <label htmlFor="totem-telefone" className="block text-xs font-bold text-on-surface-variant mb-1.5">
               WhatsApp / Celular *
             </label>
             <input
+              id="totem-telefone"
               type="tel"
+              inputMode="tel"
+              autoComplete="tel-national"
               required
               value={telefone}
               onChange={(e) => {
@@ -180,17 +191,22 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
               className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm text-on-surface"
             />
             {erros.telefone && <p className="text-xs text-error mt-1">{erros.telefone}</p>}
-            <p className="text-[11px] text-outline-variant mt-1">
-              Enviaremos seu voucher e lembretes por este número.
+            <p className="text-xs text-on-surface-variant mt-1">
+              {whatsappAtivo
+                ? 'Enviaremos seu voucher e lembretes por este número.'
+                : 'Usado apenas para contato da recepção sobre o seu agendamento.'}
             </p>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-on-surface-variant mb-1.5">
+            <label htmlFor="totem-cpf" className="block text-xs font-bold text-on-surface-variant mb-1.5">
               CPF (Opcional para recibo)
             </label>
             <input
+              id="totem-cpf"
               type="text"
+              inputMode="numeric"
+              autoComplete="off"
               value={cpf}
               onChange={(e) => {
                 setCpf(formatCpf(e.target.value));
@@ -212,7 +228,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
             <span className="material-symbols-outlined text-[18px]">health_and_safety</span>
             {saude ? 'Saúde e cuidados' : 'Informações para o atendimento'}
           </h3>
-          <span className="text-[11px] text-outline-variant">Importante para sua segurança</span>
+          <span className="text-xs text-on-surface-variant">Importante para sua segurança</span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -221,13 +237,13 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
           <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
             <div>
               <p className="text-xs font-bold text-on-surface">Está gestante?</p>
-              <p className="text-[11px] text-on-surface-variant">Requer cuidados de postura e óleos seguros</p>
+              <p className="text-xs text-on-surface-variant">Requer cuidados de postura e óleos seguros</p>
             </div>
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => setGestante(false)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                className={`flex-1 min-h-11 rounded-lg text-xs font-bold transition-colors ${
                   gestante === false ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
                 }`}
               >
@@ -236,7 +252,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
               <button
                 type="button"
                 onClick={() => setGestante(true)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                className={`flex-1 min-h-11 rounded-lg text-xs font-bold transition-colors ${
                   gestante === true ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
                 }`}
               >
@@ -249,7 +265,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
           <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
             <div>
               <p className="text-xs font-bold text-on-surface">Pressão Arterial</p>
-              <p className="text-[11px] text-on-surface-variant">Para ajuste térmico e intensidade</p>
+              <p className="text-xs text-on-surface-variant">Para ajuste térmico e intensidade</p>
             </div>
             <div className="flex gap-1.5">
               {(['normal', 'alta', 'baixa'] as const).map((p) => (
@@ -257,7 +273,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
                   key={p}
                   type="button"
                   onClick={() => setPressao(p)}
-                  className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold capitalize transition-colors ${
+                  className={`flex-1 min-h-11 rounded-lg text-xs font-bold capitalize transition-colors ${
                     pressao === p ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
                   }`}
                 >
@@ -271,13 +287,13 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
           <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
             <div>
               <p className="text-xs font-bold text-on-surface">Cirurgia Recente (últimos 6 meses)?</p>
-              <p className="text-[11px] text-on-surface-variant">Para evitar áreas sensíveis ou em cicatrização</p>
+              <p className="text-xs text-on-surface-variant">Para evitar áreas sensíveis ou em cicatrização</p>
             </div>
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => setCirurgiaRecente(false)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                className={`flex-1 min-h-11 rounded-lg text-xs font-bold transition-colors ${
                   cirurgiaRecente === false ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
                 }`}
               >
@@ -286,7 +302,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
               <button
                 type="button"
                 onClick={() => setCirurgiaRecente(true)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                className={`flex-1 min-h-11 rounded-lg text-xs font-bold transition-colors ${
                   cirurgiaRecente === true ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
                 }`}
               >
@@ -300,7 +316,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
           <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
             <div>
               <p className="text-xs font-bold text-on-surface">{spa ? 'Alergia a cosméticos ou óleos?' : 'Tem alguma alergia?'}</p>
-              <p className="text-[11px] text-on-surface-variant">{spa ? 'Usaremos produtos hipoalergênicos neutros' : 'Para a equipe se preparar'}</p>
+              <p className="text-xs text-on-surface-variant">{spa ? 'Usaremos produtos hipoalergênicos neutros' : 'Para a equipe se preparar'}</p>
             </div>
             <div className="flex gap-2">
               <button
@@ -309,7 +325,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
                   setAlergia(false);
                   setDetalheAlergia('');
                 }}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                className={`flex-1 min-h-11 rounded-lg text-xs font-bold transition-colors ${
                   alergia === false ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
                 }`}
               >
@@ -318,7 +334,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
               <button
                 type="button"
                 onClick={() => setAlergia(true)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                className={`flex-1 min-h-11 rounded-lg text-xs font-bold transition-colors ${
                   alergia === true ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
                 }`}
               >
@@ -330,15 +346,16 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
 
         {alergia && (
           <div>
-            <label className="block text-xs font-bold text-on-surface-variant mb-1">
+            <label htmlFor="totem-alergia" className="block text-xs font-bold text-on-surface-variant mb-1">
               Descreva as alergias conhecidas:
             </label>
             <input
+              id="totem-alergia"
               type="text"
               value={detalheAlergia}
               onChange={(e) => setDetalheAlergia(e.target.value)}
               placeholder={spa ? 'Ex: Alergia a canela, lavanda, amêndoas...' : 'Ex.: látex, algum produto ou medicamento...'}
-              className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 text-xs text-on-surface"
+              className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 min-h-11 text-sm text-on-surface"
             />
           </div>
         )}
@@ -360,7 +377,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
                   key={item.id}
                   type="button"
                   onClick={() => setPressaoMassagem(item.id)}
-                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+                  className={`flex-1 min-h-11 rounded-xl text-xs font-bold transition-all ${
                     pressaoMassagem === item.id
                       ? 'bg-primary text-on-primary shadow-sm'
                       : 'bg-surface-container-low border border-outline-variant/20 text-on-surface-variant'
@@ -373,13 +390,14 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-on-surface-variant mb-1.5">
+            <label htmlFor="totem-aroma" className="block text-xs font-bold text-on-surface-variant mb-1.5">
               Experiência Aromática
             </label>
             <select
+              id="totem-aroma"
               value={aroma}
               onChange={(e) => setAroma(e.target.value)}
-              className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 text-xs text-on-surface"
+              className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 min-h-11 text-sm text-on-surface"
             >
               <option value="lavanda">Lavanda Francesa (Relaxamento Profundo)</option>
               <option value="alecrim">Alecrim & Eucalipto (Descongestionante & Foco)</option>
@@ -391,22 +409,23 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
         )}
 
         <div>
-          <label className="block text-xs font-bold text-on-surface-variant mb-1">
+          <label htmlFor="totem-observacao" className="block text-xs font-bold text-on-surface-variant mb-1">
             {spa ? 'Partes do corpo a evitar ou áreas com maior tensão:' : 'Alguma observação ou preferência para o atendimento?'}
           </label>
           <input
+            id="totem-observacao"
             type="text"
             value={areasEvitar}
             onChange={(e) => setAreasEvitar(e.target.value)}
                         placeholder={spa ? 'Ex: Foco nos ombros e pescoço; não massagear pés...' : 'Opcional'}
-            className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 text-xs text-on-surface"
+            className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 min-h-11 text-sm text-on-surface"
           />
         </div>
       </div>
 
       {/* Consentimento LGPD (dados de saúde exigem autorização específica, art. 11) */}
       <div className={`rounded-xl border p-4 ${erros.consentimento ? 'border-error bg-error/5' : 'border-outline-variant/30 bg-surface-container-low'}`}>
-        <label className="flex items-start gap-3 text-xs text-on-surface cursor-pointer">
+        <label className="flex items-center gap-3 min-h-11 text-sm text-on-surface cursor-pointer">
           <input
             type="checkbox"
             checked={consentimento}
@@ -414,18 +433,18 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
               setConsentimento(e.target.checked);
               if (e.target.checked) setErros((atual) => ({ ...atual, consentimento: undefined }));
             }}
-            className="mt-0.5 h-5 w-5 shrink-0 accent-primary"
+            className="h-6 w-6 shrink-0 accent-primary"
             aria-describedby="consentimento-detalhe"
             aria-invalid={Boolean(erros.consentimento)}
           />
           <span>{termo.autorizacao}</span>
         </label>
-        <p id="consentimento-detalhe" className="mt-2 pl-8 text-[11px] text-on-surface-variant">
+        <p id="consentimento-detalhe" className="mt-2 pl-8 text-xs text-on-surface-variant">
           {termo.detalhe}
         </p>
         {/* Fora da descrição do checkbox (o leitor de tela não lê o link como parte dela). Os Termos de Uso são da equipe */}
-        <p className="mt-1 pl-8 text-[11px] text-on-surface-variant"><LinksDocumentosLegais documentos={['privacidade']} /></p>
-        {erros.consentimento && <p role="alert" className="mt-2 pl-8 text-[11px] font-bold text-error">{erros.consentimento}</p>}
+        <p className="mt-1 pl-8 text-xs text-on-surface-variant"><LinksDocumentosLegais documentos={['privacidade']} /></p>
+        {erros.consentimento && <p role="alert" className="mt-2 pl-8 text-xs font-bold text-error">{erros.consentimento}</p>}
       </div>
 
       {/* Botões de Ação */}

@@ -1,4 +1,5 @@
-import { diaMesBR } from '../../shared/agenda';
+import { formatarDataBR } from '../../shared/datasBR';
+
 import { codigoReserva } from '../../shared/codigoReserva';
 import { mascararTelefone } from '../lib/privacidade';
 import { getEmpresaConfig } from './configService';
@@ -76,7 +77,7 @@ class CommunicationService {
     // Mesma regra do lembrete: primeiro nome, dia e hora, sem profissional, sala nem serviço (a prévia da mensagem
     // aparece com o celular bloqueado, e um telefone digitado errado entrega a mensagem a outra pessoa)
     const primeiroNome = voucher.clienteNome.trim().split(/\s+/)[0] || voucher.clienteNome;
-    const mensagem = `*${empresa}*\nOlá, ${primeiroNome}! ${aguardandoPagamento ? 'Recebemos sua reserva! Ela será confirmada assim que o pagamento for aprovado.' : 'Sua reserva foi confirmada.'}\n🗓️ ${diaMesBR(voucher.data)} às ${voucher.horario} · código ${voucher.codigoConfirmacao}\n\nRecomendamos chegar 15 minutos antes.`;
+    const mensagem = `*${empresa}*\nOlá, ${primeiroNome}! ${aguardandoPagamento ? 'Recebemos sua reserva! Ela será confirmada assim que o pagamento for aprovado.' : 'Sua reserva foi confirmada.'}\n🗓️ ${formatarDataBR(voucher.data)} às ${voucher.horario} · código ${voucher.codigoConfirmacao}\n\nRecomendamos chegar 15 minutos antes.`;
     await whatsapp.enviar(voucher.clienteTelefone, mensagem);
   }
 }

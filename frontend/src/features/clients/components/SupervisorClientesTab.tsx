@@ -1,3 +1,4 @@
+import { formatarDataBR } from '@shared/datasBR';
 import React, { useState } from 'react';
 import { normalizarTexto } from '@shared/validadores';
 import { motion } from 'motion/react';
@@ -60,7 +61,14 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
   const exigirAnamnese = useCompanyConfig(token).data?.exigirAnamnese === true;
 
   const fichaClient = fichaClientId ? clients.find((c) => c.id === fichaClientId) ?? null : null;
-  const filteredClients = useSearch(clients, searchTerm, (client) => [client.nome, client.telefone, client.cpf, client.email ?? undefined, client.codigo ? `#${client.codigo}` : undefined]);
+  // Colaborador busca apenas por nome (nunca por CPF/telefone mascarado); recepção busca por nome, telefone ou código
+  const filteredClients = useSearch(clients, searchTerm, (client) => {
+    if (somenteAnamnese) return [client.nome];
+    if (ehRecepcao) return [client.nome, client.telefone, client.codigo ? `#${client.codigo}` : undefined];
+    return [client.nome, client.telefone, client.cpf, client.email ?? undefined, client.codigo ? `#${client.codigo}` : undefined];
+  });
+  const podeCadastrarCliente = !somenteAnamnese || ehRecepcao;
+  const podeImportarPlanilha = !somenteAnamnese && !ehRecepcao;
 
   const normalizeValue = (value?: string) => normalizarTexto(value);
   const digitsOnly = (value?: string) => (value || '').replace(/\D/g, '');
@@ -238,28 +246,28 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
           </div>
           <div className="flex w-full md:w-auto flex-col sm:flex-row sm:flex-wrap gap-3">
             <div className="relative w-full sm:w-72">
-              <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline-variant" aria-hidden="true">search</span>
+              <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant" aria-hidden="true">search</span>
               <input
                 type="search"
                 aria-label="Buscar cliente"
-                placeholder="Buscar por nome, telefone, CPF..."
+                placeholder={somenteAnamnese ? 'Buscar por nome...' : ehRecepcao ? 'Buscar por nome ou telefone...' : 'Buscar por nome, telefone, CPF...'}
                 value={searchTerm}
                 onChange={handleSearchChange}
                 className="w-full h-11 pl-12 pr-4 bg-surface-container-low border border-outline-variant/30 text-sm rounded-xl focus:ring-1 focus:ring-primary text-on-surface"
               />
             </div>
-            {/* Cadastro e importação: só supervisão e administração (a API confere de novo) */}
-            {!somenteAnamnese && (
-              <>
-                <button type="button" onClick={() => setAbertoImportar(true)} className="h-11 px-4 rounded-xl border border-outline-variant/30 text-sm font-bold text-on-surface hover:bg-surface-container flex items-center justify-center gap-2 whitespace-nowrap">
-                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>
-                  Importar planilha
-                </button>
-                <button type="button" onClick={() => setAbertoNovo(true)} className="h-11 px-4 rounded-xl bg-primary text-on-primary text-sm font-bold hover:bg-primary-dim flex items-center justify-center gap-2 whitespace-nowrap">
-                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">person_add</span>
-                  Novo cliente
-                </button>
-              </>
+            {/* Importação: só supervisão e administração; + Novo cliente: também habilitado na recepção */}
+            {podeImportarPlanilha && (
+              <button type="button" onClick={() => setAbertoImportar(true)} className="h-11 px-4 rounded-xl border border-outline-variant/30 text-sm font-bold text-on-surface hover:bg-surface-container flex items-center justify-center gap-2 whitespace-nowrap">
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>
+                Importar planilha
+              </button>
+            )}
+            {podeCadastrarCliente && (
+              <button type="button" onClick={() => setAbertoNovo(true)} className="h-11 px-4 rounded-xl bg-primary text-on-primary text-sm font-bold hover:bg-primary-dim flex items-center justify-center gap-2 whitespace-nowrap">
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">person_add</span>
+                Novo cliente
+              </button>
             )}
           </div>
         </div>
@@ -296,7 +304,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                   <td className="py-4 px-4 text-xs text-on-surface-variant max-w-xs truncate hidden md:table-cell" title={parsedObs.note}>
                     {parsedObs.note || 'Nenhuma'}
                   </td>
-                  <td className="py-4 px-4 text-right">
+                  <td className="py-4 px-4 text-right whitespace-nowrap">
                     <button
                       type="button"
                       onClick={() => setHistoryClient(client)}
@@ -328,14 +336,15 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                     >
                       <span className="material-symbols-outlined text-xl" aria-hidden="true">edit</span>
                     </button>
-                    <button
-                      onClick={() => setClientToDelete(client.id)}
-                      disabled={!onDeleteClient}
-                      className="p-2 text-on-surface-variant hover:text-error rounded-full disabled:opacity-40"
-                      title="Excluir cliente"
-                    >
-                      <span className="material-symbols-outlined text-xl" aria-hidden="true">delete</span>
-                    </button>
+                    {onDeleteClient && (
+                      <button
+                        onClick={() => setClientToDelete(client.id)}
+                        className="p-2 text-on-surface-variant hover:text-error rounded-full"
+                        title="Excluir cliente"
+                      >
+                        <span className="material-symbols-outlined text-xl" aria-hidden="true">delete</span>
+                      </button>
+                    )}
                   </td>
                 </tr>
                 );
@@ -394,8 +403,8 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                 </p>
               )}
               <div>
-                <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Nome</label>
-                <input
+                <label htmlFor="editar-cliente-1" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Nome</label>
+                <input id="editar-cliente-1"
                   required
                   type="text"
                   value={editingClient.nome} readOnly={somenteAnamnese || ehRecepcao}
@@ -404,8 +413,8 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Telefone</label>
-                <input
+                <label htmlFor="editar-cliente-2" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Telefone</label>
+                <input id="editar-cliente-2" inputMode="tel" autoComplete="off"
                   type="text"
                   value={editingClient.telefone || ''} readOnly={somenteAnamnese}
                   onChange={e => setEditingClient({ ...editingClient, telefone: formatPhone(e.target.value) })}
@@ -415,8 +424,8 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">CPF</label>
-                <input
+                <label htmlFor="editar-cliente-3" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">CPF</label>
+                <input id="editar-cliente-3"
                   type="text"
                   value={editingClient.cpf || ''} readOnly={somenteAnamnese || ehRecepcao}
                   onChange={e => setEditingClient({ ...editingClient, cpf: formatCpf(e.target.value) })}
@@ -446,16 +455,16 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
               {!ehRecepcao && (
                 <>
                   <div>
-                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Alergias e Restrições (Separado por vírgula)</label>
-                    <input type="text" value={editingClientAlergias} onChange={e => setEditingClientAlergias(e.target.value)} placeholder="Ex: Óleo de Amêndoas, Lavanda" className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface" />
+                    <label htmlFor="editar-cliente-4" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Alergias e Restrições (Separado por vírgula)</label>
+                    <input id="editar-cliente-4" type="text" value={editingClientAlergias} onChange={e => setEditingClientAlergias(e.target.value)} placeholder="Ex: Óleo de Amêndoas, Lavanda" className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface" />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Preferências (Separado por vírgula)</label>
-                    <input type="text" value={editingClientPreferencias} onChange={e => setEditingClientPreferencias(e.target.value)} placeholder="Ex: Pressão Forte, Chá Verde" className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface" />
+                    <label htmlFor="editar-cliente-5" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Preferências (Separado por vírgula)</label>
+                    <input id="editar-cliente-5" type="text" value={editingClientPreferencias} onChange={e => setEditingClientPreferencias(e.target.value)} placeholder="Ex: Pressão Forte, Chá Verde" className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface" />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Observações</label>
-                    <textarea
+                    <label htmlFor="editar-cliente-6" className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Observações</label>
+                    <textarea id="editar-cliente-6"
                       rows={3}
                       value={editingClientNote}
                       onChange={e => setEditingClientNote(e.target.value)}
@@ -621,7 +630,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                       {filteredHistory.map((appointment) => (
                         <div key={appointment.id} className="bg-surface-container-low border border-outline-variant/20 rounded-xl p-4">
                           <div className="flex items-center justify-between gap-3 mb-2">
-                            <p className="text-sm font-bold text-on-surface">{appointment.date.split('-').reverse().join('/')} {appointment.time}</p>
+                            <p className="text-sm font-bold text-on-surface">{formatarDataBR(appointment.date)} {appointment.time}</p>
                             <span className={`text-[11px] font-bold uppercase tracking-widest px-2 py-1 rounded-full ${appointment.status === 'completed' ? 'bg-primary/15 text-primary' : appointment.status === 'no_show' ? 'bg-error/10 text-error' : 'bg-surface-container-high text-on-surface-variant'}`}>
                               {appointment.status === 'completed' ? 'Concluído' : appointment.status === 'no_show' ? 'Faltou' : 'Agendado'}
                             </span>

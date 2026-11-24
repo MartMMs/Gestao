@@ -27,13 +27,25 @@ export function WhatsappLembretesTab({ token }: { token: string | null }) {
   });
   const erro = (acao.error ?? error) as Error | null;
 
+  const statusBadge = data?.status === 'conectado'
+    ? { rotulo: 'Conectado', classe: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30', ponto: 'bg-emerald-500' }
+    : data?.status === 'aguardando_qr' || data?.status === 'iniciando'
+      ? { rotulo: 'Aguardando leitura do QR', classe: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30', ponto: 'bg-amber-500' }
+      : { rotulo: 'Desconectado', classe: 'bg-surface-container text-on-surface-variant border-outline-variant/30', ponto: 'bg-outline' };
+
   return (
     <div className="max-w-6xl mx-auto w-full space-y-6 bg-surface-container-lowest rounded-3xl border border-outline-variant/20 p-6 shadow-sm">
-      <div>
-        <h2 className="text-lg font-bold text-on-surface">WhatsApp dos lembretes</h2>
-        <p className="text-sm text-on-surface-variant mt-1">
-          O sistema manda um lembrete por WhatsApp para quem tem atendimento nas próximas 24 horas. Só lembretes: nenhuma outra mensagem sai por aqui.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-on-surface">WhatsApp dos lembretes</h2>
+          <p className="text-sm text-on-surface-variant mt-1">
+            O sistema manda um lembrete por WhatsApp para quem tem atendimento nas próximas 24 horas. Só lembretes: nenhuma outra mensagem sai por aqui.
+          </p>
+        </div>
+        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-bold uppercase tracking-wider shrink-0 ${statusBadge.classe}`}>
+          <span className={`w-2 h-2 rounded-full ${statusBadge.ponto}`} aria-hidden="true" />
+          {statusBadge.rotulo}
+        </span>
       </div>
 
       {erro && <p role="alert" className="text-sm text-error">{erro.message}</p>}

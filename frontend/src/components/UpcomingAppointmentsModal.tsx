@@ -1,3 +1,4 @@
+import { formatarDataComDiaSemanaBR } from '@shared/datasBR';
 import React, { useMemo, useState } from 'react';
 import { normalizarTexto } from '@shared/validadores';
 import { horarioParaMinutos } from '@shared/agenda';
@@ -12,6 +13,7 @@ interface UpcomingAppointmentsModalProps {
   appointments: Appointment[];
   employees: Employee[];
   services: Service[];
+  somentePropriaAgenda?: boolean;
   onClose: () => void;
 }
 
@@ -19,7 +21,7 @@ type DateFilter = 'today' | '7days' | '30days' | 'all';
 
 const normalizeText = (value?: string) => normalizarTexto(value);
 
-export function UpcomingAppointmentsModal({ open, appointments, employees, services, onClose }: UpcomingAppointmentsModalProps) {
+export function UpcomingAppointmentsModal({ open, appointments, employees, services, somentePropriaAgenda = false, onClose }: UpcomingAppointmentsModalProps) {
   const [dateFilter, setDateFilter] = useState<DateFilter>('today');
   const [employeeFilter, setEmployeeFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -72,10 +74,7 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
     };
   }, [appointments, todayStr]);
 
-  const formatDateLabel = (value: string) => {
-    const [year, month, day] = value.split('-').map(Number);
-    return new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' }).format(new Date(year, month - 1, day));
-  };
+  const formatDateLabel = formatarDataComDiaSemanaBR;
 
   const resolveEmployeeName = (employeeId: string) => employees.find((employee) => employee.id === employeeId)?.name || 'Sem profissional';
 
@@ -111,7 +110,11 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-primary">Agenda rápida</p>
             <h2 className="text-2xl font-headline text-primary mt-1">Próximos atendimentos</h2>
-            <p className="text-sm text-on-surface-variant mt-1">Veja quem atende hoje, nos próximos dias e de outros profissionais.</p>
+            <p className="text-sm text-on-surface-variant mt-1">
+              {somentePropriaAgenda
+                ? 'Veja seus atendimentos de hoje e dos próximos dias.'
+                : 'Veja quem atende hoje, nos próximos dias e de outros profissionais.'}
+            </p>
           </div>
           <button onClick={onClose} className="rounded-full p-2 text-on-surface-variant hover:bg-surface-container-high">
             <span className="material-symbols-outlined">close</span>
@@ -127,29 +130,31 @@ export function UpcomingAppointmentsModal({ open, appointments, employees, servi
             <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Próximos dias</p>
             <p className="text-2xl font-headline text-primary">{summary.future}</p>
           </div>
-          <div>
+          <div className={somentePropriaAgenda ? 'sm:col-span-2' : ''}>
             <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Buscar</label>
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Cliente, serviço ou profissional"
+              placeholder={somentePropriaAgenda ? 'Cliente ou serviço' : 'Cliente, serviço ou profissional'}
               className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
-          <div>
-            <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Profissional</label>
-            <select
-              value={employeeFilter}
-              onChange={(e) => setEmployeeFilter(e.target.value)}
-              className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="all">Todos os profissionais</option>
-              {employees.filter((employee) => atendeNaAgenda(employee)).map((employee) => (
-                <option key={employee.id} value={employee.id}>{employee.name}</option>
-              ))}
-            </select>
-          </div>
+          {!somentePropriaAgenda && (
+            <div>
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Profissional</label>
+              <select
+                value={employeeFilter}
+                onChange={(e) => setEmployeeFilter(e.target.value)}
+                className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="all">Todos os profissionais</option>
+                {employees.filter((employee) => atendeNaAgenda(employee)).map((employee) => (
+                  <option key={employee.id} value={employee.id}>{employee.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2 border-b border-outline-variant/20 bg-surface-container-low px-6 py-4">

@@ -1,7 +1,7 @@
+import { formatarDataBR } from '@shared/datasBR';
 import React, { useMemo } from 'react';
 import { instanteNoFuso } from '@shared/agenda';
 import { semBaixaVencido } from '@shared/statusAgendamento';
-import { inicioDaSemana } from '@shared/clt';
 import type { Appointment, Employee, Service } from '../../../types';
 import { getDuration } from '../../appointments/utils/appointmentCore';
 
@@ -20,13 +20,15 @@ interface AgendaVisaoPeriodoProps {
   onAbrirAtendimento: (appointment: Appointment) => void;
 }
 
-const DIAS_SEMANA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+// Mesmo início de semana (Domingo) do mini calendário lateral
+const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
 // Datas AAAA-MM-DD em UTC ao meio-dia: somar dias nunca cai no dia errado por causa do fuso
 const somarDias = (data: string, dias: number) =>
   new Date(Date.parse(`${data}T12:00:00Z`) + dias * 86_400_000).toISOString().slice(0, 10);
-const diaDaSemanaSegunda = (data: string) => (new Date(`${data}T12:00:00Z`).getUTCDay() + 6) % 7;
+const diaDaSemanaDomingo = (data: string) => new Date(`${data}T12:00:00Z`).getUTCDay();
+const inicioDaSemanaDomingo = (data: string) => somarDias(data, -diaDaSemanaDomingo(data));
 
 type EstadoPeriodo = 'concluido' | 'falta' | 'sem_baixa' | 'ausente' | 'totem' | 'agendado';
 
@@ -67,17 +69,17 @@ function LegendaPeriodo() {
 export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, employees, services, onMudarDataBase, onAbrirDia, onAbrirAtendimento }: AgendaVisaoPeriodoProps) {
   const nomes = useMemo(() => new Map(employees.map((e) => [e.id, e.name.split(' ')[0] || e.name])), [employees]);
 
-  // Dias exibidos: a semana (segunda a domingo) ou o mês inteiro completado até fechar as semanas
+  // Dias exibidos: a semana (domingo a sábado) ou o mês inteiro completado até fechar as semanas
   const dias = useMemo(() => {
     if (visao === 'semana') {
-      const inicio = inicioDaSemana(dataBase);
+      const inicio = inicioDaSemanaDomingo(dataBase);
       return Array.from({ length: 7 }, (_, i) => somarDias(inicio, i));
     }
     const primeiro = `${dataBase.slice(0, 7)}-01`;
     const [ano, mes] = dataBase.split('-').map(Number);
     const ultimo = new Date(Date.UTC(ano, mes, 0)).toISOString().slice(0, 10);
-    const inicio = inicioDaSemana(primeiro);
-    const fim = somarDias(ultimo, 6 - diaDaSemanaSegunda(ultimo));
+    const inicio = inicioDaSemanaDomingo(primeiro);
+    const fim = somarDias(ultimo, 6 - diaDaSemanaDomingo(ultimo));
     const total = Math.round((Date.parse(fim) - Date.parse(inicio)) / 86_400_000) + 1;
     return Array.from({ length: total }, (_, i) => somarDias(inicio, i));
   }, [visao, dataBase]);
@@ -98,7 +100,7 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
 
   const [ano, mes] = dataBase.split('-').map(Number);
   const titulo = visao === 'semana'
-    ? `Semana de ${dias[0].split('-').reverse().join('/')} a ${dias[6].split('-').reverse().join('/')}`
+    ? `Semana de ${formatarDataBR(dias[0])} a ${formatarDataBR(dias[6])}`
     : `${MESES[mes - 1]} de ${ano}`;
   const navegar = (direcao: 1 | -1) => {
     if (visao === 'semana') return onMudarDataBase(somarDias(dataBase, 7 * direcao));
@@ -137,20 +139,19 @@ export function AgendaVisaoPeriodo({ visao, dataBase, todayStr, appointments, em
             return (
               <div
                 key={dia}
-                className={`rounded-xl border p-1.5 flex flex-col gap-1 ${visao === 'semana' ? 'min-h-[260px]' : 'min-h-[110px]'} ${dia === todayStr ? 'border-primary' : 'border-outline-variant/20'} ${foraDoMes ? 'bg-surface-container-low/40' : 'bg-surface-container-lowest'}`}
+                className={`rounded-xl border p-1.5 flex flex-col gap-1 ${visao === 'semana' ? 'min-h-[260px]' : 'min-h-[110px]'} ${dia === todayStr ? 'border-primary' : 'border-outline-variant/20'} ${foraDoMes ? 'bg-surface-container-low/40 opacity-50' : 'bg-surface-container-lowest'}`}
               >
                 <button
                   type="button"
                   onClick={() => onAbrirDia(dia)}
-                  className="flex items-center justify-between text-left hover:text-primary"
+                  className="flex items-center justify-between gap-2 text-left hover:text-primary"
                   title="Abrir este dia na grade"
                   aria-label={`${Number(dia.slice(8))}: ${lista.length === 0 ? 'sem atendimentos' : `${lista.length} ${lista.length === 1 ? 'atendimento' : 'atendimentos'}`}. Abrir na grade`}
                 >
-                  {/* Fora do mês só o número esmaece: os atendimentos continuam legíveis */}
-                  <span className={`text-xs font-bold ${dia === todayStr ? 'text-primary' : foraDoMes ? 'text-on-surface-variant' : 'text-on-surface'}`}>{Number(dia.slice(8))}</span>
+                  <span className={`shrink-0 text-xs font-bold tabular-nums ${dia === todayStr ? 'text-primary' : foraDoMes ? 'text-on-surface-variant' : 'text-on-surface'}`}>{Number(dia.slice(8))}</span>
                   {/* Dia vazio fica em silêncio na tela ('Livre' sugeriria vaga em domingo ou feriado); o leitor de tela ouve pelo aria-label */}
                   {lista.length > 0 && (
-                    <span className="text-[11px] font-bold text-on-surface-variant" aria-hidden="true">
+                    <span className="text-[11px] font-bold text-on-surface-variant text-right leading-tight" aria-hidden="true">
                       {lista.length} {visao === 'semana' ? (lista.length === 1 ? 'atendimento' : 'atendimentos') : 'atend.'}
                     </span>
                   )}

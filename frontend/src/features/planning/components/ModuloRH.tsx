@@ -1,3 +1,4 @@
+import { formatarDataBR } from '@shared/datasBR';
 import React, { useMemo, useRef, useState } from 'react';
 import type { ScaleOverridePayload, ScaleReplicatePayload, ScaleSwapPayload } from '../../../api';
 import { FolgasDaEquipe } from './FolgasDaEquipe';
@@ -11,17 +12,18 @@ import type { DiaEscala } from '../../../utils/escalaCalculator';
 import type { usePlanejamentoEscala } from '../hooks/usePlanejamentoEscala';
 import { analisarMes, formatarHoras } from '../utils/turnos';
 import { corrigirViolacoesClt } from '../utils/modelosEscala';
+import { baixarCsv, csvHorasPrevistas } from '../utils/horasPrevistasCsv';
 import { MOTIVOS_AUSENCIA, ehAusencia } from '@shared/escala';
-import { dataBR } from '@shared/agenda';
 
-// Hub do Módulo RH: abas (Escalas, Espelho de horas, Férias & Afastamentos) e o painel de conformidade CLT
+
+// Hub do Módulo RH: abas (Escalas, Folgas, Horas Previstas, Férias & Afastamentos) e o painel de conformidade CLT
 
 type Aba = 'escalas' | 'folgas' | 'ponto' | 'ausencias';
 const ABAS: Array<{ id: Aba; rotulo: string; icone: string }> = [
-  { id: 'escalas', rotulo: 'Escalas & Alocação', icone: 'calendar_month' },
-  { id: 'folgas', rotulo: 'Folgas da equipe', icone: 'event_busy' },
-  { id: 'ponto', rotulo: 'Espelho de Ponto & Banco de Horas', icone: 'schedule' },
-  { id: 'ausencias', rotulo: 'Férias & Afastamentos', icone: 'beach_access' },
+  { id: 'escalas', rotulo: 'Escalas', icone: 'calendar_month' },
+  { id: 'folgas', rotulo: 'Folgas', icone: 'event_busy' },
+  { id: 'ponto', rotulo: 'Horas Previstas', icone: 'schedule' },
+  { id: 'ausencias', rotulo: 'Férias e Afastamentos', icone: 'beach_access' },
 ];
 
 const mesVizinho = (mes: string, delta: number) => {
@@ -43,6 +45,7 @@ export function ModuloRH({ planejamento, onSaveScaleOverride, onReplicateScaleDa
     activeNonAdminEmployees: equipe,
     buildScaleForEmployee,
     selectedScaleMonth,
+    setSelectedScaleMonth,
     selectedScaleMonthLabel,
     proporAjustes,
     suggestedPlanningKeys,
@@ -100,7 +103,7 @@ export function ModuloRH({ planejamento, onSaveScaleOverride, onReplicateScaleDa
             setAba(proxima);
             document.getElementById(`rh-aba-${proxima}`)?.focus();
           }}
-          className="flex flex-wrap gap-1 bg-surface-container-low p-1 rounded-2xl border border-outline-variant/20 max-w-full">
+          className="flex flex-nowrap overflow-x-auto gap-1 bg-surface-container-low p-1 rounded-2xl border border-outline-variant/20 max-w-full">
           {ABAS.map(({ id, rotulo, icone }) => (
             <button
               key={id}
@@ -133,7 +136,7 @@ export function ModuloRH({ planejamento, onSaveScaleOverride, onReplicateScaleDa
         {aba === 'folgas' && <FolgasDaEquipe planejamento={planejamento} onSwapScaleDays={onSwapScaleDays} />}
       </div>
       <div role="tabpanel" id="rh-painel-ponto" aria-labelledby="rh-aba-ponto" hidden={aba !== 'ponto'}>
-        {aba === 'ponto' && <EspelhoHoras analises={analises} escalas={escalas} prefixoMes={prefixoMes} mesLabel={selectedScaleMonthLabel} />}
+        {aba === 'ponto' && <HorasPrevistas analises={analises} escalas={escalas} prefixoMes={prefixoMes} mes={selectedScaleMonth} mesLabel={selectedScaleMonthLabel} onMes={setSelectedScaleMonth} />}
       </div>
       {/* Sempre montada: trocar de aba não apaga o formulário de ausência em andamento */}
       <div role="tabpanel" id="rh-painel-ausencias" aria-labelledby="rh-aba-ausencias" hidden={aba !== 'ausencias'}>
@@ -192,11 +195,13 @@ export function ModuloRH({ planejamento, onSaveScaleOverride, onReplicateScaleDa
 }
 
 // Horas previstas pela escala do mês: normais até 44h por semana, o que passa disso é extra
-function EspelhoHoras({ analises, escalas, prefixoMes, mesLabel }: {
+function HorasPrevistas({ analises, escalas, prefixoMes, mes, mesLabel, onMes }: {
   analises: Array<{ emp: { id: string; name: string; cargo?: string }; analise: ReturnType<typeof analisarMes> }>;
   escalas: Map<string, DiaEscala[]>;
   prefixoMes: string;
+  mes: string;
   mesLabel: string;
+  onMes: (mes: string) => void; // o mesmo mês da grade: trocar aqui troca no módulo todo
 }) {
   const linhas = analises.map(({ emp, analise }) => {
     const extras = horasExtrasNoMes(escalas.get(emp.id) || [], prefixoMes);
@@ -205,9 +210,22 @@ function EspelhoHoras({ analises, escalas, prefixoMes, mesLabel }: {
 
   return (
     <section className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
-      <header className="p-4 border-b border-outline-variant/15">
-        <h2 className="text-base font-bold text-on-surface">Espelho de horas · {mesLabel}</h2>
-        <p className="text-xs text-on-surface-variant">Horas previstas pela escala (sem marcação de ponto). Extra = o que passa de {CARGA_SEMANAL_MAXIMA_HORAS}h na semana.</p>
+      <header className="p-4 border-b border-outline-variant/15 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-base font-bold text-on-surface">Horas Previstas · {mesLabel}</h2>
+          <p className="text-xs text-on-surface-variant">Horas previstas pela escala (sem marcação de ponto). Extra = o que passa de {CARGA_SEMANAL_MAXIMA_HORAS}h na semana.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="sr-only" htmlFor="horas-previstas-mes">Mês</label>
+          <input id="horas-previstas-mes" type="month" value={mes} onChange={(e) => e.target.value && onMes(e.target.value)} className="h-10 px-3 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm text-on-surface" />
+          <button
+            type="button"
+            onClick={() => baixarCsv(csvHorasPrevistas(linhas.map(({ emp, ...l }) => ({ nome: emp.name, cargo: emp.cargo, ...l })), mesLabel), `horas-previstas-${mes}.csv`)}
+            className="h-10 px-4 rounded-xl bg-primary text-on-primary text-xs font-bold uppercase tracking-wider hover:bg-primary-dim flex items-center gap-1"
+          >
+            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">download</span> Exportar CSV
+          </button>
+        </div>
       </header>
       <div className="overflow-x-auto">
         <table className="w-full text-sm [&_td]:align-top">
@@ -277,7 +295,7 @@ function FeriasAfastamentos({ equipe, ajustesSalvos, onSaveScaleOverride, onRepl
     if (!onSaveScaleOverride || !onReplicateScaleDays || enviandoRef.current) return;
     enviandoRef.current = true;
     setSalvando(true);
-    const pelaMetade = `Só ${dataBR(inicio)} foi registrado; os outros dias do período não foram gravados. Clique em Registrar de novo para completar.`;
+    const pelaMetade = `Só ${formatarDataBR(inicio)} foi registrado; os outros dias do período não foram gravados. Clique em Registrar de novo para completar.`;
     let primeiroGravado = false;
     try {
       // Grava o primeiro dia e replica para o resto do período numa transação só no servidor
@@ -288,7 +306,7 @@ function FeriasAfastamentos({ equipe, ajustesSalvos, onSaveScaleOverride, onRepl
         setErrorMessage(pelaMetade);
         return;
       }
-      setToastMessage(`${motivo} registrado de ${dataBR(inicio)} a ${dataBR(fim)}.`);
+      setToastMessage(`${motivo} registrado de ${formatarDataBR(inicio)} a ${formatarDataBR(fim)}.`);
       setInicio('');
       setFim('');
     } catch (error) {
@@ -344,7 +362,7 @@ function FeriasAfastamentos({ equipe, ajustesSalvos, onSaveScaleOverride, onRepl
           {periodos.map((p) => (
             <li key={`${p.id}:${p.inicio}`} className="py-2 flex items-center justify-between gap-3 text-sm">
               <span className="text-on-surface">{p.nome}</span>
-              <span className="text-on-surface-variant">{p.motivo} · {dataBR(p.inicio)}{p.fim !== p.inicio ? ` a ${dataBR(p.fim)}` : ''}</span>
+              <span className="text-on-surface-variant">{p.motivo} · {formatarDataBR(p.inicio)}{p.fim !== p.inicio ? ` a ${formatarDataBR(p.fim)}` : ''}</span>
               <button type="button" onClick={() => setParaExcluir(p)} aria-label={`Excluir ${p.motivo} de ${p.nome}`} className="shrink-0 px-2 py-1 rounded-lg text-xs font-bold text-error hover:bg-error/10">Excluir</button>
             </li>
           ))}
@@ -353,7 +371,7 @@ function FeriasAfastamentos({ equipe, ajustesSalvos, onSaveScaleOverride, onRepl
       <ConfirmDialog
         open={Boolean(paraExcluir)}
         title={paraExcluir ? `Excluir ${paraExcluir.motivo.toLowerCase()} de ${paraExcluir.nome}?` : ''}
-        description={paraExcluir ? `${dataBR(paraExcluir.inicio)}${paraExcluir.fim !== paraExcluir.inicio ? ` a ${dataBR(paraExcluir.fim)}` : ''}: os dias voltam ao rodízio normal da escala.` : ''}
+        description={paraExcluir ? `${formatarDataBR(paraExcluir.inicio)}${paraExcluir.fim !== paraExcluir.inicio ? ` a ${formatarDataBR(paraExcluir.fim)}` : ''}: os dias voltam ao rodízio normal da escala.` : ''}
         confirmLabel="Excluir"
         confirmingLabel="Excluindo..."
         cancelLabel="Manter"

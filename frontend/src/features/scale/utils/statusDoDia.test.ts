@@ -11,15 +11,17 @@ const status = (dia: Args[0], ajuste: Args[1], bloqueios: Args[2]) => statusDoDi
 const filtro = (dia: Args[0], ajuste: Args[1], bloqueios: Args[2]) => estaDeFolga(status(dia, ajuste, bloqueios));
 
 describe('filtro "Somente de folga"', () => {
-  it('entra quem está de folga, FDS ou férias pela escala', () => {
+  it('entra quem está de folga, descanso de fim de semana (unificado em Folga) ou férias pela escala', () => {
     expect(filtro({ data: DATA, tipo: 'folga' }, undefined, [])).toBe(true);
     expect(filtro({ data: DATA, tipo: 'fds' }, undefined, [])).toBe(true);
+    expect(status({ data: DATA, tipo: 'fds' }, undefined, [])?.label).toBe('Folga');
     expect(status({ data: DATA, tipo: 'folga', descricao: 'Férias 30 dias' }, undefined, [])?.label).toBe('Férias');
   });
 
-  it('entra quem tem folga, FDS ou férias no ajuste do dia', () => {
+  it('entra quem tem folga, descanso de fim de semana (unificado em Folga) ou férias no ajuste do dia', () => {
     expect(filtro(undefined, { tipo: 'folga' }, [])).toBe(true);
     expect(filtro(undefined, { tipo: 'fds' }, [])).toBe(true);
+    expect(status(undefined, { tipo: 'fds' }, [])?.label).toBe('Folga');
     expect(filtro(undefined, { tipo: 'folga', descricao: 'ferias' }, [])).toBe(true);
   });
 

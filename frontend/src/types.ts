@@ -1,3 +1,5 @@
+export type ExigenciaHabilidades = 'sempre' | 'apenas_totem' | 'desligado';
+export interface Habilidade { id: string; nome: string; ativa: boolean; servicosAtivos?: number; colaboradores?: number }
 export type Role = 'collaborator' | 'supervisor' | 'admin' | 'receptionist';
 export type TipoEscala = '6x1' | '5x1' | '5x2' | '12x36' | 'rotativo' | 'personalizado';
 export type TurnoSwapStatus = 'pendente' | 'aprovada' | 'rejeitada';
@@ -21,12 +23,16 @@ export interface ConfiguracaoEmpresa {
   usarComissao?: boolean;
   // Ligado: agendar e cadastrar cliente exigem ficha de anamnese
   exigirAnamnese?: boolean;
+  // Serviço "por habilidade": 'sempre' barra no totem e na agenda; 'apenas_totem' só avisa na agenda; 'desligado' ignora
+  exigenciaHabilidades?: ExigenciaHabilidades;
   // Horário de funcionamento (HH:MM) e dias abertos (0 = domingo); limite = último início aceito
   horaAbertura?: string;
   horaFechamento?: string;
   horaLimiteAgendamento?: string | null;
   diasFuncionamento?: number[];
   atualizadoEm?: string;
+  // Só na config pública: a API tem provedor de WhatsApp para a confirmação da reserva
+  whatsappAtivo?: boolean;
 }
 
 export interface Bloqueio {
@@ -52,7 +58,9 @@ export interface Employee {
   turnoPadrao?: string | null;
   folgasDomingoNoMes?: number;
   cargaHorariaSemanal?: number;
+  // Nomes das habilidades ativas (exibição) e os ids (para gravar)
   habilidades?: string[];
+  habilidadeIds?: string[];
   avatar: string;
   rating: number;
   completedServices: number;
@@ -106,6 +114,7 @@ export interface Service {
   modoElegibilidade?: ServiceEligibilityMode;
   cargosPermitidos?: string[];
   habilidadesPermitidas?: string[];
+  habilidadeIds?: string[];
   profissionaisPermitidos?: string[];
   categoria?: string;
   tempoHigienizacaoMin?: number;

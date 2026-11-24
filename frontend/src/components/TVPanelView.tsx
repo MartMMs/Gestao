@@ -3,6 +3,7 @@ import { semSufixoDoTotem } from '@shared/validadores';
 import { Appointment, Employee } from '../types';
 import { getLocalTodayString } from '../features/appointments/utils/appointmentCore';
 import { readEnv } from '../config/env';
+import { isTvHost } from '../config/hosts';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface TVPanelViewProps {
@@ -11,6 +12,20 @@ interface TVPanelViewProps {
   onExit: () => void;
   companyName?: string;
   companyIcon?: string;
+  // Sem login ou com a API fora a lista vazia mentiria ("nenhum atendimento"): o painel avisa
+  semSessao?: boolean;
+  semConexao?: boolean;
+  atualizadoEm?: number; // ms da última leitura bem-sucedida da agenda (0 = nunca)
+}
+
+// Aviso no lugar da lista quando os dados não são confiáveis; null = mostra a agenda
+export const avisoDaTv = ({ semSessao, semConexao, atualizadoEm }: Pick<TVPanelViewProps, 'semSessao' | 'semConexao' | 'atualizadoEm'>) => {
+  if (!semSessao && !semConexao) return null;
+  const hora = atualizadoEm ? new Date(atualizadoEm).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }) : null;
+  return {
+    titulo: semSessao ? 'Painel desconectado: chame a recepção' : 'Sem conexão: chame a recepção',
+    detalhe: hora ? `Última atualização às ${hora}` : 'Ainda sem atualização da agenda',
+  };
 }
 
 const formatClientName = (fullName: string) => {
@@ -32,7 +47,10 @@ function TVClock() {
   return <h2 className="text-6xl font-light tabular-nums">{currentTime.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</h2>;
 }
 
-export function TVPanelView({ appointments, employees, onExit, companyName, companyIcon }: TVPanelViewProps) {
+export function TVPanelView({ appointments, employees, onExit, companyName, companyIcon, semSessao, semConexao, atualizadoEm }: TVPanelViewProps) {
+  const aviso = avisoDaTv({ semSessao, semConexao, atualizadoEm });
+  // No host da TV o "X" levaria o público ao login do painel; sem sessão, só o botão discreto do aviso abre o login
+  const podeSair = !isTvHost();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [weather, setWeather] = useState<{ temp: number; description: string; icon: string } | null>(null);
 
@@ -163,7 +181,7 @@ export function TVPanelView({ appointments, employees, onExit, companyName, comp
           </div>
         )}
         <button onClick={toggleFullscreen} className="opacity-20 hover:opacity-100 transition-opacity" title={isFullscreen ? "Sair da Tela Cheia" : "Tela Cheia"}><span className="material-symbols-outlined text-4xl">{isFullscreen ? 'fullscreen_exit' : 'fullscreen'}</span></button>
-          <button onClick={onExit} className="opacity-20 hover:opacity-100 transition-opacity"><span className="material-symbols-outlined text-4xl">close</span></button>
+          {podeSair && <button onClick={onExit} className="opacity-20 hover:opacity-100 transition-opacity" aria-label="Sair do painel"><span className="material-symbols-outlined text-4xl">close</span></button>}
           <TVClock />
         </div>
       </div>
@@ -172,7 +190,7 @@ export function TVPanelView({ appointments, employees, onExit, companyName, comp
       
       <div className="grid gap-6">
         <AnimatePresence mode="popLayout">
-          {upcoming.slice(0, 5).map((app, index) => {
+          {(aviso ? [] : upcoming).slice(0, 5).map((app, index) => {
             const emp = employees.find(e => e.id === app.assignedEmployeeId);
             const isNext = index === 0;
             return (
@@ -211,7 +229,15 @@ export function TVPanelView({ appointments, employees, onExit, companyName, comp
             );
           })}
         </AnimatePresence>
-        {upcoming.length === 0 && (
+        {aviso && (
+          <div role="alert" className="text-center py-32 flex flex-col items-center gap-4">
+            <span className="material-symbols-outlined text-8xl text-amber-300">wifi_off</span>
+            <p className="text-5xl font-semibold text-amber-200">{aviso.titulo}</p>
+            <p className="text-3xl text-white/70">{aviso.detalhe}</p>
+            {semSessao && <button onClick={onExit} className="mt-6 text-xl text-white/70 underline">Entrar (equipe)</button>}
+          </div>
+        )}
+        {!aviso && upcoming.length === 0 && (
           <div className="text-center py-32 opacity-50 flex flex-col items-center"><span className="material-symbols-outlined text-8xl mb-6">event_available</span><p className="text-4xl font-light">Nenhum atendimento no momento.</p></div>
         )}
       </div>

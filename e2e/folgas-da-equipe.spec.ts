@@ -52,7 +52,7 @@ const abrirFolgas = async (page: Page, semanasAFrente: number) => {
   await page.goto('/');
   await loginPelaTela(page, CONTAS.supervisor);
   await page.getByRole('button', { name: /Acessar Módulo RH/i }).click();
-  await page.getByRole('tab', { name: 'Folgas da equipe' }).click();
+  await page.getByRole('tab', { name: 'Folgas', exact: true }).click();
   for (let i = 0; i < semanasAFrente; i += 1) await page.getByRole('button', { name: 'Próxima semana' }).click();
 };
 

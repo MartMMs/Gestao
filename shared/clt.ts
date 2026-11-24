@@ -1,3 +1,4 @@
+import { formatarDataBR } from './datasBR';
 /**
  * utils/cltValidator.ts
  * Validações de conformidade com a CLT baseadas na malha de escala.
@@ -363,7 +364,7 @@ export function analisarConformidadeCLT(diasEscala: DiaEscala[], opcoes: { tipoE
   const cargaTotal = regime12x36 ? calcularCargaSemanalMedia(diasEscala) : maiorSemana.horas;
   const semanaAnalisada = regime12x36
     ? 'média do período (12x36)'
-    : maiorSemana.inicioSemana ? `semana de ${maiorSemana.inicioSemana.split('-').reverse().join('/')}` : 'N/A';
+    : maiorSemana.inicioSemana ? `semana de ${formatarDataBR(maiorSemana.inicioSemana)}` : 'N/A';
 
   const cargaConforme = cargaTotal <= CARGA_SEMANAL_MAXIMA_HORAS;
   const alertasCarga = cargaConforme

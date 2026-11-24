@@ -31,7 +31,7 @@ export function LegendaTurnos() {
       {LEGENDA_CATEGORIAS.map((categoria) => (
         <span key={categoria} className="flex items-center gap-1.5 text-[11px] text-on-surface-variant font-medium">
           <span className={`w-2 h-2 rounded-full ${VISUAL_CATEGORIA[categoria].cor}`} />
-          {categoria === 'folga' ? 'Folga / FDS' : VISUAL_CATEGORIA[categoria].rotulo}
+          {VISUAL_CATEGORIA[categoria].rotulo}
         </span>
       ))}
     </div>
@@ -159,7 +159,7 @@ export function CalendarioEscala({
               {colaboradorNome && (
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20">
                   {colaboradorNome}
-                  {colaboradorCargo ? <span className="text-on-surface-variant/70">• {colaboradorCargo}</span> : null}
+                  {colaboradorCargo ? <span className="text-on-surface-variant">• {colaboradorCargo}</span> : null}
                 </span>
               )}
               {modo === 'trocar' && (

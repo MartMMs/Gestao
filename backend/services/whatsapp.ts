@@ -4,7 +4,7 @@
 
 import type { Prisma } from '@prisma/client';
 import { codigoReserva } from '../../shared/codigoReserva';
-import { diaMesDe, formatarBR, horaDe } from '../../shared/datasBR';
+import { formatarBR, formatarDataBR, horaDe } from '../../shared/datasBR';
 import { MENSAGEM_PADRAO, OPCAO_NAO, OPCAO_SIM, TEXTO_CONFIRMACAO, TITULO_CONFIRMACAO, preencherMensagem } from '../../shared/mensagemLembrete';
 
 export interface WhatsappProvider {
@@ -63,7 +63,7 @@ export const montarLembrete = (empresa: EmpresaDoLembrete, ag: AgendamentoParaLe
 
 const textoDoLembrete = (dadosEmpresa: EmpresaDoLembrete, ag: AgendamentoParaLembrete, sorteio: number) => {
   const primeiroNome = ag.clienteNome.trim().split(/\s+/)[0] || ag.clienteNome;
-  const data = diaMesDe(ag.data);
+  const data = formatarDataBR(ag.data);
   const horario = horaDe(ag.data);
   const escritas = dadosEmpresa.mensagens?.filter((m) => m.trim()) ?? [];
   const modelos = escritas.length ? escritas : [MENSAGEM_PADRAO];

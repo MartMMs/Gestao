@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { formatarReais } from '../../../utils/formatters';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { motion } from 'motion/react';
-import { Service, ServiceEligibilityMode } from '../../../types';
+import { Habilidade, Service, ServiceEligibilityMode } from '../../../types';
 import { isApiError, useCompanyConfig, useToggleServiceActive } from '../../../api';
 import { useAuth } from '../../../AuthContext';
 import { LIMITE_CATEGORIA, agruparCategorias, montarCategoria, separarCategoria } from '../utils/categorias';
@@ -46,12 +46,13 @@ interface SupervisorServicosTabProps {
   setNewServiceComissao: (value: string) => void;
   serviceAllowedCargosInput: string;
   setServiceAllowedCargosInput: React.Dispatch<React.SetStateAction<string>>;
-  serviceAllowedSkillsInput: string;
-  setServiceAllowedSkillsInput: React.Dispatch<React.SetStateAction<string>>;
+  // Regra "por habilidade": ids escolhidos entre as habilidades ativas cadastradas
+  habilidadeIds: string[];
+  setHabilidadeIds: React.Dispatch<React.SetStateAction<string[]>>;
+  habilidadesAtivas: Habilidade[];
   serviceAllowedProfessionalsInput: string;
   setServiceAllowedProfessionalsInput: React.Dispatch<React.SetStateAction<string>>;
   availableCargos: string[];
-  availableSkills: string[];
   availableProfessionals: string[];
   appendRuleToken: (currentValue: string, nextToken: string) => string;
   newServiceDescription: string;
@@ -90,12 +91,12 @@ export function SupervisorServicosTab({
   setNewServiceComissao,
   serviceAllowedCargosInput,
   setServiceAllowedCargosInput,
-  serviceAllowedSkillsInput,
-  setServiceAllowedSkillsInput,
+  habilidadeIds,
+  setHabilidadeIds,
+  habilidadesAtivas,
   serviceAllowedProfessionalsInput,
   setServiceAllowedProfessionalsInput,
   availableCargos,
-  availableSkills,
   availableProfessionals,
   appendRuleToken,
   newServiceDescription,
@@ -175,10 +176,9 @@ export function SupervisorServicosTab({
     }
   };
 
-  // Campo da regra "quem pode atender" (cargo, habilidade ou profissional); nenhum no modo livre
-  const regra = serviceEligibilityMode === 'livre' ? null : {
+  // Campo de texto da regra "quem pode atender" (cargo ou profissional); habilidade usa a lista cadastrada; nenhum no modo livre
+  const regra = serviceEligibilityMode === 'livre' || serviceEligibilityMode === 'habilidade' ? null : {
     cargo: { rotulo: 'Cargos', valor: serviceAllowedCargosInput, alterar: setServiceAllowedCargosInput, opcoes: availableCargos.slice(0, 10), exemplo: 'Ex.: Atendente, Técnico' },
-    habilidade: { rotulo: 'Habilidades', valor: serviceAllowedSkillsInput, alterar: setServiceAllowedSkillsInput, opcoes: availableSkills.slice(0, 12), exemplo: 'Ex.: Drenagem, Microagulhamento' },
     profissional: { rotulo: 'Profissionais', valor: serviceAllowedProfessionalsInput, alterar: setServiceAllowedProfessionalsInput, opcoes: availableProfessionals, exemplo: 'Ex.: Ana Luiza, Marcos' },
   }[serviceEligibilityMode];
 
@@ -194,7 +194,7 @@ export function SupervisorServicosTab({
             </p>
           </div>
           <div className="relative w-full md:max-w-xs">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline-variant text-[18px]">search</span>
+            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">search</span>
             <input
               type="text"
               placeholder="Buscar serviço..."
@@ -229,9 +229,10 @@ export function SupervisorServicosTab({
             </span>
           </div>
         )}
-        <div className="grid grid-cols-1 gap-4">
+        <div className="grid grid-cols-1 gap-3">
           {/* Fora de linha vão para o fim da lista */}
           {[...filteredServices].sort((a, b) => Number(a.ativo === false) - Number(b.ativo === false)).map((srv) => {
+            const isEditing = editingServiceId === srv.id;
             const eligibilityModeLabel = srv.modoElegibilidade === 'cargo'
               ? 'Por cargo'
               : srv.modoElegibilidade === 'habilidade'
@@ -244,52 +245,68 @@ export function SupervisorServicosTab({
               <div 
                 key={srv.id} 
                 onClick={() => onEditServiceCard(srv)}
-                className={`bg-surface-container-lowest p-5 rounded-3xl flex flex-col gap-4 transition-all ${srv.ativo === false ? 'opacity-60' : ''} hover:bg-surface-container-low hover:border-primary/30 group relative overflow-hidden border border-outline-variant/10 shadow-sm cursor-pointer`}
+                className={`p-4 rounded-2xl flex flex-col gap-2.5 transition-all ${srv.ativo === false ? 'opacity-60' : ''} ${
+                  isEditing
+                    ? 'bg-primary/5 border-primary ring-2 ring-primary/35 shadow-md'
+                    : 'bg-surface-container-lowest border-outline-variant/15 hover:bg-surface-container-low hover:border-primary/30 shadow-sm'
+                } group relative overflow-hidden border cursor-pointer`}
               >
-                <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-primary/80"></div>
-                <div className="flex items-center gap-4 pl-2 min-w-0">
-                  <div className="w-12 h-12 bg-primary-container/20 rounded-full flex items-center justify-center text-primary shrink-0">
-                    <span className="material-symbols-outlined">{srv.icone || 'design_services'}</span>
+                <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${isEditing ? 'bg-primary' : 'bg-primary/80'}`}></div>
+                <div className="flex items-start gap-3.5 pl-2 min-w-0">
+                  <div className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${isEditing ? 'bg-primary text-on-primary' : 'bg-primary-container/20 text-primary'}`}>
+                    <span className="material-symbols-outlined text-[22px]">{srv.icone || 'design_services'}</span>
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex justify-between items-start gap-2">
-                      <h4 className="font-headline text-lg text-on-surface truncate">{srv.nome}</h4>
-                      {srv.ativo === false && <span className="shrink-0 text-[10px] uppercase tracking-widest font-bold text-on-surface-variant bg-surface-container px-2 py-1 rounded-full">Fora de linha</span>}
-                      {srv.categoria && <span className="shrink-0 text-[10px] uppercase tracking-widest font-bold text-primary bg-primary/10 px-2 py-1 rounded-full">{srv.categoria}</span>}
+                    <div className="flex flex-wrap justify-between items-center gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <h4 className="font-headline text-base sm:text-lg text-on-surface truncate">{srv.nome}</h4>
+                        {isEditing && <span className="shrink-0 text-[10px] uppercase tracking-widest font-bold text-on-primary bg-primary px-2 py-0.5 rounded-full">Editando</span>}
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {srv.ativo === false && <span className="shrink-0 text-[10px] uppercase tracking-widest font-bold text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">Fora de linha</span>}
+                        {srv.categoria && <span className="shrink-0 text-[10px] uppercase tracking-widest font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">{srv.categoria}</span>}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-2 mt-2 text-sm text-on-surface-variant">
-                      <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-1 rounded-lg text-xs">
+                    <div className="flex flex-wrap gap-1.5 mt-1.5 text-sm text-on-surface-variant">
+                      <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-0.5 rounded-lg text-xs">
                         <span className="material-symbols-outlined text-[14px]">schedule</span> 
                         {formatDuration(Number(srv.duracao || 60))}
-                        {srv.tempoHigienizacaoMin ? <span className="text-[11px] opacity-70 ml-1">+ {srv.tempoHigienizacaoMin}m prep</span> : ''}
+                        {srv.tempoHigienizacaoMin ? <span className="text-[11px] opacity-70 ml-1">+ {srv.tempoHigienizacaoMin}min prep</span> : ''}
                       </span>
-                      <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-1 rounded-lg text-xs">
+                      <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-0.5 rounded-lg text-xs">
                         <span className="material-symbols-outlined text-[14px]">payments</span> {formatarReais(Number(srv.preco))}
                       </span>
                       {usarComissao && Boolean(srv.comissaoPercentual) && Number(srv.comissaoPercentual) > 0 && (
-                        <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-1 rounded-lg text-xs text-secondary">
+                        <span className="flex items-center gap-1 shrink-0 bg-surface-container px-2 py-0.5 rounded-lg text-xs text-secondary">
                           <span className="material-symbols-outlined text-[14px]">percent</span> {srv.comissaoPercentual}%
                         </span>
                       )}
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-1 text-[11px] font-bold uppercase tracking-widest text-primary">
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest text-primary">
                         <span className="material-symbols-outlined text-[14px]">verified_user</span>
                         {eligibilityModeLabel}
                       </span>
                     </div>
+                    {srv.modoElegibilidade === 'habilidade' && (srv.habilidadesPermitidas?.length ?? 0) > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5" aria-label="Habilidades exigidas">
+                        {srv.habilidadesPermitidas!.map((h) => (
+                          <span key={h} className="text-[11px] px-2 py-0.5 rounded-full border border-primary/25 text-primary">{h}</span>
+                        ))}
+                      </div>
+                    )}
                     {srv.descricao && (
-                      <p className="text-xs text-on-surface-variant mt-2 line-clamp-2 italic">
+                      <p className="text-xs text-on-surface-variant mt-1.5 line-clamp-2 italic">
                         {srv.descricao}
                       </p>
                     )}
-                    <p className="text-[11px] text-on-surface-variant mt-1 line-clamp-2">
+                    <p className="text-[11px] text-on-surface-variant mt-1 line-clamp-1">
                       {getEligibilitySummary(srv)}
                     </p>
                   </div>
                 </div>
-                <div className="flex gap-2 justify-end border-t border-outline-variant/10 pt-3 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={(e) => { e.stopPropagation(); onEditServiceCard(srv); }} className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full transition-colors" title="Editar" aria-label={`Editar ${srv.nome}`}><span className="material-symbols-outlined text-[22px]" aria-hidden="true">edit</span></button>
-                  <button onClick={(e) => { e.stopPropagation(); trocarAtivo(srv); }} disabled={alternarAtivo.isPending} className="p-2 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full transition-colors" title={srv.ativo === false ? 'Voltar ao catálogo' : 'Tirar de linha (some do totem e de novos agendamentos)'} aria-label={srv.ativo === false ? `Voltar ${srv.nome} ao catálogo` : `Tirar ${srv.nome} de linha`}><span className="material-symbols-outlined text-[22px]" aria-hidden="true">{srv.ativo === false ? 'visibility' : 'visibility_off'}</span></button>
-                  <button onClick={(e) => { e.stopPropagation(); if (confirmarExclusao) setServicoParaExcluir(srv); else onDeleteServiceCard(srv.id); }} className="p-2 text-on-surface-variant hover:bg-error-container/20 hover:text-error rounded-full transition-colors" title="Excluir" aria-label={`Excluir ${srv.nome}`}><span className="material-symbols-outlined text-[22px]" aria-hidden="true">delete</span></button>
+                <div className="flex gap-1.5 justify-end border-t border-outline-variant/10 pt-2" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={(e) => { e.stopPropagation(); onEditServiceCard(srv); }} className="p-1.5 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full transition-colors" title="Editar" aria-label={`Editar ${srv.nome}`}><span className="material-symbols-outlined text-[20px]" aria-hidden="true">edit</span></button>
+                  <button onClick={(e) => { e.stopPropagation(); trocarAtivo(srv); }} disabled={alternarAtivo.isPending} className="p-1.5 text-on-surface-variant hover:bg-primary-container/20 hover:text-primary rounded-full transition-colors" title={srv.ativo === false ? 'Voltar ao catálogo' : 'Tirar de linha (some do totem e de novos agendamentos)'} aria-label={srv.ativo === false ? `Voltar ${srv.nome} ao catálogo` : `Tirar ${srv.nome} de linha`}><span className="material-symbols-outlined text-[20px]" aria-hidden="true">{srv.ativo === false ? 'visibility' : 'visibility_off'}</span></button>
+                  <button onClick={(e) => { e.stopPropagation(); if (confirmarExclusao) setServicoParaExcluir(srv); else onDeleteServiceCard(srv.id); }} className="p-1.5 text-on-surface-variant hover:bg-error-container/20 hover:text-error rounded-full transition-colors" title="Excluir" aria-label={`Excluir ${srv.nome}`}><span className="material-symbols-outlined text-[20px]" aria-hidden="true">delete</span></button>
                 </div>
               </div>
             );
@@ -412,10 +429,31 @@ export function SupervisorServicosTab({
               <select value={serviceEligibilityMode} onChange={(e) => setServiceEligibilityMode(e.target.value as ServiceEligibilityMode)} className={CAMPO}>
                 <option value="livre">Qualquer profissional</option>
                 <option value="cargo">Só alguns cargos</option>
-                <option value="habilidade">Só quem tem certas habilidades</option>
+                <option value="habilidade">Por habilidade</option>
                 <option value="profissional">Só profissionais escolhidos</option>
               </select>
             </label>
+            {serviceEligibilityMode === 'habilidade' && (
+              <fieldset>
+                <legend className={ROTULO}>Habilidades exigidas <span className="font-normal text-on-surface-variant">(basta o profissional ter uma)</span></legend>
+                {habilidadesAtivas.length === 0 ? (
+                  <p className="mt-1 text-xs text-on-surface-variant">Nenhuma habilidade ativa. Cadastre em Equipe → Habilidades.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {habilidadesAtivas.map((h) => {
+                      const marcada = habilidadeIds.includes(h.id);
+                      return (
+                        <label key={h.id} className={`min-h-9 inline-flex items-center gap-1.5 text-xs px-3 py-1 rounded-full font-bold cursor-pointer border ${marcada ? 'bg-primary text-on-primary border-primary' : 'bg-primary/10 text-primary border-transparent hover:bg-primary/20'}`}>
+                          <input type="checkbox" className="sr-only" checked={marcada} onChange={() => setHabilidadeIds((atual) => (marcada ? atual.filter((id) => id !== h.id) : [...atual, h.id]))} />
+                          {marcada && <span className="material-symbols-outlined text-[14px]" aria-hidden="true">check</span>}
+                          {h.nome}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </fieldset>
+            )}
             {regra && (
               <div>
                 <label className={ROTULO}>

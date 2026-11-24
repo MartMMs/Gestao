@@ -24,7 +24,10 @@ export const buscarServicosPorNome = async (db: Db, nomes: unknown, opcoes: { ja
 // Totem: o catálogo público trabalha com IDs; serviço removido no meio do fluxo vira 404
 export const buscarServicosPorId = async (db: Db, ids: string[]) => {
   if (ids.length === 0) throw new HttpError(400, 'Selecione ao menos um serviço.');
-  const servicos = await db.servico.findMany({ where: { id: { in: ids }, ativo: true } });
+  const servicos = await db.servico.findMany({
+    where: { id: { in: ids }, ativo: true },
+    include: { habilidadesExigidas: { where: { ativa: true }, select: { id: true } } },
+  });
   if (servicos.length !== ids.length) throw new HttpError(404, 'Algum dos serviços escolhidos não está mais disponível.');
   return servicos;
 };

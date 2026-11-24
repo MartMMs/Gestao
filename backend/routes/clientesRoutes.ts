@@ -16,9 +16,9 @@ import {
   temFichaAnamnese,
 } from '../../shared/anamnese';
 import { getEmpresaConfig } from '../services/configService';
-import { dataHoraDe as formatarDataHora } from '../../shared/datasBR';
+import { formatarDataHoraBR as formatarDataHora } from '../../shared/datasBR';
 import { MAX_LINHAS_IMPORTACAO, MENSAGEM_EMAIL_INVALIDO, emailValido, erroNomeCliente, lerCliente, limparTexto, validarImportacao, type DadosCliente } from '../../shared/clientes';
-import { LIMITE_OBSERVACAO, MENSAGEM_CPF_INVALIDO, MENSAGEM_TELEFONE_INVALIDO, apenasDigitos, cpfValido, normalizarNome, normalizarTelefone, telefoneValido, valorMascarado } from '../../shared/validadores';
+import { LIMITE_OBSERVACAO, MENSAGEM_CPF_INVALIDO, MENSAGEM_TELEFONE_INVALIDO, apenasDigitos, cpfValido, normalizarNome, normalizarTelefone, normalizarTexto, telefoneValido, valorMascarado } from '../../shared/validadores';
 
 
 export function createClientesRouter(notificar: Notificar) {
@@ -38,13 +38,35 @@ export function createClientesRouter(notificar: Notificar) {
         },
         orderBy: { nome: 'asc' },
       });
+      const buscaRaw = typeof req.query.q === 'string'
+        ? req.query.q
+        : (typeof req.query.busca === 'string' ? req.query.busca : '');
+      const buscaNorm = normalizarTexto(buscaRaw);
+      const buscaDigitos = apenasDigitos(buscaRaw);
+      const supervisor = usuarioEhSupervisor(req);
+      const gerencia = usuarioGerenciaAgenda(req);
+
+      const filtrados = buscaNorm
+        ? clientes.filter((c) => {
+            if (normalizarTexto(c.nome).includes(buscaNorm)) return true;
+            // Colaborador só pesquisa pelo nome: nunca por CPF, telefone ou código (impede oráculo de dados mascarados)
+            if (!gerencia) return false;
+            if (c.codigo && `#${c.codigo}`.includes(buscaNorm)) return true;
+            if (buscaDigitos && c.telefone && apenasDigitos(c.telefone).includes(buscaDigitos)) return true;
+            if (!supervisor) return false;
+            if (buscaDigitos && c.cpf && apenasDigitos(c.cpf).includes(buscaDigitos)) return true;
+            if (c.email && normalizarTexto(c.email).includes(buscaNorm)) return true;
+            return false;
+          })
+        : clientes;
+
       // temAnamnese: só se há ficha, sem o conteúdo (quem não vê saúde, como a recepção, também precisa do aviso).
       // acessoSaude: quem pede vê e grava a ficha deste cliente (a tela não oferece edição que a API recusaria)
       const comAviso = <T extends { observacao: string | null }>(c: T, original: { observacao: string | null }, acessoSaude: boolean) =>
         ({ ...c, temAnamnese: temFichaAnamnese(original.observacao), acessoSaude });
-      if (usuarioEhSupervisor(req)) return res.json(clientes.map((c) => comAviso(c, c, true)));
+      if (supervisor) return res.json(filtrados.map((c) => comAviso(c, c, true)));
       const meus = await clientesComAcessoSaude(req);
-      res.json(clientes.map((c) => comAviso(prepararCliente(c, req, meus.has(c.id)), c, meus.has(c.id))));
+      res.json(filtrados.map((c) => comAviso(prepararCliente(c, req, meus.has(c.id)), c, meus.has(c.id))));
     } catch (error) {
       responderErro(res, error, 'Erro ao buscar clientes');
     }
@@ -61,9 +83,12 @@ export function createClientesRouter(notificar: Notificar) {
     return tx.cliente.createManyAndReturn({ data: lista.map((d) => ({ ...d, observacao })) });
   });
 
-  // Cadastro manual (apenas supervisão, como a edição dos dados cadastrais)
-  router.post('/clientes', verificarSupervisorToken, async (req, res) => {
+  // Cadastro manual: supervisão, admin e recepção (colaborador não cadastra direto na base)
+  router.post('/clientes', verificarToken, async (req, res) => {
     try {
+      if (!usuarioGerenciaAgenda(req)) {
+        return res.status(403).json({ erro: 'Apenas recepção ou supervisão podem cadastrar clientes.' });
+      }
       const { dados, erros } = lerCliente(req.body ?? {});
       if (erros.length) return res.status(400).json({ erro: erros[0].mensagem, erros });
       const observacao = typeof req.body?.observacao === 'string' ? req.body.observacao.slice(0, LIMITE_OBSERVACAO) : '';
@@ -73,7 +98,7 @@ export function createClientesRouter(notificar: Notificar) {
       }
       const [criado] = await gravarClientes([{ ...dados, naoReceberWhatsapp: req.body?.naoReceberWhatsapp === true }], observacao || null);
       notificar();
-      res.status(201).json(criado);
+      res.status(201).json(usuarioEhSupervisor(req) ? criado : prepararCliente(criado, req, false));
     } catch (error) {
       responderErro(res, error, 'Erro ao criar cliente');
     }

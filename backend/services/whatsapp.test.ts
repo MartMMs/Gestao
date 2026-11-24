@@ -29,7 +29,7 @@ describe('WhatsApp', () => {
   });
 
   it('lembrete: primeiro nome, data e hora de Brasília, sem nome de serviço', () => {
-    expect(montarLembrete({ nome: 'Spa Teste' }, ag('a'))).toBe('*Spa Teste*\nOlá, Maria! Lembrete do seu horário em 11/12 às 10:30. Se não puder vir, avise a recepção.');
+    expect(montarLembrete({ nome: 'Spa Teste' }, ag('a'))).toBe('*Spa Teste*\nOlá, Maria! Lembrete do seu horário em 11/12/2026 às 10:30. Se não puder vir, avise a recepção.');
   });
 
   it('lembrete com mensagem da casa: sorteia uma e troca as chaves', () => {

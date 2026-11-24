@@ -253,7 +253,7 @@ export function AutoatendimentoAdminTab() {
                   Fica guardado para quando o gateway for conectado. Até lá o totem não cobra sinal e o pagamento é feito na recepção.
                 </p>
               )}
-              <div className="flex justify-between text-[11px] text-outline-variant">
+              <div className="flex justify-between text-[11px] text-on-surface-variant">
                 <span>10% (Sinal Leve)</span>
                 <span>40% (Recomendado)</span>
                 <span>100% (Integral)</span>
@@ -324,7 +324,7 @@ export function AutoatendimentoAdminTab() {
               <option value={15}>15 minutos (Maior tranquilidade no Pix)</option>
               <option value={20}>20 minutos (Folgado)</option>
             </select>
-            <p className="text-[11px] text-outline-variant">
+            <p className="text-[11px] text-on-surface-variant">
               Tempo que o horário e o espaço ficam reservados para o cliente concluir o agendamento.
             </p>
           </div>
@@ -354,16 +354,6 @@ export function AutoatendimentoAdminTab() {
               placeholder="Ex: Chegue com 15 minutos de antecedência e apresente-se na recepção."
               className="w-full bg-surface-container-low border border-outline-variant/30 rounded-2xl p-3.5 text-xs text-on-surface focus:ring-1 focus:ring-primary"
             />
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-8 py-3 rounded-xl bg-primary text-on-primary hover:bg-primary-dim font-bold text-xs uppercase tracking-[0.15em] shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              {saving ? 'Salvando...' : 'Salvar Alterações'}
-            </button>
           </div>
         </div>
       </form>
