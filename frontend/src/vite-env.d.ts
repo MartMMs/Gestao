@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_SOCKET_URL?: string;
   readonly VITE_AUTOATENDIMENTO_HOST?: string;
   readonly VITE_TV_HOST?: string;
+  // Host do painel da equipe: só para o vite preview aceitar o endereço (scripts/apresentacao.sh)
+  readonly VITE_PAINEL_HOST?: string;
   // "1": /totem e /painel abrem pelo caminho no build de produção (teste pelo IP, sem isolamento de sessão)
   readonly VITE_ATALHO_CAMINHOS?: string;
   readonly VITE_AUTOATENDIMENTO_URL?: string;

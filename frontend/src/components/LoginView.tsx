@@ -132,11 +132,12 @@ export function LoginView({
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
-              <motion.div 
+              <motion.div
+                role="alert"
                 initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
                 className="bg-error-container text-on-error-container p-4 rounded-xl text-sm font-medium flex items-center gap-2"
               >
-                <span className="material-symbols-outlined text-lg">error</span>
+                <span className="material-symbols-outlined text-lg" aria-hidden="true">error</span>
                 {error}
               </motion.div>
             )}

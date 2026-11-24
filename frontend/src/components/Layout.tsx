@@ -11,8 +11,6 @@ interface LayoutProps {
   onViewChange?: (view: Role | 'tv' | 'autoatendimento') => void;
   onOpenUpcomingAppointments?: () => void;
   upcomingAppointmentsCount?: number;
-  cltAlertsCount?: number;
-  onOpenCltAlerts?: () => void;
   onLogout: () => void;
   isDarkMode?: boolean;
   toggleTheme?: () => void;
@@ -29,8 +27,9 @@ const VISOES_POR_PAPEL: Record<Role, Array<[Role | 'tv' | 'autoatendimento', str
   collaborator: [['collaborator', 'Portal do Colaborador']],
 };
 
-export function Layout({ children, userName, userRole, activeView, onViewChange, onOpenUpcomingAppointments, upcomingAppointmentsCount = 0, cltAlertsCount = 0, onOpenCltAlerts, onLogout, isDarkMode, toggleTheme, companyName, companyIcon }: LayoutProps) {
-  const hasCltAlerts = cltAlertsCount > 0;
+export function Layout({ children, userName, userRole, activeView, onViewChange, onOpenUpcomingAppointments, upcomingAppointmentsCount = 0, onLogout, isDarkMode, toggleTheme, companyName, companyIcon }: LayoutProps) {
+  const visoesDisponiveis = VISOES_POR_PAPEL[userRole];
+  const podeAlternarVisao = visoesDisponiveis.length > 1;
 
   return (
     <div translate="no" className="notranslate min-h-screen flex flex-col bg-surface text-on-surface font-body antialiased transition-colors duration-300">
@@ -46,16 +45,22 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
           </span>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-4 min-w-0">
-          <div className="hidden lg:flex items-center gap-2 px-4 py-1 bg-surface-container rounded-full border border-outline-variant/30">
+          <div className="hidden lg:flex items-center gap-2 px-4 py-1.5 bg-surface-container rounded-full border border-outline-variant/30">
             <span className="material-symbols-outlined text-primary scale-75">badge</span>
-            <select
-              aria-label="Portal"
-              value={activeView}
-              onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
-              className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-wide font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
-            >
-              {VISOES_POR_PAPEL[userRole].map(([valor, rotulo]) => <option key={valor} value={valor}>{rotulo}</option>)}
-            </select>
+            {podeAlternarVisao ? (
+              <select
+                aria-label="Portal"
+                value={activeView}
+                onChange={(e) => onViewChange?.(e.target.value as Role | 'tv' | 'autoatendimento')}
+                className="bg-transparent border-none text-xs font-semibold text-on-surface-variant uppercase tracking-wide font-body focus:ring-0 cursor-pointer outline-none m-0 p-0"
+              >
+                {visoesDisponiveis.map(([valor, rotulo]) => <option key={valor} value={valor}>{rotulo}</option>)}
+              </select>
+            ) : (
+              <span className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide font-body">
+                {visoesDisponiveis[0]?.[1]}
+              </span>
+            )}
           </div>
           {activeView === 'supervisor' && onOpenUpcomingAppointments && (
             <button
@@ -89,24 +94,6 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
                 </AnimatePresence>
               </button>
             )}
-            {userRole === 'supervisor' && activeView === 'supervisor' && onOpenCltAlerts && (
-              <button
-                onClick={onOpenCltAlerts}
-                className={`relative w-10 h-10 flex items-center justify-center rounded-full transition-all ${
-                  hasCltAlerts
-                    ? 'text-error bg-error/10 ring-1 ring-error/40 hover:bg-error/15'
-                    : 'text-on-surface-variant hover:bg-surface-container hover:text-primary'
-                }`}
-                title="Alertas e Auditoria"
-              >
-                <span className="material-symbols-outlined">{hasCltAlerts ? 'notifications_active' : 'notifications'}</span>
-                {cltAlertsCount > 0 && (
-                  <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-error text-on-error text-[10px] font-bold rounded-full flex items-center justify-center shadow-sm border border-surface">
-                    {cltAlertsCount > 9 ? '9+' : cltAlertsCount}
-                  </span>
-                )}
-              </button>
-            )}
             <span className="text-sm font-bold text-primary hidden md:block">{userName}</span>
             <button 
               onClick={onLogout} 
@@ -133,7 +120,7 @@ export function Layout({ children, userName, userRole, activeView, onViewChange,
         </div>
         <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-3">
           <LinksDocumentosLegais />
-          <span className="text-outline-variant">Uso Exclusivo para Colaboradores</span>
+          <span className="text-on-surface-variant">Uso Exclusivo para Colaboradores</span>
         </div>
       </footer>
     </div>

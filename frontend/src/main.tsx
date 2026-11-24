@@ -4,6 +4,8 @@ import * as Sentry from '@sentry/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './AuthContext';
 import { isAutoatendimentoHost, noCaminho } from './config/hosts';
+// Ícones do próprio build (sem depender do Google Fonts: sem internet viravam texto cru)
+import 'material-symbols/outlined.css';
 import './index.css';
 
 // Cópia rápida da cor do sistema (a fonte é a configuração da empresa, que o App confere e atualiza logo depois):

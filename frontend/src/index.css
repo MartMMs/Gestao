@@ -87,10 +87,13 @@
     --color-surface-container-high: #44403c;
     --color-surface-container-highest: #57534e;
     --color-on-surface: #f5f5f4;
-    --color-on-surface-variant: #d6d3d1;
+    /* #bcb6b1: 8,7:1 no fundo e 5,1:1 no container-high, mas distinto do texto principal (#d6d3d1 ficava a 1,37:1 dele) */
+    --color-on-surface-variant: #bcb6b1;
     --color-outline: #a8a29e;
     --color-outline-variant: #78716c;
     --color-primary: #b3d99a;
+    /* hover dos botões primários: mais claro que o primary no escuro (o #3e5a2d do claro dava 2,2:1 com o texto) */
+    --color-primary-dim: #9cc583;
     --color-on-primary: #132107;
     --color-primary-container: #365026;
     --color-on-primary-container: #cef7b4;
@@ -139,6 +142,7 @@
 }
 :root.dark[style*="--brand"] {
   --color-primary: color-mix(in oklab, var(--brand) 55%, white);
+  --color-primary-dim: color-mix(in oklab, var(--brand) 45%, white);
   --color-on-primary: color-mix(in oklab, var(--brand) 30%, black);
   --color-primary-container: color-mix(in oklab, var(--brand) 45%, black);
   --color-on-primary-container: color-mix(in oklab, var(--brand) 20%, white);
