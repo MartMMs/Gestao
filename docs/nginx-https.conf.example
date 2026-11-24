@@ -18,7 +18,7 @@
 # Teste depois de mudar: sudo nginx -t && sudo systemctl reload nginx
 #
 # CSP (fonte única: só aqui; o build não leva <meta> de CSP). Começa em Report-Only: o navegador só avisa no console.
-# Depois de uma semana sem avisos, troque "Content-Security-Policy-Report-Only" por "Content-Security-Policy" nos dois
+# A CSP abaixo ja bloqueia (nao e Report-Only): se precisar so medir antes, troque por "Content-Security-Policy-Report-Only" nos dois
 # sites. img-src aceita https: porque as fotos de serviços e avatares podem vir de qualquer endereço configurado.
 
 server_tokens off;   # não anuncia a versão do nginx
@@ -81,7 +81,7 @@ server {
   root /var/www/gestao/frontend/dist;
 
   include snippets/gestao-seguranca.conf;
-  add_header Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self'; connect-src 'self' wss://$host; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self'; connect-src 'self' wss://$host; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
 
   # Caminhos do portal interno: 404 seco. A mesma lista está em scripts/apresentacao.sh: mude nos dois
   location ~* ^/(login|logout|rh|admin|painel|supervisor|recepcao|equipe|relatorios|tv|totem)(/|$) { return 404; }
@@ -136,7 +136,7 @@ server {
 
   include snippets/gestao-seguranca.conf;
   # Além do totem: previsão do tempo do painel (open-meteo) e som de chamada (mixkit)
-  add_header Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' https://assets.mixkit.co; connect-src 'self' wss://$host https://api.open-meteo.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' https://assets.mixkit.co; connect-src 'self' wss://$host https://api.open-meteo.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
 
   # Login: limite mais rígido na borda (o backend ainda conta tentativas por conta e por IP)
   location = /api/login {
