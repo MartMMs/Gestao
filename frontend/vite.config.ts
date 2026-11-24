@@ -26,7 +26,7 @@ export default defineConfig(({ mode }) => {
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'strict-origin-when-cross-origin',
         'Strict-Transport-Security': 'max-age=31536000',
-        'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' https://assets.mixkit.co; connect-src 'self' wss: https://api.open-meteo.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+        'Content-Security-Policy': "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' https://assets.mixkit.co; connect-src 'self' wss: https://api.open-meteo.com https://cloudflareinsights.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
       },
       allowedHosts: [env.VITE_AUTOATENDIMENTO_HOST, env.VITE_PAINEL_HOST, env.VITE_TV_HOST].flatMap((h) => (h ?? '').split(',').map((x) => x.trim()).filter(Boolean)),
     },
