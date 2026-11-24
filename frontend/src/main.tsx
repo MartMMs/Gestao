@@ -15,7 +15,16 @@ try {
   if (cor && /^#[0-9a-f]{6}$/i.test(cor)) document.documentElement.style.setProperty('--brand', cor);
 } catch { /* navegador sem localStorage: espera a configuração */ }
 
-const SENTRY_DSN = "SUA_DSN_DO_SENTRY_AQUI"; // Insira a chave fornecida pelo painel do Sentry
+// Libera os ícones quando a fonte deles termina de baixar (ver index.css): antes disso apareceriam como palavras.
+// Se o download falhar, libera também: a palavra ("schedule") ao menos diz o que o botão faz; invisível não diria nada
+const liberarIcones = () => document.documentElement.classList.add('icones-ok');
+if (document.fonts?.load) {
+  document.fonts.load('24px "Material Symbols Outlined"', 'spa').finally(liberarIcones).catch(() => {});
+} else {
+  liberarIcones(); // navegador sem a API de fontes: comportamento de antes
+}
+
+const SENTRY_DSN ="SUA_DSN_DO_SENTRY_AQUI"; // Insira a chave fornecida pelo painel do Sentry
 
 if (SENTRY_DSN && SENTRY_DSN !== "SUA_DSN_DO_SENTRY_AQUI") {
   // Inicialize o Sentry antes de renderizar a aplicação

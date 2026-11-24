@@ -106,6 +106,15 @@
   }
 }
 
+/* Ícones são palavras ("spa", "schedule") que viram desenho com a fonte. A fonte tem ~4 MB: no primeiro acesso
+   lento o navegador desiste de esperar e mostra a palavra crua. Até main.tsx marcar a fonte como carregada, o
+   ícone fica invisível ocupando só o quadrado dele (sem a palavra larga empurrando o layout). */
+html:not(.icones-ok) .material-symbols-outlined {
+  color: transparent;
+  width: 1em;
+  overflow: hidden;
+}
+
 @layer utilities {
   .material-symbols-outlined {
     font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
