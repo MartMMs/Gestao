@@ -49,5 +49,5 @@ test('rotas públicas do totem: só o necessário, sem dados internos de equipe 
 test('saúde: /health responde ok sem revelar nada além disso', async ({ request }) => {
   const r = await request.get(`${apiBase()}/health`);
   expect(r.status()).toBe(200);
-  expect(await r.json()).toEqual({ status: 'ok' });
+  expect(await r.json()).toMatchObject({ status: 'ok', versao: expect.any(String) });
 });

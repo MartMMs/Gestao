@@ -1,3 +1,4 @@
+import type { ConfiguracaoEmpresa } from '@prisma/client';
 import { prisma } from '../db';
 import { config as ambiente } from '../env';
 import { criarGatewayHttp } from './gatewayPagamento';
@@ -38,13 +39,21 @@ export const getEmpresaConfig = () => prisma.configuracaoEmpresa.upsert({
   create: EMPRESA_PADRAO,
 });
 
-/**
- * Configuração da empresa para quem não está logado (totem, TV, tela de login) e para o aviso em tempo real, que vai
- * a todas as conexões: sem os textos e a ligação da confirmação do WhatsApp (só o admin lê, em /whatsapp/mensagens)
- */
-export const empresaPublica = <T extends { mensagensLembrete?: unknown; lembretePedeConfirmacao?: unknown }>(
-  { mensagensLembrete: _mensagens, lembretePedeConfirmacao: _confirmacao, ...publica }: T,
-) => publica;
+// Lista branca: só estes campos saem para quem não está logado (totem, TV, login) e no aviso em tempo real.
+// Campo novo no schema fica de fora até ser incluído aqui (os textos do WhatsApp ficam em /whatsapp/mensagens, só admin)
+const CAMPOS_EMPRESA_PUBLICOS = [
+  'id', 'nomeEmpresa', 'segmento', 'slogan', 'icone', 'termoAtendimento', 'termoProfissional', 'termoEspaco', 'termoServico',
+  'telefoneContato', 'emailContato', 'endereco', 'corTemaPrimaria', 'usarComissao', 'exigirAnamnese', 'exigenciaHabilidades', 'horaAbertura',
+  'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento', 'atualizadoEm',
+] as const satisfies readonly (keyof ConfiguracaoEmpresa)[];
+
+export type EmpresaPublica = Pick<ConfiguracaoEmpresa, (typeof CAMPOS_EMPRESA_PUBLICOS)[number]> & { whatsappAtivo: boolean };
+
+export const empresaPublica = (empresa: ConfiguracaoEmpresa): EmpresaPublica => ({
+  ...(Object.fromEntries(CAMPOS_EMPRESA_PUBLICOS.map((campo) => [campo, empresa[campo]])) as Pick<ConfiguracaoEmpresa, (typeof CAMPOS_EMPRESA_PUBLICOS)[number]>),
+  // Confirmação da reserva pelo WhatsApp só sai com o provedor HTTP configurado (communicationService)
+  whatsappAtivo: Boolean(ambiente.whatsappUrl),
+});
 
 export const getAutoatendimentoConfig = () => prisma.configuracaoAutoatendimento.upsert({
   where: { id: 'default' },

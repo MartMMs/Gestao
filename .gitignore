@@ -49,3 +49,10 @@ generated/
 
 # Dumps do banco feitos pelo scripts/deploy-producao.sh (dados reais de clientes)
 backups/
+# Cópia temporária e versão anterior guardadas pelo deploy
+.deploy-*/
+node_modules.anterior/
+frontend/dist.anterior/
+.versao-publicada
+.deploy-pendente
+backend/.versao

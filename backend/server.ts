@@ -3,6 +3,8 @@ import { config, validarConfigProducao } from './env';
 import express, { Request, Response, NextFunction } from 'express';
 import cors, { type CorsOptions } from 'cors';
 import http from 'http';
+import { execFileSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { Server } from 'socket.io';
 import { createRouter } from './routes';
 import { createAutoatendimentoRouter } from './routes/autoatendimentoRoutes';
@@ -97,11 +99,19 @@ const jsonPadrao = lerJson('100kb');
 app.use('/api/clientes/importar', lerJson('400kb'));
 app.use(jsonPadrao);
 
-// Saúde para o deploy e o monitoramento: só diz se a API e o banco respondem (nada de versão, host ou erro)
+// Versão em execução: APP_VERSAO, ou backend/.versao gravado pelo deploy, ou o commit do git (desenvolvimento).
+// O arquivo evita depender do git no servidor (usuário do systemd diferente do dono do repositório, sem .git)
+const VERSAO = process.env.APP_VERSAO || (() => {
+  try { return readFileSync(new URL('./.versao', import.meta.url), 'utf8').trim(); } catch { /* sem deploy ainda */ }
+  try { return execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); }
+  catch { return 'desconhecida'; }
+})();
+
+// Saúde para o deploy e o monitoramento: API, banco e commit (nada de host ou erro). No host público o nginx dá 404
 app.get(['/health', '/api/health'], async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', versao: VERSAO });
   } catch {
     res.status(503).json({ status: 'erro' });
   }
