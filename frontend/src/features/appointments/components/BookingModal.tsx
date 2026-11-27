@@ -4,15 +4,15 @@ import { normalizarTexto } from '@shared/validadores';
 import { horarioParaMinutos } from '@shared/agenda';
 import { Appointment, Client, Employee, Service, ServiceEligibilityMode } from '../../../types';
 import { getDuration } from '../utils/appointmentCore';
-import { AnamneseForm, AnamneseData, initialAnamnese, formatAnamnese } from '../../../components/AnamneseForm';
 import { AppointmentScheduleFields } from '../../../components/AppointmentScheduleFields';
 import { ModalFormulario } from '../../../components/ModalFormulario';
-import { fichaOculta, formatAnamneseStorage, hasAnamnese, parseClientObservation } from '../../../utils/anamneseUtils';
+import { fichaOculta, formatAnamneseStorage, hasAnamnese, initialAnamnese, parseClientObservation, type AnamneseData } from '../../../utils/anamneseUtils';
+import type { ValorResposta } from '@shared/formularioAnamnese';
 import { FichaAnamneseModal } from '../../../components/FichaAnamneseModal';
-import { FichaRecepcaoModal } from '../../../components/FichaRecepcaoModal';
+import { FichaRecepcaoModal, temRespostas } from '../../../components/FichaRecepcaoModal';
 import { AvisoCliente } from '../../../components/AvisoCliente';
 import { SeloAlertaClinico } from '../../../components/FichaFormulario';
-import { MENSAGEM_ANAMNESE_OBRIGATORIA, linhasDoTotem } from '@shared/anamnese';
+import { MENSAGEM_ANAMNESE_OBRIGATORIA } from '@shared/anamnese';
 import { useAuth } from '../../../AuthContext';
 import { formatPhone, formatCpf, atendeNaAgenda } from '../../../utils/formatters';
 import { useFormDraft } from '../../../hooks/useFormDraft';
@@ -81,6 +81,8 @@ type BookingAppointmentPayload = Omit<Appointment, 'id' | 'status'> & {
   cpf?: string;
   clientId?: string;
   clientObservation?: string;
+  // Ficha do formulário configurável preenchida na reserva (gravada pela API na mesma transação)
+  respostasFicha?: Record<string, ValorResposta>;
 };
 
 export interface BookingModalProps {
@@ -165,6 +167,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const [showAnamnese, setShowAnamnese] = useState(() => Boolean(draft.showAnamnese));
   const [anamneseData, setAnamneseData] = useState<AnamneseData>(() => draft.anamneseData ?? initialAnamnese);
+  const [respostasFicha, setRespostasFicha] = useState<Record<string, ValorResposta>>({});
   // Cliente já cadastrado: abre primeiro a visualização da ficha (o formulário vazio parecia ficha apagada)
   const [verFicha, setVerFicha] = useState(false);
   const clientSearchWrapperRef = useRef<HTMLDivElement | null>(null);
@@ -328,7 +331,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   const { token, currentUser } = useAuth();
   const exigirAnamnese = useCompanyConfig(token).data?.exigirAnamnese === true;
   const clienteEscolhido = clientMode === 'search' ? clients.find((c) => c.id === selectedClientId) : undefined;
-  const clienteTemFicha = Boolean(clienteEscolhido?.temAnamnese) || hasAnamnese(anamneseData);
+  const clienteTemFicha = Boolean(clienteEscolhido?.temAnamnese) || hasAnamnese(anamneseData) || temRespostas(respostasFicha);
   const gerenciaAgenda = currentUser?.role === 'receptionist' || currentUser?.role === 'supervisor' || currentUser?.role === 'admin';
   // Quem grava a ficha: cliente novo, quem tem acesso à saúde, ou a recepção no balcão (sem ver o histórico anterior)
   const podeEditarFicha = !clienteEscolhido || clienteEscolhido.acessoSaude === true || gerenciaAgenda || (exigirAnamnese && !clienteEscolhido.temAnamnese);
@@ -346,6 +349,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     setBookCpf('');
     setBookClientObservation('');
     setAnamneseData(initialAnamnese);
+    setRespostasFicha({});
   };
 
   const selectClient = (client: Client) => {
@@ -410,6 +414,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       } else {
         setBookClientObservation('');
         setAnamneseData(initialAnamnese);
+        setRespostasFicha({});
       }
       setClientSearchTerm('');
       setIsClientSearchOpen(false);
@@ -477,11 +482,11 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
     if (exigirAnamnese && !clienteTemFicha) {
       setErrorMessage(MENSAGEM_ANAMNESE_OBRIGATORIA);
-      setShowAnamnese(true);
+      if (fichaAsCegas) setFichaRecepcao(true); else setShowAnamnese(true);
       return;
     }
 
-    const finalDetails = showAnamnese ? `${bookDetails}${formatAnamnese(anamneseData)}`.trim() : bookDetails;
+    const finalDetails = bookDetails;
     const payloadObservation = formatAnamneseStorage(bookClientObservation, anamneseData);
 
     // Só reaproveita o cliente escolhido na busca; nomes iguais podem ser pessoas diferentes.
@@ -501,6 +506,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
         cpf: bookCpf,
         clientId: selectedClient?.id,
         clientObservation: payloadObservation,
+        ...(temRespostas(respostasFicha) ? { respostasFicha } : {}),
       });
 
       if (success !== false) {
@@ -528,7 +534,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
   const hasUnsavedChanges = Boolean(
     bookName.trim() || bookPhone || bookCpf || bookService.length > 0 || bookDetails.trim()
-    || bookClientObservation.trim() || selectedClientId || JSON.stringify(anamneseData) !== JSON.stringify(initialAnamnese),
+    || bookClientObservation.trim() || selectedClientId || JSON.stringify(anamneseData) !== JSON.stringify(initialAnamnese) || temRespostas(respostasFicha),
   );
 
   // Fechar de propósito descarta o rascunho; ele só sobrevive a recarregar a página ou à sessão expirar
@@ -661,7 +667,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
                 className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm"
                 placeholder="Nome completo"
               />
-              {bookName.trim() && <p className="mt-1"><AvisoCliente naoCadastrado semFicha={!hasAnamnese(anamneseData)} /></p>}
+              {bookName.trim() && <p className="mt-1"><AvisoCliente naoCadastrado semFicha={!hasAnamnese(anamneseData) && !temRespostas(respostasFicha)} /></p>}
             </div>
           ) : (
             <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3 flex items-center justify-between gap-3">
@@ -756,14 +762,9 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
         <FichaRecepcaoModal clienteId={clienteEscolhido.id} nome={clienteEscolhido.nome} onClose={() => setFichaRecepcao(false)} />
       )}
       {showAnamnese && (
-        <AnamneseForm
-          data={anamneseData}
-          onChange={setAnamneseData}
-          onClose={() => setShowAnamnese(false)}
-          declaracoesTotem={linhasDoTotem(bookClientObservation)}
-          fichaRestrita={Boolean(clienteEscolhido && fichaOculta(clienteEscolhido)) && !hasAnamnese(anamneseData)}
-        />
+        <FichaRecepcaoModal nome={bookName} valoresIniciais={respostasFicha} onConfirmar={setRespostasFicha} onClose={() => setShowAnamnese(false)} />
       )}
+
     </>
   );
 }

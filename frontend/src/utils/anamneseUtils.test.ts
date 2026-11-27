@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MARCADOR_ANAMNESE, aparaObservacao, atualizarSomenteFichaJson, fichaPreenchida, forjaFichaDoTotem, separarFicha, temFichaAnamnese } from '@shared/anamnese';
 import { fichaOculta, formatAnamneseStorage, parseClientObservation } from './anamneseUtils';
-import { initialAnamnese } from '../components/AnamneseForm';
+import { initialAnamnese } from './anamneseUtils';
 
 describe('parseClientObservation', () => {
   const totem = '[Anamnese Autoatendimento 2026-11-01]: alergia a lavanda';

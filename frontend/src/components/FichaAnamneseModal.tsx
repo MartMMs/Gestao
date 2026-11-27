@@ -18,7 +18,7 @@ interface Props {
   podeEditarFormulario?: boolean;
 }
 
-// Visualização da ficha de anamnese (lista de clientes e agendamento); editar abre o AnamneseForm de quem chamou
+// Visualização da ficha de anamnese (lista de clientes e agendamento); editar abre a ficha nova de quem chamou
 export function FichaAnamneseModal({ nome, observacao, restrita = false, exigirAnamnese, onEditar, onClose, clienteId, podeEditarFormulario = false }: Props) {
   useModal(true, onClose);
   const tituloId = useId();

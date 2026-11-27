@@ -11,6 +11,7 @@ import { atendimentoSobrepostoDoCliente, avisoDeHabilidade, validarDisponibilida
 import { buscarServicosPorNome } from '../services/servicoService';
 import { erroNomeCliente, limparTexto } from '../../shared/clientes';
 import { getEmpresaConfig } from '../services/configService';
+import { gravarFichaNoAto } from '../services/formularioService';
 import {
   CODIGO_ANAMNESE_OBRIGATORIA,
   MENSAGEM_ANAMNESE_OBRIGATORIA,
@@ -452,7 +453,9 @@ export function createAgendamentosRouter(notificar: Notificar) {
         if (indisponivel) throw new HttpError(indisponivel.status, indisponivel.erro);
 
         let cliente = await resolverCliente(tx, req, req.body, { acessoSaude, exigirAnamnese });
-        if (exigirAnamnese) cliente = await garantirFichaAnamnese(tx, req, cliente, req.body.clientObservation, acessoSaude);
+        // Ficha do formulário configurável enviada com a reserva (cliente novo no ato ou recepção no balcão)
+        const gravouFicha = await gravarFichaNoAto(tx, req, cliente, req.body.respostasFicha);
+        if (exigirAnamnese && !gravouFicha) cliente = await garantirFichaAnamnese(tx, req, cliente, req.body.clientObservation, acessoSaude);
         await conflitoDoCliente(tx, cliente.id, inicio, duracaoTotal(servicos));
         return tx.agendamento.create({
           data: {

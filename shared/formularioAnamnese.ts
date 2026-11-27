@@ -272,3 +272,16 @@ export const errosDoCampo = (campo: CampoDoEditor): string[] => {
   }
   return erros;
 };
+
+/**
+ * Ficha enviada junto com um cadastro ou agendamento: a recepção grava às cegas só as perguntas do totem/ambos
+ * (canal 'recepcao'); o resto da equipe grava as da equipe. Sem resposta, null (não cria ficha vazia).
+ */
+export const fichaDoAto = (campos: CampoFormulario[], respostas: unknown, papel: string | undefined) => {
+  if (!respostas || typeof respostas !== 'object' || Object.keys(respostas).length === 0) return null;
+  const recepcao = papel === 'receptionist';
+  const { itens, erro } = lerRespostas(campos, respostas, recepcao ? 'totem' : 'profissional');
+  if (erro) return { erro };
+  if (itens.length === 0) return null;
+  return { itens, canal: recepcao ? 'recepcao' as const : 'profissional' as const, canalSnapshot: recepcao ? 'totem' as const : 'profissional' as const };
+};

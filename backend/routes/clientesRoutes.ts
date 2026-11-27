@@ -16,6 +16,7 @@ import {
   temFichaAnamnese,
 } from '../../shared/anamnese';
 import { getEmpresaConfig } from '../services/configService';
+import { gravarFichaNoAto } from '../services/formularioService';
 import { formatarDataHoraBR as formatarDataHora } from '../../shared/datasBR';
 import { MAX_LINHAS_IMPORTACAO, MENSAGEM_EMAIL_INVALIDO, emailValido, erroNomeCliente, lerCliente, limparTexto, validarImportacao, type DadosCliente } from '../../shared/clientes';
 import { LIMITE_OBSERVACAO, MENSAGEM_CPF_INVALIDO, MENSAGEM_TELEFONE_INVALIDO, apenasDigitos, cpfValido, normalizarNome, normalizarTelefone, normalizarTexto, telefoneValido, valorMascarado } from '../../shared/validadores';
@@ -82,13 +83,18 @@ export function createClientesRouter(notificar: Notificar) {
 
   // Grava clientes já validados, todos ou nenhum. Pega as travas de nome e de CPF antes de reler a base (outro
   // cadastro pode ter entrado depois da validação), em ordem fixa para dois envios simultâneos não se cruzarem
-  const gravarClientes = (lista: Array<DadosCliente & { naoReceberWhatsapp?: boolean }>, observacao: string | null = null) => transacaoComTravas(async (tx) => {
+  const gravarClientes = (
+    lista: Array<DadosCliente & { naoReceberWhatsapp?: boolean }>, observacao: string | null = null,
+    depois?: (tx: Prisma.TransactionClient, criados: Array<{ id: string; codigo: number | null }>) => Promise<void>,
+  ) => transacaoComTravas(async (tx) => {
     for (const nome of [...new Set(lista.map((d) => normalizarNome(d.nome)))].sort()) await travarNomeCliente(tx, nome);
     for (const cpf of [...new Set(lista.flatMap((d) => (d.cpf ? [d.cpf] : [])))].sort()) await travarChave(tx, `cliente-cpf:${cpf}`);
     const existentes = await tx.cliente.findMany({ where: { removidoEm: null }, select: { nome: true, cpf: true, codigo: true } });
     const { erros } = validarImportacao(lista, existentes);
     if (erros.length) throw new HttpError(409, erros[0].mensagem);
-    return tx.cliente.createManyAndReturn({ data: lista.map((d) => ({ ...d, observacao })) });
+    const criados = await tx.cliente.createManyAndReturn({ data: lista.map((d) => ({ ...d, observacao })) });
+    if (depois) await depois(tx, criados);
+    return criados;
   });
 
   // Cadastro manual: supervisão, admin e recepção (colaborador não cadastra direto na base)
@@ -101,10 +107,13 @@ export function createClientesRouter(notificar: Notificar) {
       if (erros.length) return res.status(400).json({ erro: erros[0].mensagem, erros });
       const observacao = typeof req.body?.observacao === 'string' ? req.body.observacao.slice(0, LIMITE_OBSERVACAO) : '';
       if (forjaFichaDoTotem(observacao, null)) return res.status(400).json({ erro: MENSAGEM_FICHA_TOTEM_RESERVADA });
-      if ((await getEmpresaConfig()).exigirAnamnese && !temFichaAnamnese(observacao)) {
-        return res.status(400).json({ erro: MENSAGEM_ANAMNESE_OBRIGATORIA, code: CODIGO_ANAMNESE_OBRIGATORIA });
-      }
-      const [criado] = await gravarClientes([{ ...dados, naoReceberWhatsapp: req.body?.naoReceberWhatsapp === true }], observacao || null);
+      const exigir = (await getEmpresaConfig()).exigirAnamnese && !temFichaAnamnese(observacao);
+      // Ficha do formulário configurável na mesma transação: sem ela (quando exigida), o cliente não é criado
+      const [criado] = await gravarClientes([{ ...dados, naoReceberWhatsapp: req.body?.naoReceberWhatsapp === true }], observacao || null, async (tx, [novo]) => {
+        if (!(await gravarFichaNoAto(tx, req, novo, req.body?.respostasFicha)) && exigir) {
+          throw new HttpError(400, MENSAGEM_ANAMNESE_OBRIGATORIA, CODIGO_ANAMNESE_OBRIGATORIA);
+        }
+      });
       notificar();
       res.status(201).json(usuarioEhSupervisor(req) ? criado : prepararCliente(criado, req, false));
     } catch (error) {

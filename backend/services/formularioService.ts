@@ -1,7 +1,11 @@
 import type { Prisma, CampoFormulario as CampoDb } from '@prisma/client';
 import { prisma } from '../db';
 import { transacaoComTravas, travarChave } from '../lib/transacao';
-import { presetDoSegmento, type CampoFormulario, type TipoCampo, type CanalCampo } from '../../shared/formularioAnamnese';
+import type { Request } from 'express';
+import { getUsuario } from '../auth';
+import { HttpError } from '../lib/http';
+import { registrarAuditoria } from '../lib/auditoria';
+import { alertasDe, fichaDoAto, montarSnapshot, presetDoSegmento, type CampoFormulario, type TipoCampo, type CanalCampo } from '../../shared/formularioAnamnese';
 import { getEmpresaConfig } from './configService';
 
 // Mesma trava em toda escrita do formulário (editor, preset e a criação inicial)
@@ -42,4 +46,21 @@ export const lerCampos = async (db: Db) => {
     db.configuracaoEmpresa.findUnique({ where: { id: 'default' }, select: { formularioVersao: true } }),
   ]);
   return { campos: campos.map(paraCampo), versao: config?.formularioVersao ?? 0 };
+};
+
+/** Grava, na transação do cadastro/agendamento, a ficha enviada junto (true se gravou). Erro de validação vira 400. */
+export const gravarFichaNoAto = async (tx: Prisma.TransactionClient, req: Request, cliente: { id: string; codigo?: number | null }, respostas: unknown) => {
+  const { campos, versao } = await lerCampos(tx);
+  const ficha = fichaDoAto(campos, respostas, getUsuario(req)?.papel);
+  if (!ficha) return false;
+  if ('erro' in ficha) throw new HttpError(400, ficha.erro!);
+  await tx.fichaPreenchida.create({
+    data: {
+      clienteId: cliente.id, canal: ficha.canal, versaoFormulario: versao, snapshot: montarSnapshot(ficha.itens, versao, ficha.canalSnapshot),
+      alertas: alertasDe(ficha.itens), preenchidoPorId: getUsuario(req)?.id ?? null,
+    },
+  });
+  // Só o fato (sem as respostas): o histórico de alterações não guarda dado de saúde
+  await registrarAuditoria(req, { acao: 'cliente.anamnese', alvo: `Cliente #${cliente.codigo ?? ''}`, antes: { fichaFormulario: null }, depois: { fichaFormulario: `versão ${versao}` }, tx });
+  return true;
 };

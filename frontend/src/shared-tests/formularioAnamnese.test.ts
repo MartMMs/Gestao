@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  alertasDe, editarOpcoes, errosDoCampo, formularioPublico, mudarTipoCampo, lerRespostas, lerSnapshot, montarSnapshot, presetDoSegmento, resumoTexto,
+  alertasDe, editarOpcoes, fichaDoAto, errosDoCampo, formularioPublico, mudarTipoCampo, lerRespostas, lerSnapshot, montarSnapshot, presetDoSegmento, resumoTexto,
   validarCampos, type CampoFormulario,
 } from '@shared/formularioAnamnese';
 import { separarFicha, temFichaAnamnese, MARCADOR_ANAMNESE } from '@shared/anamnese';
@@ -152,5 +152,29 @@ describe('ficha às cegas da recepção (mesmas regras do totem)', () => {
     expect(itens.map((i) => i.campoId)).toEqual(['g']);
     expect(alertasDe(itens)).toEqual(['Gestante']);
     expect(lerRespostas(campos, {}, 'totem').erro).toBe('Responda: Gestante');
+  });
+});
+
+describe('ficha enviada no cadastro / reserva de cliente novo', () => {
+  const campos = [
+    campo({ id: 'g', chave: 'g', rotulo: 'Gestante', tipo: 'sim_nao', respostasAlerta: ['Sim'], ordem: 0 }),
+    campo({ id: 'p', chave: 'p', rotulo: 'Nota do profissional', tipo: 'texto_livre', canal: 'apenas_profissional', ordem: 1 }),
+    campo({ id: 'pr', chave: 'pr', rotulo: 'Obrigatória do profissional', tipo: 'texto_livre', canal: 'apenas_profissional', obrigatorio: true, ordem: 2 }),
+  ];
+  it('sem respostas não cria ficha vazia', () => {
+    expect(fichaDoAto(campos, undefined, 'receptionist')).toBeNull();
+    expect(fichaDoAto(campos, {}, 'supervisor')).toBeNull();
+  });
+  it('recepção: canal recepcao, descarta campo do profissional, obrigatória dele não bloqueia, alerta calculado', () => {
+    const f = fichaDoAto(campos, { g: 'Sim', p: 'injetado' }, 'receptionist');
+    expect(f && 'itens' in f && f.canal).toBe('recepcao');
+    expect(f && 'itens' in f && f.itens!.map((i) => i.campoId)).toEqual(['g']);
+    expect(f && 'itens' in f && alertasDe(f.itens!)).toEqual(['Gestante']);
+  });
+  it('supervisão/profissional: canal profissional, grava a seção do profissional e cobra a obrigatória dela', () => {
+    expect(fichaDoAto(campos, { g: 'Não' }, 'supervisor')).toEqual({ erro: 'Responda: Obrigatória do profissional' });
+    const f = fichaDoAto(campos, { g: 'Não', p: 'ok', pr: 'ok' }, 'collaborator');
+    expect(f && 'itens' in f && f.canal).toBe('profissional');
+    expect(f && 'itens' in f && f.itens!.map((i) => i.campoId)).toEqual(['g', 'p', 'pr']);
   });
 });

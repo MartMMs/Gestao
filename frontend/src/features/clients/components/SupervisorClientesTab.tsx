@@ -3,9 +3,7 @@ import React, { useState } from 'react';
 import { normalizarTexto } from '@shared/validadores';
 import { motion } from 'motion/react';
 import { Appointment, Client, Service } from '../../../types';
-import { AnamneseForm, AnamneseData } from '../../../components/AnamneseForm';
-import { fichaOculta, formatAnamneseStorage, parseClientObservation } from '../../../utils/anamneseUtils';
-import { linhasDoTotem } from '@shared/anamnese';
+import { fichaOculta, formatAnamneseStorage, parseClientObservation, type AnamneseData } from '../../../utils/anamneseUtils';
 import { useSearch } from '../../../hooks/useSearch';
 import { confirmarSaida, useAlterado, useModal } from '../../../hooks/useModal';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
@@ -48,7 +46,6 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
   // Só o id: a ficha aberta acompanha a lista quando ela recarrega (alteração feita em outro aparelho)
   const [fichaClientId, setFichaClientId] = useState<string | null>(null);
   const [fichaRecepcao, setFichaRecepcao] = useState<{ id: string; nome: string } | null>(null);
-  const [editingAnamneseClient, setEditingAnamneseClient] = useState<{ id: string; name: string; note: string; data: AnamneseData; restrita?: boolean } | null>(null);
   const [historyClient, setHistoryClient] = useState<Client | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | '7days' | 'month'>('all');
   const [abertoNovo, setAbertoNovo] = useState(false);
@@ -206,27 +203,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
     }
   };
 
-  const handleSaveAnamnese = async () => {
-    // Duplo clique em "Concluir" mandava dois PUT
-    if (isSaving) return;
-    if (!editingAnamneseClient || !onEditClient) {
-      setEditingAnamneseClient(null);
-      return;
-    }
 
-    const finalObservation = formatAnamneseStorage(editingAnamneseClient.note, editingAnamneseClient.data);
-    setIsSaving(true);
-    try {
-      const resultado = await onEditClient(editingAnamneseClient.id, { observacao: finalObservation });
-      if (resultado === false) throw new Error('Não foi possível salvar a anamnese.');
-      mostrarMensagem('Ficha de anamnese atualizada!');
-      setEditingAnamneseClient(null);
-    } catch (error) {
-      mostrarMensagem(mensagemDeErro(error, 'Não foi possível salvar a anamnese.'));
-    } finally {
-      setIsSaving(false);
-    }
-  };
 
   // Uma função de fechar (X, clique fora e Esc): não fecha durante o envio e pergunta se algo mudou
   const edicaoAlterada = useAlterado(!!editingClient, [editingClient, editingClientNote, editingClientAlergias, editingClientPreferencias]);
@@ -510,12 +487,8 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
           clienteId={fichaClient.acessoSaude ? fichaClient.id : null}
           podeEditarFormulario={fichaClient.acessoSaude === true}
           // Supervisão/profissional autorizado ou recepção (atualização cega no balcão)
-          onEditar={ehRecepcao && !fichaClient.acessoSaude ? () => { setFichaRecepcao({ id: fichaClient.id, nome: fichaClient.nome }); setFichaClientId(null); }
-            : onEditClient && fichaClient.acessoSaude ? () => {
-            const parsed = parseClientObservation(fichaClient.observacao);
-            setEditingAnamneseClient({ id: fichaClient.id, name: fichaClient.nome, note: parsed.note, data: parsed.anamData, restrita: fichaOculta(fichaClient) });
-            setFichaClientId(null);
-          } : undefined}
+          // Recepção grava ficha nova às cegas; quem vê a saúde edita pelo formulário dentro do resumo
+          onEditar={ehRecepcao && !fichaClient.acessoSaude ? () => { setFichaRecepcao({ id: fichaClient.id, nome: fichaClient.nome }); setFichaClientId(null); } : undefined}
           onClose={() => setFichaClientId(null)}
         />
       )}
@@ -525,17 +498,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
           onSalvo={() => mostrarMensagem('Ficha registrada.')} />
       )}
 
-      {editingAnamneseClient && (
-        <AnamneseForm
-          data={editingAnamneseClient.data}
-          onChange={(data) => setEditingAnamneseClient(prev => (prev ? { ...prev, data } : prev))}
-          onClose={handleSaveAnamnese}
-          onCancel={() => setEditingAnamneseClient(null)}
-          salvando={isSaving}
-          declaracoesTotem={linhasDoTotem(editingAnamneseClient.note)}
-          fichaRestrita={editingAnamneseClient.restrita}
-        />
-      )}
+
 
       {historyClient && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

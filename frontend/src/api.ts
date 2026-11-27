@@ -952,7 +952,7 @@ export const useClients = (token: string | null) => useQuery<Client[]>({
   enabled: !!token,
 });
 
-export type NovoCliente = { nome: string; telefone?: string; cpf?: string; email?: string; observacao?: string; naoReceberWhatsapp?: boolean };
+export type NovoCliente = { nome: string; telefone?: string; cpf?: string; email?: string; observacao?: string; naoReceberWhatsapp?: boolean; respostasFicha?: Record<string, ValorResposta> };
 export type PreviaImportacao = { total: number; validos: number; erros: { linha: number; mensagem: string }[]; ignoradas?: number; importados?: number };
 
 export const useCreateClient = (token: string | null) => {

@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext, type Page, type Locator } from '@playwright/test';
 import { codigoReserva } from '../shared/codigoReserva';
-import { CONTAS, apagarClienteDeTeste, apiBase, authHeaders, loginPelaTela, nomeClienteTeste, reservarHorarioNoTotem } from './credenciais';
+import { CONTAS, apagarClienteDeTeste, apiBase, authHeaders, diaFuturo, loginPelaTela, nomeClienteTeste, reservarHorarioNoTotem } from './credenciais';
 
 // Formulário de anamnese configurável (Personalizar formulário). Global: muda as perguntas do totem para todos os
 // testes, por isso roda em série depois dos outros e, no fim, devolve o formulário como estava (as perguntas criadas
@@ -328,6 +328,92 @@ test.describe('Formulário de anamnese configurável', () => {
       expect(Object.keys(await r.json()).sort()).toEqual(['id', 'preenchidoEm']);
       const fichas = JSON.stringify(await (await request.get(`${apiBase()}/clientes/${id}/fichas`, { headers: sup })).json());
       expect(fichas).not.toContain('forjado');
+    } finally {
+      await apagarClienteDeTeste(request, nome);
+    }
+  });
+
+  test('cenário 6: recepção cadastra cliente novo com a ficha dinâmica; supervisão vê a ficha e o alerta', async ({ page, request }) => {
+    test.setTimeout(150_000);
+    const sup = await authHeaders(request, CONTAS.supervisor);
+    const nome = nomeClienteTeste('Novo Dinamico');
+    try {
+      await page.goto('/');
+      await loginPelaTela(page, CONTAS.recepcao);
+      await page.getByRole('button', { name: 'Clientes', exact: true }).click();
+      await page.getByRole('button', { name: 'Novo cliente' }).click();
+      const novo = page.getByRole('dialog', { name: 'Novo cliente' });
+      await novo.getByLabel('Nome completo').fill(nome);
+      await novo.getByRole('button', { name: 'Preencher ficha' }).click();
+      const ficha = page.getByRole('dialog', { name: 'Nova ficha de anamnese' });
+      await expect(ficha.getByText(/Por privacidade \(LGPD\)/)).toBeVisible();
+      await expect(ficha.getByText(PROF)).toHaveCount(0);
+      await ficha.getByRole('button', { name: `${OBRIGATORIA}: Não` }).click();
+      await ficha.getByRole('button', { name: `${MULTIPLA}: ${OPCAO_ALERTA}` }).click();
+      await ficha.getByRole('button', { name: 'Concluir ficha' }).click();
+      await expect(ficha).toBeHidden();
+      await expect(novo).toContainText('preenchida');
+      await novo.getByRole('button', { name: 'Cadastrar' }).click();
+      await expect(novo).toBeHidden();
+      await page.getByLabel('Buscar cliente').fill(nome);
+      const linha = page.getByRole('row', { name: new RegExp(nome) });
+      await expect(linha).toBeVisible();
+      await expect(linha.getByText('Sem ficha')).toHaveCount(0);
+      await expect(linha.getByRole('note', { name: /Alerta clínico/ })).toHaveCount(0);
+
+      const lista = (await (await request.get(`${apiBase()}/clientes`, { headers: sup })).json()) as Array<{ id: string; nome: string; alertasClinicos?: string[] }>;
+      const c = lista.find((x) => x.nome === nome)!;
+      expect(c.alertasClinicos).toContain(MULTIPLA);
+      const fichas = (await (await request.get(`${apiBase()}/clientes/${c.id}/fichas`, { headers: sup })).json()) as Array<{ canal: string }>;
+      expect(fichas[0]?.canal).toBe('recepcao');
+    } finally {
+      await apagarClienteDeTeste(request, nome);
+    }
+  });
+
+  test('cenário 7: reserva para cliente sem cadastro usa a ficha dinâmica (sem campos fixos antigos)', async ({ page, request }) => {
+    test.setTimeout(150_000);
+    const sup = await authHeaders(request, CONTAS.supervisor);
+    const nome = nomeClienteTeste('Reserva Dinamica');
+    try {
+      await page.goto('/');
+      await loginPelaTela(page, CONTAS.recepcao);
+      await page.getByRole('button', { name: /Nova Reserva/i }).click();
+      const modal = page.getByRole('dialog', { name: /Novo Agendamento/i });
+      await modal.getByRole('button', { name: /Novo Cliente/i }).click();
+      await modal.getByPlaceholder('Nome completo').fill(nome);
+      await modal.getByRole('button', { name: /\+ Ficha do Cliente/ }).click();
+      const ficha = page.getByRole('dialog', { name: 'Nova ficha de anamnese' });
+      await expect(ficha.getByText(MULTIPLA)).toBeVisible();
+      await expect(ficha.getByText(PROF)).toHaveCount(0);
+      await expect(ficha.getByText(/Marcapasso|Profissão/)).toHaveCount(0);
+      await ficha.getByRole('button', { name: `${OBRIGATORIA}: Sim` }).click();
+      await ficha.getByRole('button', { name: 'Concluir ficha' }).click();
+      await expect(ficha).toBeHidden();
+
+      let salvo = false;
+      for (const d of [40, 41, 42, 43]) {
+        await modal.locator('input[type="date"]').first().fill(diaFuturo(d));
+        const servico = modal.getByRole('button', { name: /E2E Massagem/ }).first();
+        if (!(await servico.textContent())?.includes('Selecionado')) await servico.click();
+        const profissional = modal.locator('select').first();
+        if ((await profissional.locator('option:not([disabled])').count()) && !(await profissional.inputValue())) await profissional.selectOption({ index: 1 });
+        for (const h of ['09:00', '11:00', '14:00', '16:00']) {
+          await modal.locator('input[type="time"]').first().fill(h);
+          await modal.getByRole('button', { name: /Confirmar Agendamento/i }).click();
+          try { await expect(modal).toBeHidden({ timeout: 5_000 }); salvo = true; break; } catch {
+            const entendi = page.getByRole('button', { name: /Entendi/i });
+            if (await entendi.count()) await entendi.first().click();
+          }
+        }
+        if (salvo) break;
+      }
+      expect(salvo, 'agendamento não salvo').toBe(true);
+      const c = ((await (await request.get(`${apiBase()}/clientes`, { headers: sup })).json()) as Array<{ id: string; nome: string; temAnamnese: boolean }>).find((x) => x.nome === nome)!;
+      expect(c.temAnamnese).toBe(true);
+      const fichas = (await (await request.get(`${apiBase()}/clientes/${c.id}/fichas`, { headers: sup })).json()) as Array<{ canal: string; snapshot: unknown }>;
+      expect(fichas[0]?.canal).toBe('recepcao');
+      expect(JSON.stringify(fichas[0]?.snapshot)).toContain(OBRIGATORIA);
     } finally {
       await apagarClienteDeTeste(request, nome);
     }

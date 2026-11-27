@@ -8,16 +8,11 @@ vi.mock('../../AuthContext', () => ({ useAuth: () => ({ token: 't' }) }));
 vi.mock('../../api', () => ({ useCompanyConfig: () => ({ data: { segmento: segmentoAtual } }) }));
 
 const { StepIdentification } = await import('./components/StepIdentification');
-const { AnamneseForm, initialAnamnese } = await import('../../components/AnamneseForm');
 const { CamposDinamicos } = await import('../../components/CamposDinamicos');
 const { presetDoSegmento, paraPublico } = await import('@shared/formularioAnamnese');
 
 const totem = (segmento?: string) => renderToStaticMarkup(
   <StepIdentification reservation={{} as never} segmento={segmento} nomeEmpresa="Empresa X" onSubmit={() => {}} onBack={() => {}} />);
-const ficha = (segmento?: string) => {
-  segmentoAtual = segmento;
-  return renderToStaticMarkup(<AnamneseForm data={initialAnamnese} onChange={() => {}} onClose={() => {}} />);
-};
 
 // O totem agora mostra o formulário configurável. Na primeira vez ele nasce do modelo do segmento
 // (shared/formularioAnamnese.ts), que repete as perguntas que o totem sempre fez
@@ -50,31 +45,7 @@ describe('totem: modelo inicial por segmento', () => {
 });
 
 describe('sem segmento (a configuração não carregou)', () => {
-  it('totem e ficha mostram tudo, em vez de esconder as perguntas de saúde de uma clínica', () => {
+  it('totem mostra tudo, em vez de esconder as perguntas de saúde de uma clínica', () => {
     expect(totem(undefined)).toContain('informações de saúde acima');
-    const f = ficha(undefined);
-    expect(f).toContain('Marcapasso');
-    expect(f).toContain('Preferências do Tratamento');
-  });
-});
-
-describe('ficha interna por segmento', () => {
-  it('clínica: perguntas de saúde, sem preferências de spa', () => {
-    const h = ficha('clinica_saude');
-    expect(h).toContain('Marcapasso');
-    expect(h).toContain('Está grávida?');
-    expect(h).not.toContain('Preferências do Tratamento');
-  });
-  it('spa: tudo', () => {
-    const h = ficha('spa_bemestar');
-    expect(h).toContain('Marcapasso');
-    expect(h).toContain('Preferências do Tratamento');
-  });
-  it('geral: só as gerais (como no totem)', () => {
-    const h = ficha('geral');
-    expect(h).not.toContain('Marcapasso');
-    expect(h).not.toContain('Está grávida?');
-    expect(h).not.toContain('Preferências do Tratamento');
-    expect(h).toContain('Tem alguma alergia?');
   });
 });

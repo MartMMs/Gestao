@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { ModalFormulario } from '../../../components/ModalFormulario';
 import { useAuth } from '../../../AuthContext';
 import { useCompanyConfig, useCreateClient } from '../../../api';
-import { AnamneseForm, initialAnamnese, type AnamneseData } from '../../../components/AnamneseForm';
-import { formatAnamneseStorage, hasAnamnese } from '../../../utils/anamneseUtils';
+import { FichaRecepcaoModal, temRespostas } from '../../../components/FichaRecepcaoModal';
+import type { ValorResposta } from '@shared/formularioAnamnese';
 import { formatCpf, formatPhone } from '../../../utils/formatters';
 import { lerCliente } from '@shared/clientes';
 import { MENSAGEM_ANAMNESE_OBRIGATORIA } from '@shared/anamnese';
@@ -18,9 +18,9 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
   const [erro, setErro] = useState<string | null>(null);
   const { data: empresa } = useCompanyConfig(token);
   const exigirAnamnese = empresa?.exigirAnamnese === true;
-  const [ficha, setFicha] = useState<AnamneseData>(initialAnamnese);
+  const [ficha, setFicha] = useState<Record<string, ValorResposta>>({});
   const [fichaAberta, setFichaAberta] = useState(false);
-  const fichaPreenchida = hasAnamnese(ficha);
+  const fichaPreenchida = temRespostas(ficha);
   const alterar = (campo: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const valor = campo === 'telefone' ? formatPhone(e.target.value) : campo === 'cpf' ? formatCpf(e.target.value) : e.target.value;
     setForm((atual) => ({ ...atual, [campo]: valor }));
@@ -37,7 +37,7 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
       return;
     }
     try {
-      const criado = await criar({ ...form, naoReceberWhatsapp, ...(fichaPreenchida ? { observacao: formatAnamneseStorage('', ficha) } : {}) });
+      const criado = await criar({ ...form, naoReceberWhatsapp, ...(fichaPreenchida ? { respostasFicha: ficha } : {}) });
       setToastMessage?.(`Cliente ${criado.nome} cadastrado${criado.codigo ? ` (#${criado.codigo})` : ''}.`);
       onClose();
     } catch (error) {
@@ -92,7 +92,7 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
       {erro && <p role="alert" className="text-sm text-error">{erro}</p>}
     </ModalFormulario>
     {/* Fora do <form> do cadastro: Enter num campo da ficha não envia o cadastro */}
-    {fichaAberta && <AnamneseForm data={ficha} onChange={setFicha} onClose={() => setFichaAberta(false)} />}
+    {fichaAberta && <FichaRecepcaoModal nome={form.nome} valoresIniciais={ficha} onConfirmar={setFicha} onClose={() => setFichaAberta(false)} />}
     </>
   );
 }
