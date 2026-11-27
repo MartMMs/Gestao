@@ -110,7 +110,7 @@ export function createClientesRouter(notificar: Notificar) {
       const exigir = (await getEmpresaConfig()).exigirAnamnese && !temFichaAnamnese(observacao);
       // Ficha do formulário configurável na mesma transação: sem ela (quando exigida), o cliente não é criado
       const [criado] = await gravarClientes([{ ...dados, naoReceberWhatsapp: req.body?.naoReceberWhatsapp === true }], observacao || null, async (tx, [novo]) => {
-        if (!(await gravarFichaNoAto(tx, req, novo, req.body?.respostasFicha)) && exigir) {
+        if ((await gravarFichaNoAto(tx, req, novo, req.body?.respostasFicha)) === 'sem_ficha' && exigir) {
           throw new HttpError(400, MENSAGEM_ANAMNESE_OBRIGATORIA, CODIGO_ANAMNESE_OBRIGATORIA);
         }
       });

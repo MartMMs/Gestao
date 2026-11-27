@@ -63,6 +63,21 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
   branca dos campos dele (`GET /api/autoatendimento/formulario`); o selo de alerta aparece no Perfil Clinico e no
   atendimento. A ficha antiga continua lida e os campos com correspondencia (gestante, alergia, pressao...) seguem
   preenchidos.
+- **Ficha nova em todo lugar (formulario configuravel):** cadastro de cliente novo, reserva (cliente novo ou ja
+  cadastrado) e "Atualizar ficha" da lista de clientes usam as mesmas perguntas configuradas; o formulario fixo antigo
+  saiu da tela (a ficha antiga fica so para leitura em "Ficha anterior (legado)"). A ficha vai junto com o cadastro ou
+  a reserva e e gravada na mesma transacao (`respostasFicha` em `POST /api/clientes` e `POST /api/agendamentos`):
+  resposta invalida recusa tudo (400) e nada fica pela metade. O rascunho da reserva guarda as respostas.
+- **Recepcao as cegas (LGPD):** a recepcao so recebe as perguntas "ambos" e "so totem"
+  (`GET /api/formulario-anamnese/recepcao`, sem regras de alerta) e grava sem ler de volta
+  (`POST /api/clientes/:id/fichas/recepcao` responde so `{ id, preenchidoEm }`); `GET /api/clientes/:id/fichas` e
+  `GET /api/formulario-anamnese/equipe` continuam 403 para ela. O alerta e calculado no servidor e aparece para a
+  supervisao e o profissional; no historico a ficha aparece como "Recepcao".
+- **Ficha obrigatoria sem perguntas:** com "Exigir ficha de anamnese" ligado e o formulario sem nenhuma pergunta ativa,
+  a ficha deixa de ser cobrada (tela e API); se so faltar pergunta para a recepcao, a tela pede para a supervisao
+  incluir perguntas "Totem" ou "Ambos". Resposta so com espacos conta como nao respondida em todo lugar.
+- **Confirmacao ao fechar:** todo modal com alteracao nao salva pergunta "Descartar alteracoes?" (janela do sistema, nao
+  o aviso do navegador).
 - **Modulo RH:** abas "Escalas & Alocacao" (Grade de Escalas), "Espelho de Ponto & Banco de Horas" (horas previstas
   pela escala, normais ate 44h por semana e extras acima disso) e "Ferias & Afastamentos" (registra o periodo como
   folga com o motivo; protegido contra clique duplo e avisa se o periodo ficar gravado pela metade). Painel
@@ -179,7 +194,8 @@ depois de uma semana sem avisos no console, troque para `Content-Security-Policy
 
 ## Producao: HTTPS e isolamento do totem
 
-O TLS fica no nginx; o Node escuta so em `127.0.0.1:3333`. Modelo pronto em
+O TLS fica no nginx; o Node escuta so em `127.0.0.1:3333` (padrao; dentro de container Docker/Podman usa
+`0.0.0.0`, e `HOST` no `.env` vale sobre os dois). Modelo pronto em
 [docs/nginx-https.conf.example](docs/nginx-https.conf.example): dois sites com o mesmo build, cada um falando com a API
 no proprio endereco (`/api`):
 

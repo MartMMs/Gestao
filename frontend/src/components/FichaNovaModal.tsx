@@ -1,12 +1,10 @@
 import { useState, type FormEvent } from 'react';
-import { paraPublico, type ValorResposta } from '@shared/formularioAnamnese';
+import { obrigatoriaPendente, paraPublico, temRespostas, type ValorResposta } from '@shared/formularioAnamnese';
 import { useAuth } from '../AuthContext';
 import { useFormularioEquipe, useFormularioRecepcao, useSalvarFichaRecepcao } from '../api';
 import { CamposDinamicos } from './CamposDinamicos';
 import { ModalFormulario } from './ModalFormulario';
 
-const vazio = (v: ValorResposta | undefined) => (Array.isArray(v) ? v.length === 0 : !String(v ?? '').trim());
-export const temRespostas = (valores: Record<string, ValorResposta>) => Object.values(valores).some((v) => !vazio(v));
 
 type Props = {
   nome: string;
@@ -23,23 +21,34 @@ type Props = {
  * Ficha nova no formulário configurável. Recepção (LGPD): só as perguntas do totem/ambos, sem ficha anterior nem
  * alerta clínico. Demais papéis: perguntas da equipe, com a seção do profissional.
  */
-export function FichaRecepcaoModal({ nome, onClose, clienteId, onSalvo, valoresIniciais, onConfirmar }: Props) {
+/** Perguntas que quem está logado preenche: recepção, as do balcão (totem/ambos); demais, as da equipe. */
+export function usePerguntasDaFicha() {
   const { token, currentUser } = useAuth();
   const recepcao = currentUser?.role === 'receptionist';
   const doBalcao = useFormularioRecepcao(recepcao ? token : null);
   const daEquipe = useFormularioEquipe(token, !recepcao);
-  const { data, error, isLoading } = recepcao ? doBalcao : daEquipe;
+  const { error, isLoading } = recepcao ? doBalcao : daEquipe;
+  const todos = recepcao ? doBalcao.data?.campos ?? [] : (daEquipe.data?.campos ?? []).map(paraPublico);
+  const doProfissional = new Set(recepcao ? [] : (daEquipe.data?.campos ?? []).filter((c) => c.canal === 'apenas_profissional').map((c) => c.id));
+  return {
+    recepcao, error, isLoading, todos,
+    comuns: todos.filter((c) => !doProfissional.has(c.id)),
+    prof: todos.filter((c) => doProfissional.has(c.id)),
+    // Só o formulário inteiro vazio dispensa a ficha obrigatória (mesma regra da API); a equipe vê "ambos" também
+    semPerguntas: (recepcao ? doBalcao.data : daEquipe.data)?.formularioVazio === true,
+  };
+}
+
+export function FichaNovaModal({ nome, onClose, clienteId, onSalvo, valoresIniciais, onConfirmar }: Props) {
+  const { token } = useAuth();
+  const { recepcao, error, isLoading, todos, comuns, prof } = usePerguntasDaFicha();
   const salvar = useSalvarFichaRecepcao(token);
   const [valores, setValores] = useState<Record<string, ValorResposta>>(valoresIniciais ?? {});
   const [erro, setErro] = useState<string | null>(null);
-  const todos = recepcao ? doBalcao.data?.campos ?? [] : (daEquipe.data?.campos ?? []).map(paraPublico);
-  const doProfissional = new Set(recepcao ? [] : (daEquipe.data?.campos ?? []).filter((c) => c.canal === 'apenas_profissional').map((c) => c.id));
-  const comuns = todos.filter((c) => !doProfissional.has(c.id));
-  const prof = todos.filter((c) => doProfissional.has(c.id));
 
   const enviar = async (e: FormEvent) => {
     e.preventDefault();
-    const faltando = todos.find((c) => c.obrigatorio && vazio(valores[c.id]));
+    const faltando = obrigatoriaPendente(todos, valores);
     if (faltando) { setErro(`Responda: ${faltando.rotulo}`); return; }
     if (onConfirmar) { onConfirmar(valores); onClose(); return; }
     try {
@@ -66,7 +75,7 @@ export function FichaRecepcaoModal({ nome, onClose, clienteId, onSalvo, valoresI
     >
       {isLoading ? <p className="text-sm text-on-surface-variant">Carregando perguntas...</p>
         : error ? <p role="alert" className="text-sm text-error">{(error as Error).message}</p>
-        : todos.length === 0 ? <p className="text-sm text-on-surface-variant">A empresa ainda não configurou perguntas na ficha.</p>
+        : todos.length === 0 ? <p className="text-sm text-on-surface-variant">{recepcao ? 'Não há perguntas da ficha para a recepção. Peça à supervisão para incluir perguntas "Totem" ou "Ambos".' : 'A empresa ainda não configurou perguntas na ficha.'}</p>
         : (
           <>
             <CamposDinamicos idBase="ficha-nova" campos={comuns} valores={valores} onChange={mudar} />

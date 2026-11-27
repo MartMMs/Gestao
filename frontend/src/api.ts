@@ -992,7 +992,7 @@ export const useDeleteClient = (token: string | null) => {
 // =======================
 // FORMULÁRIO DE ANAMNESE (configurável) E FICHAS PREENCHIDAS
 // =======================
-export type FormularioAnamnese = { campos: CampoFormulario[]; versao: number; segmento?: string };
+export type FormularioAnamnese = { campos: CampoFormulario[]; versao: number; segmento?: string; formularioVazio?: boolean };
 export type FichaDoCliente = { id: string; canal: 'totem' | 'profissional' | 'recepcao'; preenchidoEm: string; alertas: string[]; snapshot: SnapshotFicha | null };
 
 // Gestão (admin e supervisão): ativos e arquivados
@@ -1028,7 +1028,7 @@ export const useAplicarPreset = (token: string | null) => {
 
 // Debaixo de ['clients']: o aviso em tempo real de clientes também recarrega as fichas
 // Recepção: perguntas do totem/ambos (sem regras de alerta) e gravação às cegas, sem ler a ficha de volta
-export const useFormularioRecepcao = (token: string | null) => useQuery<{ campos: CampoPublico[] }>({
+export const useFormularioRecepcao = (token: string | null) => useQuery<{ campos: CampoPublico[]; formularioVazio?: boolean }>({
   queryKey: ['formulario-anamnese', 'recepcao'],
   queryFn: () => fetchApi('/formulario-anamnese/recepcao', token),
   enabled: !!token,

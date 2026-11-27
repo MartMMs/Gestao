@@ -62,7 +62,12 @@ export const formularioPublico = (campos: CampoFormulario[]) => {
   return { campos: doTotem.map(paraPublico), exigeConsentimentoLgpd: exigeConsentimentoLgpd(doTotem) };
 };
 
-const valorVazio = (v: ValorResposta | undefined) => (Array.isArray(v) ? v.length === 0 : !v);
+// Uma regra só para "não respondeu" (tela do totem, fichas e API): texto só com espaços conta como vazio
+export const valorVazio = (v: ValorResposta | undefined) => (Array.isArray(v) ? v.length === 0 : !String(v ?? '').trim());
+export const temRespostas = (valores: Record<string, ValorResposta>) => Object.values(valores).some((v) => !valorVazio(v));
+/** Primeira pergunta obrigatória sem resposta (a tela aponta a mesma que a API apontaria). */
+export const obrigatoriaPendente = <T extends { id: string; obrigatorio: boolean }>(campos: T[], valores: Record<string, ValorResposta>) =>
+  campos.find((c) => c.obrigatorio && valorVazio(valores[c.id]));
 
 /**
  * Lê as respostas enviadas ({ [campoId]: valor }) só para os campos visíveis no canal: resposta de campo de outro
@@ -179,8 +184,12 @@ export const validarCampos = (entrada: unknown): { campos: CampoEditado[]; erro?
 };
 
 // Partes estruturais: mudar qualquer uma delas cria uma nova versão do formulário
-export const assinaturaEstrutural = (c: Omit<CampoFormulario, 'id' | 'versao'>) =>
-  JSON.stringify([c.chave, c.rotulo, c.ajuda, c.tipo, c.opcoes, c.canal, c.obrigatorio, c.dadoSensivel, c.respostasAlerta, c.ordem, c.ativa]);
+type CampoEstrutural = Omit<CampoFormulario, 'id' | 'versao'>;
+const CHAVES_ESTRUTURAIS = ['chave', 'rotulo', 'ajuda', 'tipo', 'opcoes', 'canal', 'obrigatorio', 'dadoSensivel', 'respostasAlerta', 'ordem', 'ativa'] as const;
+// Campo novo no tipo sem entrar na lista quebra a compilação (senão a mudança passaria sem nova versão)
+const _todasAsChaves: Exclude<keyof CampoEstrutural, typeof CHAVES_ESTRUTURAIS[number]> extends never ? true : never = true;
+void _todasAsChaves;
+export const assinaturaEstrutural = (c: CampoEstrutural) => JSON.stringify(CHAVES_ESTRUTURAIS.map((k) => c[k]));
 
 const simNao = (chave: string, rotulo: string, ajuda: string | null, alerta = true, dadoSensivel = true): CampoNovo => ({
   chave, rotulo, ajuda, tipo: 'sim_nao', opcoes: [], canal: 'ambos', obrigatorio: false, dadoSensivel, respostasAlerta: alerta ? ['Sim'] : [],
@@ -233,7 +242,8 @@ export const PRESETS: Record<string, CampoNovo[]> = {
     texto('observacoes', 'Alguma observação ou preferência para o atendimento?', 'Opcional'),
   ],
 };
-export const presetDoSegmento = (segmento: string | null | undefined) => PRESETS[segmento ?? ''] ?? PRESETS.geral;
+// hasOwn: segmento vem do corpo da requisição ("__proto__" devolveria Object.prototype)
+export const presetDoSegmento = (segmento: string | null | undefined) => (segmento && Object.hasOwn(PRESETS, segmento) ? PRESETS[segmento] : PRESETS.geral);
 
 // ---- Editor (PersonalizarFormularioModal): mesma regra na tela e nos testes ----
 type CampoDoEditor = Pick<CampoFormulario, 'rotulo' | 'tipo' | 'opcoes' | 'respostasAlerta'>;
@@ -277,11 +287,15 @@ export const errosDoCampo = (campo: CampoDoEditor): string[] => {
  * Ficha enviada junto com um cadastro ou agendamento: a recepção grava às cegas só as perguntas do totem/ambos
  * (canal 'recepcao'); o resto da equipe grava as da equipe. Sem resposta, null (não cria ficha vazia).
  */
-export const fichaDoAto = (campos: CampoFormulario[], respostas: unknown, papel: string | undefined) => {
+export const fichaDoAto = (campos: CampoFormulario[], respostas: unknown, papel: string | undefined):
+  | null | { ok: false; erro: string } | { ok: true; itens: ItemFicha[]; canal: 'recepcao' | 'profissional' } => {
   if (!respostas || typeof respostas !== 'object' || Object.keys(respostas).length === 0) return null;
   const recepcao = papel === 'receptionist';
   const { itens, erro } = lerRespostas(campos, respostas, recepcao ? 'totem' : 'profissional');
-  if (erro) return { erro };
+  if (erro) return { ok: false, erro };
   if (itens.length === 0) return null;
-  return { itens, canal: recepcao ? 'recepcao' as const : 'profissional' as const, canalSnapshot: recepcao ? 'totem' as const : 'profissional' as const };
+  return { ok: true, itens, canal: recepcao ? 'recepcao' : 'profissional' };
 };
+
+/** Formulário já inicializado sem nenhuma pergunta ativa: só então a ficha obrigatória é dispensada (tela e API). */
+export const formularioVazio = (campos: Pick<CampoFormulario, 'ativa'>[], versao: number) => versao > 0 && !campos.some((c) => c.ativa);

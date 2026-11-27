@@ -174,7 +174,7 @@ process.on('unhandledRejection', (motivo) => {
 
 // Só a própria máquina (o nginx ou o túnel ficam na frente). Em Docker precisa de 0.0.0.0 para o mapeamento de
 // porta funcionar; HOST no .env vence os dois
-const HOST = process.env.HOST || (existsSync('/.dockerenv') ? '0.0.0.0' : '127.0.0.1');
+const HOST = process.env.HOST || (existsSync('/.dockerenv') || existsSync('/run/.containerenv') ? '0.0.0.0' : '127.0.0.1');
 server.listen(PORT, HOST, () => {
   console.log(`🚀 Servidor escutando em ${HOST}:${PORT}`);
 });

@@ -16,7 +16,7 @@ import { valorDoAtendimento } from '../../../utils/valorAtendimento';
 import { NovoClienteModal } from './NovoClienteModal';
 import { AvisoCliente } from '../../../components/AvisoCliente';
 import { FichaAnamneseModal } from '../../../components/FichaAnamneseModal';
-import { FichaRecepcaoModal } from '../../../components/FichaRecepcaoModal';
+import { FichaNovaModal } from '../../../components/FichaNovaModal';
 import { SeloAlertaClinico } from '../../../components/FichaFormulario';
 import { ImportarClientesModal } from './ImportarClientesModal';
 
@@ -494,7 +494,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
       )}
 
       {fichaRecepcao && (
-        <FichaRecepcaoModal clienteId={fichaRecepcao.id} nome={fichaRecepcao.nome} onClose={() => setFichaRecepcao(null)}
+        <FichaNovaModal clienteId={fichaRecepcao.id} nome={fichaRecepcao.nome} onClose={() => setFichaRecepcao(null)}
           onSalvo={() => mostrarMensagem('Ficha registrada.')} />
       )}
 

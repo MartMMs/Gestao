@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  alertasDe, editarOpcoes, fichaDoAto, errosDoCampo, formularioPublico, mudarTipoCampo, lerRespostas, lerSnapshot, montarSnapshot, presetDoSegmento, resumoTexto,
+  alertasDe, editarOpcoes, fichaDoAto, formularioVazio, obrigatoriaPendente, errosDoCampo, formularioPublico, mudarTipoCampo, lerRespostas, lerSnapshot, montarSnapshot, presetDoSegmento, resumoTexto,
   validarCampos, type CampoFormulario,
 } from '@shared/formularioAnamnese';
 import { separarFicha, temFichaAnamnese, MARCADOR_ANAMNESE } from '@shared/anamnese';
@@ -167,14 +167,36 @@ describe('ficha enviada no cadastro / reserva de cliente novo', () => {
   });
   it('recepção: canal recepcao, descarta campo do profissional, obrigatória dele não bloqueia, alerta calculado', () => {
     const f = fichaDoAto(campos, { g: 'Sim', p: 'injetado' }, 'receptionist');
-    expect(f && 'itens' in f && f.canal).toBe('recepcao');
-    expect(f && 'itens' in f && f.itens!.map((i) => i.campoId)).toEqual(['g']);
-    expect(f && 'itens' in f && alertasDe(f.itens!)).toEqual(['Gestante']);
+    expect(f?.ok && f.canal).toBe('recepcao');
+    expect(f?.ok && f.itens.map((i) => i.campoId)).toEqual(['g']);
+    expect(f?.ok && alertasDe(f.itens)).toEqual(['Gestante']);
   });
   it('supervisão/profissional: canal profissional, grava a seção do profissional e cobra a obrigatória dela', () => {
-    expect(fichaDoAto(campos, { g: 'Não' }, 'supervisor')).toEqual({ erro: 'Responda: Obrigatória do profissional' });
+    expect(fichaDoAto(campos, { g: 'Não' }, 'supervisor')).toEqual({ ok: false, erro: 'Responda: Obrigatória do profissional' });
     const f = fichaDoAto(campos, { g: 'Não', p: 'ok', pr: 'ok' }, 'collaborator');
-    expect(f && 'itens' in f && f.canal).toBe('profissional');
-    expect(f && 'itens' in f && f.itens!.map((i) => i.campoId)).toEqual(['g', 'p', 'pr']);
+    expect(f?.ok && f.canal).toBe('profissional');
+    expect(f?.ok && f.itens.map((i) => i.campoId)).toEqual(['g', 'p', 'pr']);
+  });
+});
+
+describe('entradas maliciosas', () => {
+  it('segmento "__proto__" ou "constructor" cai no modelo geral', () => {
+    expect(presetDoSegmento('__proto__')).toEqual(presetDoSegmento('geral'));
+    expect(presetDoSegmento('constructor')).toEqual(presetDoSegmento('geral'));
+  });
+  it('só espaços conta como não respondido, igual na tela e na API', () => {
+    const campos = [campo({ id: 'x', chave: 'x', rotulo: 'X', tipo: 'texto_livre', obrigatorio: true })];
+    expect(obrigatoriaPendente(campos, { x: '   ' })?.id).toBe('x');
+    expect(lerRespostas(campos, { x: '   ' }, 'totem').erro).toBe('Responda: X');
+  });
+});
+
+describe('ficha obrigatória com formulário vazio', () => {
+  it('só dispensa quando o formulário inteiro não tem pergunta ativa e já foi inicializado', () => {
+    expect(formularioVazio([], 1)).toBe(true);
+    expect(formularioVazio([{ ativa: false }], 2)).toBe(true);
+    expect(formularioVazio([], 0)).toBe(false); // nunca inicializado: o modelo do segmento ainda vai ser criado
+    // Recepção sem pergunta do totem, mas com pergunta só do profissional: continua exigindo
+    expect(formularioVazio([{ ativa: true }], 3)).toBe(false);
   });
 });

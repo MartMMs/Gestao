@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { ModalFormulario } from '../../../components/ModalFormulario';
 import { useAuth } from '../../../AuthContext';
 import { useCompanyConfig, useCreateClient } from '../../../api';
-import { FichaRecepcaoModal, temRespostas } from '../../../components/FichaRecepcaoModal';
+import { FichaNovaModal, usePerguntasDaFicha } from '../../../components/FichaNovaModal';
+import { temRespostas } from '@shared/formularioAnamnese';
 import type { ValorResposta } from '@shared/formularioAnamnese';
 import { formatCpf, formatPhone } from '../../../utils/formatters';
 import { lerCliente } from '@shared/clientes';
@@ -17,7 +18,8 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
   const [naoReceberWhatsapp, setNaoReceberWhatsapp] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const { data: empresa } = useCompanyConfig(token);
-  const exigirAnamnese = empresa?.exigirAnamnese === true;
+  const { semPerguntas } = usePerguntasDaFicha();
+  const exigirAnamnese = empresa?.exigirAnamnese === true && !semPerguntas;
   const [ficha, setFicha] = useState<Record<string, ValorResposta>>({});
   const [fichaAberta, setFichaAberta] = useState(false);
   const fichaPreenchida = temRespostas(ficha);
@@ -92,7 +94,7 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
       {erro && <p role="alert" className="text-sm text-error">{erro}</p>}
     </ModalFormulario>
     {/* Fora do <form> do cadastro: Enter num campo da ficha não envia o cadastro */}
-    {fichaAberta && <FichaRecepcaoModal nome={form.nome} valoresIniciais={ficha} onConfirmar={setFicha} onClose={() => setFichaAberta(false)} />}
+    {fichaAberta && <FichaNovaModal nome={form.nome} valoresIniciais={ficha} onConfirmar={setFicha} onClose={() => setFichaAberta(false)} />}
     </>
   );
 }

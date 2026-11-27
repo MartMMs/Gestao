@@ -419,6 +419,47 @@ test.describe('Formulário de anamnese configurável', () => {
     }
   });
 
+  test('API: /equipe barra a recepção, PUT com versão antiga dá 409, totem sem regras internas e reserva com ficha inválida não grava nada', async ({ request }) => {
+    const rec = await authHeaders(request, CONTAS.recepcao);
+    const sup = await authHeaders(request, CONTAS.supervisor);
+    expect((await request.get(`${apiBase()}/formulario-anamnese/equipe`, { headers: rec })).status()).toBe(403);
+    expect((await request.get(`${apiBase()}/formulario-anamnese/equipe`, { headers: await authHeaders(request, CONTAS.colaboradora) })).status()).toBe(200);
+
+    const atual = await lerFormulario(request);
+    const velho = await request.put(`${apiBase()}/formulario-anamnese`, { headers: await authHeaders(request, CONTAS.admin), data: { versao: atual.versao - 1, campos: atual.campos } });
+    expect(velho.status()).toBe(409);
+
+    const publico = await (await request.get(`${apiBase()}/autoatendimento/formulario`)).text();
+    for (const proibido of ['respostasAlerta', '"canal"', PROF]) expect(publico).not.toContain(proibido);
+
+    const nome = nomeClienteTeste('Ficha Invalida');
+    const equipe = (await (await request.get(`${apiBase()}/colaboradores`, { headers: await authHeaders(request, CONTAS.admin) })).json()) as Array<{ id: string; email?: string }>;
+    const helenaId = equipe.find((e) => e.email === CONTAS.colaboradora)!.id;
+    const multipla = atual.campos.find((c) => c.rotulo === MULTIPLA)!;
+    try {
+      const r = await request.post(`${apiBase()}/agendamentos`, {
+        headers: rec,
+        data: { collaboratorId: helenaId, date: diaFuturo(60), time: '10:00', serviceNames: ['E2E Massagem'], clientName: nome, respostasFicha: { [multipla.id]: ['Opção que não existe'] } },
+      });
+      expect(r.status(), await r.text()).toBe(400);
+      const lista = (await (await request.get(`${apiBase()}/clientes`, { headers: sup })).json()) as Array<{ nome: string }>;
+      expect(lista.some((c) => c.nome === nome), 'transação desfeita: cliente não criado').toBe(false);
+
+      // Cliente já cadastrado: ficha inválida não deixa agendamento nem ficha
+      expect((await request.post(`${apiBase()}/clientes/importar`, { headers: sup, data: { linhas: [{ nome }], confirmar: true } })).status()).toBe(201);
+      const id = ((await (await request.get(`${apiBase()}/clientes`, { headers: sup })).json()) as Array<{ id: string; nome: string }>).find((c) => c.nome === nome)!.id;
+      const r2 = await request.post(`${apiBase()}/agendamentos`, {
+        headers: rec,
+        data: { collaboratorId: helenaId, date: diaFuturo(61), time: '10:00', serviceNames: ['E2E Massagem'], clientId: id, respostasFicha: { [multipla.id]: ['Opção que não existe'] } },
+      });
+      expect(r2.status(), await r2.text()).toBe(400);
+      expect(await (await request.get(`${apiBase()}/agendamentos?clienteId=${id}`, { headers: sup })).json()).toEqual([]);
+      expect(await (await request.get(`${apiBase()}/clientes/${id}/fichas`, { headers: sup })).json()).toEqual([]);
+    } finally {
+      await apagarClienteDeTeste(request, nome);
+    }
+  });
+
   test('cenário 4: editor e totem no celular (375x812) sem corte horizontal e com botões de toque', async ({ browser }) => {
     test.setTimeout(150_000);
     const context = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true });

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { formatarDataHoraBR } from '@shared/datasBR';
-import { paraPublico, textoDoValor, type ValorResposta } from '@shared/formularioAnamnese';
+import { obrigatoriaPendente, paraPublico, textoDoValor, type ValorResposta } from '@shared/formularioAnamnese';
 import { useAuth } from '../AuthContext';
 import { useFichasCliente, useFormularioEquipe, useSalvarFichaCliente } from '../api';
 import { CamposDinamicos } from './CamposDinamicos';
@@ -29,12 +29,21 @@ export function FichaFormulario({ clienteId, podeEditar, exigirAnamnese = false 
   const [valores, setValores] = useState<Record<string, ValorResposta>>({});
   const [mensagem, setMensagem] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
   const ultima = fichas?.[0];
+  // Há digitação não salva: uma ficha nova gravada por outra pessoa não apaga o que está na tela
+  const [editado, setEditado] = useState(false);
 
   // Começa com as respostas da última ficha (por campo): a equipe só altera o que mudou
   useEffect(() => {
-    if (!ultima?.snapshot) return;
+    if (!ultima?.snapshot || editado) return;
     setValores(Object.fromEntries(ultima.snapshot.itens.map((i) => [i.campoId, i.valor])));
   }, [ultima?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // "Ficha salva." some sozinho; erro fica até a próxima edição
+  useEffect(() => {
+    if (mensagem?.tipo !== 'ok') return;
+    const t = setTimeout(() => setMensagem(null), 4000);
+    return () => clearTimeout(t);
+  }, [mensagem]);
 
   const campos = useMemo(() => formulario?.campos ?? [], [formulario]);
   const comuns = campos.filter((c) => c.canal === 'ambos').map(paraPublico);
@@ -45,16 +54,17 @@ export function FichaFormulario({ clienteId, podeEditar, exigirAnamnese = false 
   const enviar = async () => {
     setMensagem(null);
     // Mesma regra da API: aponta a pergunta obrigatória que faltou
-    const faltando = [...comuns, ...doProfissional].find((c) => c.obrigatorio && (Array.isArray(valores[c.id]) ? !valores[c.id].length : !String(valores[c.id] ?? '').trim()));
+    const faltando = obrigatoriaPendente([...comuns, ...doProfissional], valores);
     if (faltando) { setMensagem({ tipo: 'erro', texto: `Responda: ${faltando.rotulo}` }); return; }
     try {
       await salvar.mutateAsync({ clienteId, respostas: valores });
+      setEditado(false);
       setMensagem({ tipo: 'ok', texto: 'Ficha salva.' });
     } catch (err) {
       setMensagem({ tipo: 'erro', texto: err instanceof Error ? err.message : 'Não foi possível salvar a ficha.' });
     }
   };
-  const mudar = (id: string, v: ValorResposta) => { setValores((a) => ({ ...a, [id]: v })); setMensagem(null); };
+  const mudar = (id: string, v: ValorResposta) => { setValores((a) => ({ ...a, [id]: v })); setEditado(true); setMensagem(null); };
 
   return (
     <section aria-label="Formulário de anamnese" className="space-y-4 mt-4">

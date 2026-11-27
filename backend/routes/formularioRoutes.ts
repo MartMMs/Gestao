@@ -6,9 +6,9 @@ import { transacaoComTravas, travarChave } from '../lib/transacao';
 import { registrarAuditoria } from '../lib/auditoria';
 import { clientesComAcessoSaude } from '../lib/privacidade';
 import { getEmpresaConfig } from '../services/configService';
-import { lerCampos, listarCampos, TRAVA_FORMULARIO } from '../services/formularioService';
+import { criarFicha, lerCampos, listarCampos, TRAVA_FORMULARIO } from '../services/formularioService';
 import {
-  alertasDe, assinaturaEstrutural, camposDoCanal, formularioPublico, lerRespostas, lerSnapshot, montarSnapshot,
+  assinaturaEstrutural, camposDoCanal, formularioPublico, formularioVazio, lerRespostas, lerSnapshot,
   presetDoSegmento, validarCampos, type CampoFormulario,
 } from '../../shared/formularioAnamnese';
 import { CODIGO_CONFIG_DESATUALIZADA } from '../../shared/codigosErro';
@@ -35,10 +35,12 @@ export function createFormularioRouter(notificar: Notificar) {
   });
 
   // Equipe interna: campos "ambos" e "apenas_profissional" ativos (a ficha do cliente segue as regras de acesso de saúde)
-  router.get('/formulario-anamnese/equipe', verificarToken, async (_req, res) => {
+  router.get('/formulario-anamnese/equipe', verificarToken, async (req, res) => {
     try {
+      // Recepção nunca vê os campos do profissional nem as regras de alerta (usa /recepcao)
+      if (getUsuario(req)?.papel === 'receptionist') return res.status(403).json({ erro: 'A recepção usa a ficha do balcão.' });
       const { campos, versao } = await listarCampos();
-      res.json({ campos: camposDoCanal(campos, 'profissional'), versao });
+      res.json({ campos: camposDoCanal(campos, 'profissional'), versao, formularioVazio: formularioVazio(campos, versao) });
     } catch (error) {
       responderErro(res, error, 'Erro ao buscar o formulário de anamnese.');
     }
@@ -48,8 +50,8 @@ export function createFormularioRouter(notificar: Notificar) {
   router.get('/formulario-anamnese/recepcao', verificarToken, async (req, res) => {
     try {
       if (!usuarioGerenciaAgenda(req)) return res.status(403).json({ erro: 'Disponível só para a recepção e a supervisão.' });
-      const { campos } = await listarCampos();
-      res.json({ campos: formularioPublico(campos).campos });
+      const { campos, versao } = await listarCampos();
+      res.json({ campos: formularioPublico(campos).campos, formularioVazio: formularioVazio(campos, versao) });
     } catch (error) {
       responderErro(res, error, 'Erro ao buscar o formulário de anamnese.');
     }
@@ -161,17 +163,11 @@ export function createFormularioRouter(notificar: Notificar) {
       const { itens, erro } = lerRespostas(campos, req.body?.respostas, 'profissional');
       if (erro) return res.status(400).json({ erro });
       if (itens.length === 0) return res.status(400).json({ erro: 'Responda ao menos uma pergunta da ficha.' });
-      const snapshot = montarSnapshot(itens, versao, 'profissional');
       const ficha = await transacaoComTravas(async (tx) => {
         await travarChave(tx, `cliente:${id}`);
         const cliente = await tx.cliente.findUnique({ where: { id } });
         if (!cliente || cliente.removidoEm) throw new HttpError(404, 'Cliente não encontrado.');
-        const criada = await tx.fichaPreenchida.create({
-          data: {
-            clienteId: id, canal: 'profissional', versaoFormulario: versao, snapshot, alertas: alertasDe(itens),
-            preenchidoPorId: getUsuario(req)?.id ?? null,
-          },
-        });
+        const criada = await criarFicha(tx, { clienteId: id, canal: 'profissional', itens, versao, autorId: getUsuario(req)?.id });
         // Só o fato (sem as respostas): o histórico de alterações não guarda dado de saúde
         await registrarAuditoria(req, {
           acao: 'cliente.anamnese', alvo: cliente.nome, antes: { fichaFormulario: null }, depois: { fichaFormulario: `versão ${versao}` }, tx,
@@ -179,7 +175,7 @@ export function createFormularioRouter(notificar: Notificar) {
         return criada;
       });
       notificar();
-      res.status(201).json({ id: ficha.id, canal: ficha.canal, preenchidoEm: ficha.preenchidoEm, alertas: ficha.alertas, snapshot });
+      res.status(201).json({ id: ficha.id, canal: ficha.canal, preenchidoEm: ficha.preenchidoEm, alertas: ficha.alertas, snapshot: lerSnapshot(ficha.snapshot) });
     } catch (error) {
       responderErro(res, error, 'Erro ao salvar a ficha do cliente.');
     }
@@ -194,14 +190,11 @@ export function createFormularioRouter(notificar: Notificar) {
       const { itens, erro } = lerRespostas(campos, req.body?.respostas, 'totem');
       if (erro) return res.status(400).json({ erro });
       if (itens.length === 0) return res.status(400).json({ erro: 'Responda ao menos uma pergunta da ficha.' });
-      const snapshot = montarSnapshot(itens, versao, 'totem');
       const ficha = await transacaoComTravas(async (tx) => {
         await travarChave(tx, `cliente:${id}`);
         const cliente = await tx.cliente.findUnique({ where: { id } });
         if (!cliente || cliente.removidoEm) throw new HttpError(404, 'Cliente não encontrado.');
-        const criada = await tx.fichaPreenchida.create({
-          data: { clienteId: id, canal: 'recepcao', versaoFormulario: versao, snapshot, alertas: alertasDe(itens), preenchidoPorId: getUsuario(req)?.id ?? null },
-        });
+        const criada = await criarFicha(tx, { clienteId: id, canal: 'recepcao', itens, versao, autorId: getUsuario(req)?.id });
         await registrarAuditoria(req, {
           acao: 'cliente.anamnese', alvo: cliente.nome, antes: { fichaFormulario: null }, depois: { fichaFormulario: `versão ${versao} (recepção)` }, tx,
         });

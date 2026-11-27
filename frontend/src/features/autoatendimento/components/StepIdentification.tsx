@@ -4,7 +4,7 @@ import { AutoatendimentoReservaSession } from '../../../types';
 import { formatPhone, formatCpf } from '../../../utils/formatters';
 import { cpfValido, telefoneValido } from '@shared/validadores';
 import { perguntasDoSegmento } from '@shared/segmento';
-import type { CampoPublico, ValorResposta } from '@shared/formularioAnamnese';
+import { obrigatoriaPendente, type CampoPublico, type ValorResposta } from '@shared/formularioAnamnese';
 import { CamposDinamicos } from '../../../components/CamposDinamicos';
 import { textoConsentimento } from '@shared/consentimento';
 import { LinksDocumentosLegais } from '../../../components/DocumentosLegais';
@@ -89,7 +89,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, whatsap
 
     // Só os campos que estão na tela (o rascunho pode ter respostas de um formulário que mudou)
     const visiveis = campos ?? [];
-    const pendente = visiveis.find((c) => c.obrigatorio && (Array.isArray(respostas[c.id]) ? !respostas[c.id].length : !respostas[c.id]));
+    const pendente = obrigatoriaPendente(visiveis, respostas);
     if (pendente) newErros.ficha = `Responda: ${pendente.rotulo}`;
 
     if (!consentimento) {

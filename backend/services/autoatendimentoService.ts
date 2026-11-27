@@ -13,8 +13,8 @@ import {
 import { DURACAO_PADRAO_MIN, duracaoTotal, instanteNoFuso } from '../../shared/agenda';
 import { versaoConsentimentoValida } from '../../shared/consentimento';
 import { PREFIXO_TOTEM } from '../../shared/anamnese';
-import { alertasDe, lerRespostas, montarSnapshot, resumoTexto, type ItemFicha } from '../../shared/formularioAnamnese';
-import { listarCampos } from './formularioService';
+import { lerRespostas, resumoTexto, type ItemFicha } from '../../shared/formularioAnamnese';
+import { criarFicha, listarCampos } from './formularioService';
 import {
   LIMITE_OBSERVACAO,
   MENSAGEM_CPF_INVALIDO,
@@ -313,14 +313,8 @@ export const criarAgendamentoTotem = async (
       ?? await tx.cliente.create({ data: { nome: nomeCadastro, telefone: cliente.telefone, cpf: cliente.cpf, observacao: cliente.ficha?.itens.length ? null : observacao } });
     const gravarFicha = async (agendamentoId: string) => {
       if (!cliente.ficha || cliente.ficha.itens.length === 0) return;
-      await tx.fichaPreenchida.create({
-        data: {
-          clienteId: dbCliente.id, agendamentoId, canal: 'totem', versaoFormulario: cliente.ficha.versao,
-          // Cadastro existente: fica só no agendamento (mesma regra da linha de texto acima)
-          vinculadaAoCliente: !existente,
-          snapshot: montarSnapshot(cliente.ficha.itens, cliente.ficha.versao, 'totem'), alertas: alertasDe(cliente.ficha.itens),
-        },
-      });
+      // Cadastro existente: fica só no agendamento (mesma regra da linha de texto acima)
+      await criarFicha(tx, { clienteId: dbCliente.id, agendamentoId, canal: 'totem', itens: cliente.ficha.itens, versao: cliente.ficha.versao, vinculadaAoCliente: !existente });
     };
     // De propósito, o totem NÃO recusa horário sobreposto de cliente que já existe (a agenda interna recusa): qualquer
     // recusa, mesmo com a mensagem de horário ocupado, diria a quem sabe nome e telefone de alguém que essa pessoa

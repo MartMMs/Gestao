@@ -37,7 +37,7 @@ test.describe('ficha obrigatória pela tela', () => {
       // Recepção grava ficha nova às cegas no formulário configurável
       const ficha = page.getByRole('dialog', { name: 'Nova ficha de anamnese' });
       await ficha.locator('button[aria-pressed]').first().click();
-      await ficha.getByRole('button', { name: 'Salvar ficha' }).click();
+      await ficha.getByRole('button', { name: 'Concluir ficha' }).click();
       await expect(ficha).toBeHidden();
 
       let salvo = false;

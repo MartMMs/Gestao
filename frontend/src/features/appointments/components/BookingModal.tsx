@@ -9,7 +9,8 @@ import { ModalFormulario } from '../../../components/ModalFormulario';
 import { fichaOculta, formatAnamneseStorage, hasAnamnese, initialAnamnese, parseClientObservation, type AnamneseData } from '../../../utils/anamneseUtils';
 import type { ValorResposta } from '@shared/formularioAnamnese';
 import { FichaAnamneseModal } from '../../../components/FichaAnamneseModal';
-import { FichaRecepcaoModal, temRespostas } from '../../../components/FichaRecepcaoModal';
+import { FichaNovaModal, usePerguntasDaFicha } from '../../../components/FichaNovaModal';
+import { temRespostas } from '@shared/formularioAnamnese';
 import { AvisoCliente } from '../../../components/AvisoCliente';
 import { SeloAlertaClinico } from '../../../components/FichaFormulario';
 import { MENSAGEM_ANAMNESE_OBRIGATORIA } from '@shared/anamnese';
@@ -73,8 +74,8 @@ type BookingDraft = {
   bookDetails: string;
   bookClientObservation: string;
   selectedClientId?: string | null;
-  showAnamnese?: boolean;
   anamneseData?: AnamneseData;
+  respostasFicha?: Record<string, ValorResposta>;
 };
 
 type BookingAppointmentPayload = Omit<Appointment, 'id' | 'status'> & {
@@ -115,8 +116,8 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     bookDetails: '',
     bookClientObservation: '',
     selectedClientId: null,
-    showAnamnese: false,
     anamneseData: initialAnamnese,
+    respostasFicha: {},
   }), [initialEmpId, initialTime, receptionDate]);
 
   // Rascunho por slot: um formulário abandonado nunca é restaurado em outro horário/profissional
@@ -165,9 +166,10 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   // Trava síncrona: o estado só muda na próxima renderização e o clique duplo passava as duas vezes
   const enviandoRef = useRef(false);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
-  const [showAnamnese, setShowAnamnese] = useState(() => Boolean(draft.showAnamnese));
+  // A ficha não reabre sozinha ao restaurar o rascunho: as respostas voltam, a janela fica fechada
+  const [showAnamnese, setShowAnamnese] = useState(false);
   const [anamneseData, setAnamneseData] = useState<AnamneseData>(() => draft.anamneseData ?? initialAnamnese);
-  const [respostasFicha, setRespostasFicha] = useState<Record<string, ValorResposta>>({});
+  const [respostasFicha, setRespostasFicha] = useState<Record<string, ValorResposta>>(() => draft.respostasFicha ?? {});
   // Cliente já cadastrado: abre primeiro a visualização da ficha (o formulário vazio parecia ficha apagada)
   const [verFicha, setVerFicha] = useState(false);
   const clientSearchWrapperRef = useRef<HTMLDivElement | null>(null);
@@ -188,8 +190,8 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
       bookDetails,
       bookClientObservation,
       selectedClientId,
-      showAnamnese,
       anamneseData,
+      respostasFicha,
     });
   }, [
     clientMode,
@@ -204,8 +206,8 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
     bookDetails,
     bookClientObservation,
     selectedClientId,
-    showAnamnese,
     anamneseData,
+    respostasFicha,
     setDraft,
   ]);
 
@@ -329,16 +331,14 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
   // Ficha: a do cadastro (a API diz se existe, mesmo para quem não vê o conteúdo) ou a preenchida agora
   const { token, currentUser } = useAuth();
-  const exigirAnamnese = useCompanyConfig(token).data?.exigirAnamnese === true;
+  const { semPerguntas } = usePerguntasDaFicha();
+  const exigirAnamnese = useCompanyConfig(token).data?.exigirAnamnese === true && !semPerguntas;
   const clienteEscolhido = clientMode === 'search' ? clients.find((c) => c.id === selectedClientId) : undefined;
   const clienteTemFicha = Boolean(clienteEscolhido?.temAnamnese) || hasAnamnese(anamneseData) || temRespostas(respostasFicha);
   const gerenciaAgenda = currentUser?.role === 'receptionist' || currentUser?.role === 'supervisor' || currentUser?.role === 'admin';
   // Quem grava a ficha: cliente novo, quem tem acesso à saúde, ou a recepção no balcão (sem ver o histórico anterior)
   const podeEditarFicha = !clienteEscolhido || clienteEscolhido.acessoSaude === true || gerenciaAgenda || (exigirAnamnese && !clienteEscolhido.temAnamnese);
   // Uma regra para o botão dos detalhes: com ficha (ou sem poder preencher) mostra a ficha; senão abre o formulário
-  // Recepção com cliente cadastrado: ficha nova às cegas no formulário configurável (não lê a anterior)
-  const fichaAsCegas = Boolean(clienteEscolhido) && currentUser?.role === 'receptionist' && !clienteEscolhido?.acessoSaude;
-  const [fichaRecepcao, setFichaRecepcao] = useState(false);
   const mostraFicha = Boolean(clienteEscolhido) && (clienteTemFicha || !podeEditarFicha);
   const rotuloFicha = mostraFicha ? 'Ver Ficha do Cliente' : exigirAnamnese && !clienteTemFicha ? '+ Ficha do Cliente (obrigatória)' : '+ Ficha do Cliente';
 
@@ -482,7 +482,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
 
     if (exigirAnamnese && !clienteTemFicha) {
       setErrorMessage(MENSAGEM_ANAMNESE_OBRIGATORIA);
-      if (fichaAsCegas) setFichaRecepcao(true); else setShowAnamnese(true);
+      setShowAnamnese(true);
       return;
     }
 
@@ -733,7 +733,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
             detailsLabel="Observações"
             detailsPlaceholder="Ex: Preferências do cliente..."
             detailsAction={(
-              <button type="button" onClick={() => (mostraFicha || clienteEscolhido?.acessoSaude ? setVerFicha(true) : fichaAsCegas ? setFichaRecepcao(true) : setShowAnamnese(true))} className={`text-[11px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors ${exigirAnamnese && !clienteTemFicha ? 'bg-error/10 text-error hover:bg-error/20' : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'}`}>
+              <button type="button" onClick={() => (mostraFicha || clienteEscolhido?.acessoSaude ? setVerFicha(true) : setShowAnamnese(true))} className={`text-[11px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors ${exigirAnamnese && !clienteTemFicha ? 'bg-error/10 text-error hover:bg-error/20' : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'}`}>
                 {rotuloFicha}
               </button>
             )}
@@ -754,15 +754,13 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
           exigirAnamnese={exigirAnamnese}
           clienteId={clienteEscolhido.acessoSaude ? clienteEscolhido.id : null}
           podeEditarFormulario={clienteEscolhido.acessoSaude === true}
-          onEditar={podeEditarFicha ? () => { setVerFicha(false); if (fichaAsCegas) setFichaRecepcao(true); else setShowAnamnese(true); } : undefined}
+          onEditar={podeEditarFicha ? () => { setVerFicha(false); setShowAnamnese(true); } : undefined}
           onClose={() => setVerFicha(false)}
         />
       )}
-      {fichaRecepcao && clienteEscolhido && (
-        <FichaRecepcaoModal clienteId={clienteEscolhido.id} nome={clienteEscolhido.nome} onClose={() => setFichaRecepcao(false)} />
-      )}
+
       {showAnamnese && (
-        <FichaRecepcaoModal nome={bookName} valoresIniciais={respostasFicha} onConfirmar={setRespostasFicha} onClose={() => setShowAnamnese(false)} />
+        <FichaNovaModal nome={bookName} valoresIniciais={respostasFicha} onConfirmar={setRespostasFicha} onClose={() => setShowAnamnese(false)} />
       )}
 
     </>

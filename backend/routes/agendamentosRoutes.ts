@@ -454,8 +454,8 @@ export function createAgendamentosRouter(notificar: Notificar) {
 
         let cliente = await resolverCliente(tx, req, req.body, { acessoSaude, exigirAnamnese });
         // Ficha do formulário configurável enviada com a reserva (cliente novo no ato ou recepção no balcão)
-        const gravouFicha = await gravarFichaNoAto(tx, req, cliente, req.body.respostasFicha);
-        if (exigirAnamnese && !gravouFicha) cliente = await garantirFichaAnamnese(tx, req, cliente, req.body.clientObservation, acessoSaude);
+        const ficha = await gravarFichaNoAto(tx, req, cliente, req.body.respostasFicha);
+        if (exigirAnamnese && ficha === 'sem_ficha') cliente = await garantirFichaAnamnese(tx, req, cliente, req.body.clientObservation, acessoSaude);
         await conflitoDoCliente(tx, cliente.id, inicio, duracaoTotal(servicos));
         return tx.agendamento.create({
           data: {
