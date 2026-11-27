@@ -9,6 +9,9 @@ import { createServicosRouter } from './routes/servicosRoutes';
 import { createEscalaRouter } from './routes/escalaRoutes';
 import { createTurnosRouter } from './routes/turnosRoutes';
 import { createRelatoriosRouter } from './routes/relatoriosRoutes';
+import { createWhatsappRouter } from './routes/whatsappRoutes';
+import { createHabilidadesRouter } from './routes/habilidadesRoutes';
+import { createFormularioRouter } from './routes/formularioRoutes';
 
 // Monta a API interna (/api). Cada módulo cuida de um assunto.
 export function createRouter(eventos: Eventos) {
@@ -18,10 +21,18 @@ export function createRouter(eventos: Eventos) {
   router.use(createColaboradoresRouter(eventos));
   router.use(createAgendamentosRouter(() => eventos.notificarMudanca(ESCOPOS.agenda)));
   router.use(createClientesRouter(() => eventos.notificarMudanca(ESCOPOS.clientes)));
-  router.use(createServicosRouter(() => eventos.notificarMudanca(ESCOPOS.servicos)));
+  router.use(createServicosRouter(
+    () => eventos.notificarMudanca(ESCOPOS.servicos),
+    () => eventos.notificarMudanca(ESCOPOS.bloqueios),
+  ));
   router.use(createEscalaRouter(() => eventos.notificarMudanca(ESCOPOS.escala)));
   router.use(createTurnosRouter(() => eventos.notificarMudanca(ESCOPOS.turnos)));
   router.use(createRelatoriosRouter());
+  router.use(createWhatsappRouter());
+  // Habilidade muda quem pode atender: serviços e equipe recarregam
+  router.use(createHabilidadesRouter(() => eventos.notificarMudanca([...ESCOPOS.servicos, ...ESCOPOS.equipe])));
+
+  router.use(createFormularioRouter(() => eventos.notificarMudanca(ESCOPOS.clientes)));
 
   return router;
 }

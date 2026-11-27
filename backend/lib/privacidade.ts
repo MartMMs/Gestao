@@ -109,6 +109,9 @@ export const prepararAgendamento = <T extends AgendamentoBase>(agendamento: T, r
   return {
     ...agendamento,
     ...('valorComissao' in agendamento && !podeVerComissao ? { valorComissao: null } : {}),
+    // Token da sessão do totem: só o servidor usa; a equipe não precisa dele
+    ...('reservaToken' in agendamento ? { reservaToken: null } : {}),
+    ...('referenciaPagamento' in agendamento ? { referenciaPagamento: null } : {}),
     // O percentual junto com o valor do atendimento daria a comissão que acabou de ser escondida
     ...(agendamento.servicos ? { servicos: agendamento.servicos.map(({ comissaoPercentual: _comissao, ...s }) => s) } : {}),
     observacoesSaude: veSaude ? agendamento.observacoesSaude : null,

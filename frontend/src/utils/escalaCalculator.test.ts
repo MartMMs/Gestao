@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   aplicarFeriadosNaEscala,
   aplicarFolgasDomingoNoMes,
-  calcularHorasEscala,
   gerarEscalaComRegras,
   gerarEscala12x36,
   gerarEscala5x2,
@@ -110,17 +109,6 @@ describe('aplicarFolgasDomingoNoMes (CLT / folga dominical)', () => {
     const configurados = domingos.filter((d) => d.folgaDominicalConfigurada);
     expect(configurados.length).toBeGreaterThanOrEqual(1);
     expect(configurados.every((d) => d.tipo === 'folga' || d.tipo === 'fds')).toBe(true);
-  });
-});
-
-describe('calcularHorasEscala', () => {
-  it('soma horas de turno com inicio e fim', () => {
-    const res = calcularHorasEscala([
-      { data: '2026-06-02', tipo: 'trabalho', horaInicio: '09:00', horaFim: '18:00' },
-      { data: '2026-06-03', tipo: 'folga' },
-    ]);
-    expect(res.diasTrabalho).toBe(1);
-    expect(res.horasTrabalhadas).toBe(9);
   });
 });
 

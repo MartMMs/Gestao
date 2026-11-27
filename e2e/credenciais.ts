@@ -26,6 +26,12 @@ export async function loginPelaTela(page: Page, email: string, senha = E2E_PASSW
   await expect(page.getByText('Carregando dados do sistema...')).toBeHidden({ timeout: 90_000 });
 }
 
+// Janela padrão "Descartar alterações?" (fechar formulário com algo preenchido)
+export const janelaDescartar = (page: Page) => page.getByRole('dialog', { name: 'Descartar alterações?' });
+export async function descartarAlteracoes(page: Page) {
+  await janelaDescartar(page).getByRole('button', { name: 'Descartar e fechar' }).click();
+}
+
 // CPF aleatório com dígitos verificadores válidos (a API recusa CPFs inválidos)
 export function gerarCpfValido(): string {
   const base = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10));

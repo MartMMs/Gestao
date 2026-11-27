@@ -32,8 +32,10 @@ export const formatDuration = (minutes: number) => {
   return `${m}m`;
 };
 
-// Profissionais que atendem clientes (admins e supervisores não entram nas grades de atendimento)
-export const isTeamMember = (employee: { role: string }) => employee.role === 'collaborator';
+// Quem tem coluna na AGENDA de atendimento: só quem atende clientes (diferente da escala de trabalho, abaixo)
+export const atendeNaAgenda = (employee: { role: string }) => employee.role === 'collaborator';
+// Quem entra na escala: atendentes e supervisores. Admin (gestão) e recepção ficam fora da grade.
+export const participaDaEscala = (employee: { role: string }) => employee.role === 'collaborator' || employee.role === 'supervisor';
 
 // Senha provisória forte para novos colaboradores (mostrada uma única vez ao supervisor)
 export const gerarSenhaProvisoria = () => {
@@ -41,3 +43,6 @@ export const gerarSenhaProvisoria = () => {
   const bytes = crypto.getRandomValues(new Uint8Array(12));
   return Array.from(bytes, (b) => alfabeto[b % alfabeto.length]).join('');
 };
+
+export const formatarReais = (valor: number) =>
+  (Number.isFinite(valor) ? valor : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });

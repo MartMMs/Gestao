@@ -35,8 +35,10 @@ describe('CLT na 12x36', () => {
   });
 
   it('a mesma malha fora da 12x36 é cobrada semana a semana', () => {
-    const dias = gerarEscala12x36('2026-11-01', 30, { diurno: { inicio: '07:00', fim: '19:00' } });
+    // Plantão de 13h (12h de trabalho): a semana de 4 plantões dá 48h; na média da 12x36 seria 42h
+    const dias = gerarEscala12x36('2026-11-01', 30, { diurno: { inicio: '07:00', fim: '20:00' } });
     expect(analisarConformidadeCLT(dias).cargaSemanal.conforme).toBe(false);
+    expect(analisarConformidadeCLT(dias, { tipoEscala: '12x36' }).cargaSemanal.conforme).toBe(true);
   });
 });
 

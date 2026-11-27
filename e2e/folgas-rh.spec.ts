@@ -15,7 +15,7 @@ test.describe('RH — folgas', () => {
     // Profissional próprio do teste: a escala e os bloqueios dele somem quando ele é excluído
     const sufixo = Array.from({ length: 6 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join('');
     const criado = await request.post(`${apiBase()}/colaboradores`, {
-      headers: admin, data: { nome: `Papeis Folga ${sufixo}`, email: `papeis.${sufixo}@teste.com`, senha: `Provisoria!${sufixo}9`, especialidade: 'Massagem' },
+      headers: admin, data: { nome: `Papeis Folga ${sufixo}`, email: `papeis.${sufixo}@teste.com`, senha: `Provisoria!${sufixo}9`, especialidade: 'Massagem', tipoEscala: '5x2' },
     });
     expect(criado.status(), await criado.text()).toBe(201);
     const { id } = await criado.json();
@@ -53,10 +53,10 @@ test.describe('RH — folgas', () => {
 
     const admin = await authHeaders(request, CONTAS.admin);
     // Profissional próprio do teste: os outros testes marcam atendimentos para a equipe do seed, e dia com
-    // atendimento não vira folga (409)
+    // atendimento não vira folga (409). 5x2: no 6x1 a folga do rodízio na mesma semana recusaria a segunda (ex.: hoje domingo)
     const sufixo = Array.from({ length: 6 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join('');
     const criado = await request.post(`${apiBase()}/colaboradores`, {
-      headers: admin, data: { nome: `Folga Teste ${sufixo}`, email: `folga.${sufixo}@teste.com`, senha: `Provisoria!${sufixo}9`, especialidade: 'Massagem' },
+      headers: admin, data: { nome: `Folga Teste ${sufixo}`, email: `folga.${sufixo}@teste.com`, senha: `Provisoria!${sufixo}9`, especialidade: 'Massagem', tipoEscala: '5x2' },
     });
     expect(criado.status(), await criado.text()).toBe(201);
     const helena = (await criado.json()) as { id: string; nome: string };
@@ -78,6 +78,13 @@ test.describe('RH — folgas', () => {
       await item.getByRole('button', { name: 'Mudar folga' }).click();
 
       const dialogo = page.getByRole('dialog', { name: 'Mudar folga' });
+      // Acessibilidade: o foco entra no modal, o Esc fecha e o foco volta para o botão que abriu; depois reabre
+      const botaoMudar = item.getByRole('button', { name: 'Mudar folga' });
+      await expect.poll(() => dialogo.evaluate((d) => d.contains(document.activeElement))).toBe(true);
+      await page.keyboard.press('Escape');
+      await expect(dialogo).toBeHidden();
+      await expect(botaoMudar).toBeFocused();
+      await botaoMudar.click();
       await dialogo.getByLabel('Novo dia de folga').selectOption({ value: novo });
       await dialogo.getByRole('button', { name: 'Mudar folga' }).click();
       await expect(dialogo).toBeHidden();
@@ -94,6 +101,32 @@ test.describe('RH — folgas', () => {
   });
 });
 
+test('6x1: segunda folga na mesma semana é recusada; trocar o domingo por trabalho libera', async ({ request }) => {
+  const admin = await authHeaders(request, CONTAS.admin);
+  const sufixo = Array.from({ length: 6 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join('');
+  const criado = await request.post(`${apiBase()}/colaboradores`, {
+    headers: admin, data: { nome: `Seis Por Um ${sufixo}`, email: `seisx1.${sufixo}@teste.com`, senha: `Provisoria!${sufixo}9`, especialidade: 'Massagem', tipoEscala: '6x1' },
+  });
+  expect(criado.status(), await criado.text()).toBe(201);
+  const { id } = await criado.json();
+  // Quarta e domingo da semana que vem (o domingo já é o descanso do 6x1)
+  const hoje = new Date(`${hojeSP()}T12:00:00Z`);
+  const quarta = somarDias(hojeSP(), ((3 - hoje.getUTCDay() + 7) % 7) + 7);
+  const domingo = somarDias(quarta, 4);
+  const gravar = (data: string, tipo: string) => request.post(`${apiBase()}/escala/override`, { headers: admin, data: { colaboradorId: id, data, tipo, ...(tipo === 'trabalho' ? { turno: '08:00-17:00' } : {}) } });
+  try {
+    const recusada = await gravar(quarta, 'folga');
+    expect(recusada.status()).toBe(409);
+    expect((await recusada.json()).erro).toContain('uma folga por semana');
+
+    expect((await gravar(domingo, 'trabalho')).ok()).toBeTruthy();
+    const aceita = await gravar(quarta, 'folga');
+    expect(aceita.ok(), await aceita.text()).toBeTruthy();
+  } finally {
+    await request.delete(`${apiBase()}/colaboradores/${id}`, { headers: admin });
+  }
+});
+
 // Horário aleatório (HH:MM) para o turno de teste: horário repetido é recusado (409) e duas execuções não colidem
 const horarioAleatorio = () => `${String(Math.floor(Math.random() * 24)).padStart(2, '0')}:${String(1 + Math.floor(Math.random() * 58)).padStart(2, '0')}`;
 const somarHoras = (hhmm: string, horas: number) => `${String((Number(hhmm.slice(0, 2)) + horas) % 24).padStart(2, '0')}${hhmm.slice(2)}`;
@@ -106,14 +139,15 @@ const apagarTurnosDeTeste = async (request: APIRequestContext, nome: string) => 
 };
 
 test.describe('RH — turnos padrão', () => {
-  test('API: todos leem; só supervisão e administração criam e excluem; horário repetido é recusado', async ({ request }) => {
+  test('API: só supervisão e administração leem, criam e excluem (RH); horário repetido é recusado', async ({ request }) => {
     const nome = `Turno Papeis ${Date.now() % 100000}`;
     const inicio = horarioAleatorio();
     const fim = somarHoras(inicio, 6);
     try {
+      // Turnos padrão são configuração do RH (Pacote 2): recepção usa /escala/operacional
       for (const conta of [CONTAS.colaboradora, CONTAS.recepcao, CONTAS.supervisor, CONTAS.admin]) {
         const lidos = await request.get(`${apiBase()}/turnos`, { headers: await authHeaders(request, conta) });
-        expect(lidos.status(), conta).toBe(200);
+        expect(lidos.status(), conta).toBe(conta === CONTAS.supervisor || conta === CONTAS.admin ? 200 : 403);
       }
       for (const conta of [CONTAS.colaboradora, CONTAS.recepcao]) {
         expect((await request.post(`${apiBase()}/turnos`, { headers: await authHeaders(request, conta), data: { nome, inicio, fim } })).status(), conta).toBe(403);

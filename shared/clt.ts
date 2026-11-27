@@ -1,3 +1,4 @@
+import { formatarDataBR } from './datasBR';
 /**
  * utils/cltValidator.ts
  * Validações de conformidade com a CLT baseadas na malha de escala.
@@ -277,34 +278,70 @@ export function analisarSetimoDiaConsecutivo(diasEscala: DiaEscala[]): {
   };
 }
 
-// Horas de um dia de trabalho (turno que vira a meia-noite conta até o fim no dia seguinte)
-const horasDoDia = (dia: DiaEscala): number => {
-  if (dia.tipo !== 'trabalho' || !dia.horaInicio || !dia.horaFim) return 0;
-  const minutos = horarioParaMinutos(dia.horaFim) - horarioParaMinutos(dia.horaInicio);
-  return Number.isNaN(minutos) ? 0 : (minutos < 0 ? minutos + 24 * 60 : minutos) / 60;
+/**
+ * O máximo de trabalho que cabe num turno de `h` horas respeitando o intervalo da CLT (art. 71), que depende das horas
+ * TRABALHADAS: até 4h, nenhum; até 6h, 15 min; acima de 6h, 1h. O turno guarda só início e fim, então o intervalo real
+ * não fica registrado e a conta assume o mínimo legal. Cresce com o turno: 6h15 a 7h dá 6h (trabalhar mais exigiria 1h
+ * de pausa), 4h a 4h15 dá 4h.
+ */
+const trabalhoMaximoNoTurno = (h: number) => (h <= 4 ? h : Math.max(4, Math.min(h - 0.25, 6), h - 1));
+
+// Horas trabalhadas num dia: o turno (que vira a meia-noite conta até o fim no dia seguinte) menos o intervalo mínimo
+export const horasDoDia = (dia: DiaEscala): number => {
+  // Mesma regra de "tem turno" da tela (horaInicio/horaFim válidos ou o campo turno): dia sem turno não soma horas
+  const turno = getShiftHours(dia);
+  if (!turno) return 0;
+  const minutos = horarioParaMinutos(turno.fim) - horarioParaMinutos(turno.inicio);
+  if (Number.isNaN(minutos)) return 0;
+  return trabalhoMaximoNoTurno((minutos < 0 ? minutos + 24 * 60 : minutos) / 60);
 };
+
+/** Segunda-feira (YYYY-MM-DD) da semana do dia */
+export const inicioDaSemana = (dataISO: string): string => {
+  const data = new Date(`${dataISO}T12:00:00Z`);
+  data.setUTCDate(data.getUTCDate() - ((data.getUTCDay() + 6) % 7));
+  return data.toISOString().slice(0, 10);
+};
+
+/**
+ * Horas extras (acima de 44h na semana de segunda a domingo) que caem nos dias do mês `prefixoMes` ("YYYY-MM-").
+ * A semana conta inteira, mesmo cruzando o mês; o excedente cai nos últimos dias trabalhados da semana.
+ */
+export function horasExtrasNoMes(diasEscala: DiaEscala[], prefixoMes: string): number {
+  const acumulado = new Map<string, number>();
+  let extras = 0;
+  for (const dia of [...diasEscala].sort((a, b) => a.data.localeCompare(b.data))) {
+    const semana = inicioDaSemana(dia.data);
+    const antes = acumulado.get(semana) ?? 0;
+    const depois = antes + horasDoDia(dia);
+    acumulado.set(semana, depois);
+    if (dia.data.startsWith(prefixoMes)) {
+      extras += Math.max(0, depois - CARGA_SEMANAL_MAXIMA_HORAS) - Math.max(0, antes - CARGA_SEMANAL_MAXIMA_HORAS);
+    }
+  }
+  return extras;
+}
+
+/** Horas de trabalho de cada semana (segunda a domingo, chave = a segunda): a conta única do limite semanal */
+export function horasPorSemana(diasEscala: DiaEscala[]): Map<string, number> {
+  const porSemana = new Map<string, number>();
+  for (const dia of diasEscala) {
+    const semana = inicioDaSemana(dia.data);
+    porSemana.set(semana, (porSemana.get(semana) ?? 0) + horasDoDia(dia));
+  }
+  return porSemana;
+}
 
 /**
  * Semana (segunda a domingo) com mais horas na malha. A CLT limita cada semana a 44h: uma semana de 60h não pode
  * sumir na média do mês.
  */
 export function calcularMaiorCargaSemanal(diasEscala: DiaEscala[]): { horas: number; inicioSemana: string | null } {
-  const porSemana = new Map<string, number>();
-  for (const dia of diasEscala) {
-    const data = new Date(`${dia.data}T12:00:00Z`);
-    const recuo = (data.getUTCDay() + 6) % 7; // dias desde a segunda-feira
-    data.setUTCDate(data.getUTCDate() - recuo);
-    const semana = data.toISOString().slice(0, 10);
-    porSemana.set(semana, (porSemana.get(semana) ?? 0) + horasDoDia(dia));
-  }
   let maior = { horas: 0, inicioSemana: null as string | null };
-  for (const [semana, horas] of porSemana) if (horas > maior.horas) maior = { horas, inicioSemana: semana };
+  for (const [semana, horas] of horasPorSemana(diasEscala)) if (horas > maior.horas) maior = { horas, inicioSemana: semana };
   return { horas: Math.round(maior.horas * 10) / 10, inicioSemana: maior.inicioSemana };
 }
 
-/**
- * Análise completa de conformidade CLT baseada na malha de escala.
- */
 /**
  * Média semanal do período. Usada na 12x36 (CLT art. 59-A): o regime alterna semanas de 36h e 48h e é legal desde que a
  * média fique dentro do limite; cobrar 44h semana a semana marcaria toda 12x36 como irregular.
@@ -315,6 +352,9 @@ export function calcularCargaSemanalMedia(diasEscala: DiaEscala[]): number {
   return Math.round((total / (diasEscala.length / 7)) * 10) / 10;
 }
 
+/**
+ * Análise completa de conformidade CLT baseada na malha de escala.
+ */
 export function analisarConformidadeCLT(diasEscala: DiaEscala[], opcoes: { tipoEscala?: string } = {}): AnaliseConformidadeCLT {
   const interjornada = analisarInterjornadaEscala(diasEscala);
   const setimoDia = analisarSetimoDiaConsecutivo(diasEscala);
@@ -324,7 +364,7 @@ export function analisarConformidadeCLT(diasEscala: DiaEscala[], opcoes: { tipoE
   const cargaTotal = regime12x36 ? calcularCargaSemanalMedia(diasEscala) : maiorSemana.horas;
   const semanaAnalisada = regime12x36
     ? 'média do período (12x36)'
-    : maiorSemana.inicioSemana ? `semana de ${maiorSemana.inicioSemana.split('-').reverse().join('/')}` : 'N/A';
+    : maiorSemana.inicioSemana ? `semana de ${formatarDataBR(maiorSemana.inicioSemana)}` : 'N/A';
 
   const cargaConforme = cargaTotal <= CARGA_SEMANAL_MAXIMA_HORAS;
   const alertasCarga = cargaConforme

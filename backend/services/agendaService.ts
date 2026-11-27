@@ -1,3 +1,4 @@
+import { formatarDataHoraBR } from '../../shared/datasBR';
 import { PAPEIS_ATENDIMENTO } from '../lib/usuarios';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
@@ -77,19 +78,41 @@ export const mensagemForaDoTurno = (
     : null;
 };
 
+type HabilidadeRef = { id: string; ativa?: boolean | null };
+
 type ServicoElegibilidade = {
+  id?: string;
   nome: string;
   modoElegibilidade?: string | null;
   cargosPermitidos?: string[] | null;
-  habilidadesPermitidas?: string[] | null;
   profissionaisPermitidos?: string[] | null;
+  // Habilidades exigidas pelo serviço (basta ter uma); arquivadas não contam
+  habilidadesExigidas?: HabilidadeRef[] | null;
 };
 
-type ColaboradorElegibilidade = { id: string; nome?: string | null; cargo?: string | null; especialidade?: string | null; habilidades?: string[] | null };
+type ColaboradorElegibilidade = {
+  id: string; nome?: string | null; cargo?: string | null; especialidade?: string | null; habilidadesCadastradas?: HabilidadeRef[] | null;
+};
 
-export const erroElegibilidade = (colaborador: ColaboradorElegibilidade, servicos: ServicoElegibilidade[]): string | null => {
+export const EXIGENCIAS_HABILIDADE = ['sempre', 'apenas_totem', 'desligado'] as const;
+export type ExigenciaHabilidade = (typeof EXIGENCIAS_HABILIDADE)[number];
+export type OrigemAgendamento = 'totem' | 'interno';
+export const RESTRICAO_HABILIDADE = '(restrição por habilidade)';
+
+// Chave global da empresa: 'sempre' barra em todo lugar; 'apenas_totem' barra só no totem (a agenda avisa); 'desligado' ignora
+export const habilidadeBarra = (exigencia: string | null | undefined, origem: OrigemAgendamento) =>
+  exigencia === 'sempre' || (exigencia === 'apenas_totem' && origem === 'totem')
+  || !(EXIGENCIAS_HABILIDADE as readonly unknown[]).includes(exigencia);
+
+const ativas = (lista?: HabilidadeRef[] | null) => (lista || []).filter((h) => h.ativa !== false);
+
+export const erroElegibilidade = (
+  colaborador: ColaboradorElegibilidade,
+  servicos: ServicoElegibilidade[],
+  { checarHabilidade = true }: { checarHabilidade?: boolean } = {},
+): string | null => {
   const cargo = normalizarNome(colaborador.cargo || colaborador.especialidade || '');
-  const habilidades = new Set((colaborador.habilidades || []).map(normalizarNome));
+  const habilidades = new Set(ativas(colaborador.habilidadesCadastradas).map((h) => h.id));
 
   for (const servico of servicos) {
     const modo = normalizarModoElegibilidade(servico.modoElegibilidade);
@@ -99,10 +122,11 @@ export const erroElegibilidade = (colaborador: ColaboradorElegibilidade, servico
         return `Profissional não habilitado para o serviço ${servico.nome} (restrição por cargo).`;
       }
     }
-    if (modo === 'habilidade') {
-      const permitidas = (servico.habilidadesPermitidas || []).map(normalizarNome);
-      if (permitidas.length === 0 || !permitidas.some((h) => habilidades.has(h))) {
-        return `Profissional não habilitado para o serviço ${servico.nome} (restrição por habilidade).`;
+    if (modo === 'habilidade' && checarHabilidade) {
+      // Sem nenhuma habilidade ativa exigida (todas arquivadas), o serviço deixa de restringir
+      const exigidas = ativas(servico.habilidadesExigidas);
+      if (exigidas.length > 0 && !exigidas.some((h) => habilidades.has(h.id))) {
+        return `Profissional não possui a habilidade exigida pelo serviço ${servico.nome} ${RESTRICAO_HABILIDADE}.`;
       }
     }
     if (modo === 'profissional') {
@@ -116,15 +140,42 @@ export const erroElegibilidade = (colaborador: ColaboradorElegibilidade, servico
   return null;
 };
 
-export const getErroElegibilidade = async (db: DbOuTransacao, colaboradorId: string, servicos: ServicoElegibilidade[]) => {
+// Habilidades ativas exigidas por cada serviço, lidas do banco (quem chama pode passar o serviço sem o vínculo)
+const comHabilidadesExigidas = async <S extends ServicoElegibilidade>(db: DbOuTransacao, servicos: S[]) => {
+  const ids = servicos.map((s) => s.id).filter((id): id is string => Boolean(id));
+  if (ids.length === 0) return servicos;
+  const vinculos = await db.servico.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, habilidadesExigidas: { where: { ativa: true }, select: { id: true } } },
+  });
+  const porId = new Map(vinculos.map((v) => [v.id, v.habilidadesExigidas]));
+  return servicos.map((s) => (s.id && porId.has(s.id) ? { ...s, habilidadesExigidas: porId.get(s.id) } : s));
+};
+
+export const getErroElegibilidade = async (
+  db: DbOuTransacao, colaboradorId: string, servicos: ServicoElegibilidade[], { checarHabilidade = true }: { checarHabilidade?: boolean } = {},
+) => {
   const colaborador = await db.colaborador.findUnique({
     where: { id: colaboradorId },
-    select: { id: true, nome: true, cargo: true, especialidade: true, habilidades: true, ativo: true, papel: true },
+    select: {
+      id: true, nome: true, cargo: true, especialidade: true, ativo: true, papel: true,
+      habilidadesCadastradas: { where: { ativa: true }, select: { id: true } },
+    },
   });
   if (!colaborador || !colaborador.ativo) return 'Profissional não encontrado.';
   // Recepção, supervisão e admin não atendem: agendar para eles daria acesso indevido à ficha de saúde
   if (!PAPEIS_ATENDIMENTO.includes(colaborador.papel)) return 'Só é possível agendar para profissionais que atendem clientes.';
-  return erroElegibilidade(colaborador, servicos);
+  return erroElegibilidade(colaborador, await comHabilidadesExigidas(db, servicos), { checarHabilidade });
+};
+
+const lerExigencia = async (db: DbOuTransacao) =>
+  (await db.configuracaoEmpresa.findUnique({ where: { id: 'default' }, select: { exigenciaHabilidades: true } }))?.exigenciaHabilidades ?? 'sempre';
+
+// Agenda interna no modo 'apenas_totem': o agendamento passa, mas a recepção vê que falta a habilidade
+export const avisoDeHabilidade = async (db: DbOuTransacao, colaboradorId: string, servicos: ServicoElegibilidade[]) => {
+  if ((await lerExigencia(db)) !== 'apenas_totem') return null;
+  const erro = await getErroElegibilidade(db, colaboradorId, servicos);
+  return erro?.includes(RESTRICAO_HABILIDADE) ? erro.replace(` ${RESTRICAO_HABILIDADE}`, '') + ' Agendado mesmo assim (exigência só no totem).' : null;
 };
 
 type AgendamentoComServicos = { id: string; data: Date; servicos: ServicoComDuracao[] };
@@ -201,10 +252,7 @@ export const verificarConflitoSala = async (
   return existeTrava(chaves, sessaoPropria);
 };
 
-const formatarDataHora = (instante: Date) => {
-  const { data, horario } = partesNoFuso(instante);
-  return `${data.slice(8, 10)}/${data.slice(5, 7)} ${horario}`;
-};
+const formatarDataHora = (instante: Date) => formatarDataHoraBR(instante);
 
 export const verificarCLTInterjornadaEmMemoria = (
   agendamentosOrdenados: Array<{ data: Date; servicos: ServicoComDuracao[] }>,
@@ -287,15 +335,17 @@ export const validarDisponibilidadeProfissional = async (
   colaboradorId: string,
   inicio: Date,
   servicos: Array<ServicoElegibilidade & ServicoComDuracao>,
-  opcoes: { ignorarAgendamentoId?: string; sessaoPropria?: string } = {},
+  opcoes: { ignorarAgendamentoId?: string; sessaoPropria?: string; origem?: OrigemAgendamento } = {},
 ): Promise<{ status: number; erro: string } | null> => {
   const { data, minutos } = partesNoFuso(inicio);
   const escala = await getEscalaDoDia(db, colaboradorId, data);
   const msgEscala = mensagemIndisponibilidadeEscala(escala) ?? mensagemForaDoTurno(escala, minutos, minutos + duracaoTotal(servicos));
   if (msgEscala) return { status: 409, erro: msgEscala };
 
-  const erroElegivel = await getErroElegibilidade(db, colaboradorId, servicos);
-  if (erroElegivel) return { status: 409, erro: erroElegivel };
+  const checarHabilidade = habilidadeBarra(await lerExigencia(db), opcoes.origem ?? 'interno');
+  const erroElegivel = await getErroElegibilidade(db, colaboradorId, servicos, { checarHabilidade });
+  // Falta de habilidade é regra de negócio do pedido (422), não disputa de horário (409)
+  if (erroElegivel) return { status: erroElegivel.includes(RESTRICAO_HABILIDADE) ? 422 : 409, erro: erroElegivel };
 
   const duracao = duracaoTotal(servicos);
   const conflito = await verificarConflito(db, colaboradorId, inicio, duracao, opcoes);

@@ -54,7 +54,7 @@ export function AuditorModal({ open, alerts, onClose, onResolve }: AuditorModalP
           {alerts.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-center">
               <span className="material-symbols-outlined text-6xl text-emerald-500/50 mb-4">check_circle</span>
-              <h3 className="text-lg font-headline text-emerald-600 mb-2">Escala em Conformidade</h3>
+              <h3 className="text-lg font-headline text-emerald-700 dark:text-emerald-400 mb-2">Escala em Conformidade</h3>
               <p className="text-sm text-on-surface-variant max-w-xs">Nenhuma infração trabalhista detectada. Sua equipe está operando dentro dos limites legais.</p>
             </div>
           ) : (

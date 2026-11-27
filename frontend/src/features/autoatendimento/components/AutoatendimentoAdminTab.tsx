@@ -5,7 +5,6 @@ import {
   fetchAutoatendimentoConfig,
   updateAutoatendimentoConfig,
 } from '../services/autoatendimentoService';
-import { AutoatendimentoView } from './AutoatendimentoView';
 import { mensagemDeErro } from '../utils/erros';
 import { useAuth } from '../../../AuthContext';
 
@@ -30,9 +29,6 @@ export function AutoatendimentoAdminTab() {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Modo Simulador Mobile
-  const [showMobileSimulator, setShowMobileSimulator] = useState(false);
-  const [simulatorDevice, setSimulatorDevice] = useState<'iphone' | 'android' | 'tablet'>('iphone');
 
   useEffect(() => {
     let mounted = true;
@@ -103,26 +99,11 @@ export function AutoatendimentoAdminTab() {
             Configurações do Autoatendimento
           </h2>
           <p className="text-xs sm:text-sm text-on-surface-variant font-body">
-            Gerencie as regras do totem, ligue/desligue pagamentos online e visualize o layout mobile em tempo real.
+            Gerencie as regras do totem e ligue/desligue pagamentos online.
           </p>
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={() => setShowMobileSimulator(!showMobileSimulator)}
-            className={`px-4 py-2.5 rounded-xl border text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
-              showMobileSimulator
-                ? 'bg-primary text-on-primary border-primary shadow-md'
-                : 'bg-surface-container border-outline-variant/30 text-on-surface-variant hover:text-primary hover:border-primary/40'
-            }`}
-          >
-            <span className="material-symbols-outlined text-[18px]">
-              {showMobileSimulator ? 'desktop_windows' : 'smartphone'}
-            </span>
-            <span>{showMobileSimulator ? 'Ocultar Simulador' : 'Simulador Mobile'}</span>
-          </button>
-
           <button
             type="button"
             disabled={saving}
@@ -160,100 +141,6 @@ export function AutoatendimentoAdminTab() {
           <span className="material-symbols-outlined text-lg">error</span>
           <span>{error}</span>
         </div>
-      )}
-
-      {/* Se o simulador mobile estiver ativo */}
-      {showMobileSimulator && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-surface-container-low border border-outline-variant/30 rounded-3xl p-6 shadow-xl space-y-4"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-outline-variant/15 pb-4">
-            <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary text-xl">devices</span>
-              <h3 className="font-bold text-sm text-primary uppercase tracking-wider">
-                Simulador de Acessibilidade Mobile
-              </h3>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-on-surface-variant font-medium">Dispositivo:</span>
-              <button
-                type="button"
-                onClick={() => setSimulatorDevice('iphone')}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  simulatorDevice === 'iphone'
-                    ? 'bg-primary text-on-primary shadow-xs'
-                    : 'bg-surface-container text-on-surface-variant hover:text-primary'
-                }`}
-              >
-                iPhone (375px)
-              </button>
-              <button
-                type="button"
-                onClick={() => setSimulatorDevice('android')}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  simulatorDevice === 'android'
-                    ? 'bg-primary text-on-primary shadow-xs'
-                    : 'bg-surface-container text-on-surface-variant hover:text-primary'
-                }`}
-              >
-                Galaxy (390px)
-              </button>
-              <button
-                type="button"
-                onClick={() => setSimulatorDevice('tablet')}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  simulatorDevice === 'tablet'
-                    ? 'bg-primary text-on-primary shadow-xs'
-                    : 'bg-surface-container text-on-surface-variant hover:text-primary'
-                }`}
-              >
-                Tablet (768px)
-              </button>
-            </div>
-          </div>
-
-          <div className="flex justify-center p-4 bg-black/10 dark:bg-black/40 rounded-2xl overflow-x-auto">
-            {/* Moldura do Smartphone */}
-            <div
-              className={`${deviceWidths[simulatorDevice]} bg-surface-container-lowest border-4 border-neutral-800 rounded-[44px] shadow-2xl overflow-hidden flex flex-col relative transition-all duration-300 ring-8 ring-neutral-900/10`}
-            >
-              {/* Notch / Speaker */}
-              <div className="w-full bg-neutral-900 h-6 flex items-center justify-center relative shrink-0">
-                <div className="w-20 h-3.5 bg-black rounded-b-xl flex items-center justify-center">
-                  <div className="w-3 h-1 bg-neutral-700 rounded-full" />
-                </div>
-              </div>
-
-              {/* Tela do Aplicativo com Scroll Independente */}
-              <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 custom-scrollbar">
-                <AutoatendimentoView />
-              </div>
-
-              {/* Barra de Navegação Inferior (Home Indicator) */}
-              <div className="w-full h-4 bg-neutral-900 flex items-center justify-center shrink-0">
-                <div className="w-28 h-1 bg-neutral-500 rounded-full" />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-on-surface-variant pt-2">
-            <span className="flex items-center gap-1 text-emerald-600 font-semibold">
-              <span className="material-symbols-outlined text-[16px]">check_circle</span>
-              Touch Target Seguro (&gt;= 44px)
-            </span>
-            <span className="flex items-center gap-1 text-emerald-600 font-semibold">
-              <span className="material-symbols-outlined text-[16px]">check_circle</span>
-              Sem Transbordo Horizontal
-            </span>
-            <span className="flex items-center gap-1 text-emerald-600 font-semibold">
-              <span className="material-symbols-outlined text-[16px]">check_circle</span>
-              Scroll Snap de 14 Dias Fluido
-            </span>
-          </div>
-        </motion.div>
       )}
 
       {/* Grid de Configurações */}
@@ -311,7 +198,7 @@ export function AutoatendimentoAdminTab() {
                   Modo com Pagamento Online Ativado
                 </p>
                 <p className="text-on-surface-variant">
-                  O cliente deve pagar o sinal ({config.percentualSinal}%) ou o valor integral via Pix ou Cartão. O horário fica reservado por {config.tempoLockMinutos} minutos via Redis enquanto realiza o pagamento.
+                  O cliente deve pagar o sinal ({config.percentualSinal}%) ou o valor integral via Pix ou Cartão. O horário fica reservado por {config.tempoLockMinutos} minutos enquanto ele realiza o pagamento.
                 </p>
               </div>
             ) : (
@@ -366,7 +253,7 @@ export function AutoatendimentoAdminTab() {
                   Fica guardado para quando o gateway for conectado. Até lá o totem não cobra sinal e o pagamento é feito na recepção.
                 </p>
               )}
-              <div className="flex justify-between text-[11px] text-outline-variant">
+              <div className="flex justify-between text-[11px] text-on-surface-variant">
                 <span>10% (Sinal Leve)</span>
                 <span>40% (Recomendado)</span>
                 <span>100% (Integral)</span>
@@ -425,7 +312,7 @@ export function AutoatendimentoAdminTab() {
           {/* Tempo de Lock no Redis */}
           <div className="space-y-2 pt-2 border-t border-outline-variant/15">
             <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider">
-              Tempo de Bloqueio Temporário no Redis (Lock Slot)
+              Tempo que o horário fica reservado durante a compra
             </label>
             <select
               value={config.tempoLockMinutos}
@@ -437,7 +324,7 @@ export function AutoatendimentoAdminTab() {
               <option value={15}>15 minutos (Maior tranquilidade no Pix)</option>
               <option value={20}>20 minutos (Folgado)</option>
             </select>
-            <p className="text-[11px] text-outline-variant">
+            <p className="text-[11px] text-on-surface-variant">
               Tempo que o horário e o espaço ficam reservados para o cliente concluir o agendamento.
             </p>
           </div>
@@ -467,16 +354,6 @@ export function AutoatendimentoAdminTab() {
               placeholder="Ex: Chegue com 15 minutos de antecedência e apresente-se na recepção."
               className="w-full bg-surface-container-low border border-outline-variant/30 rounded-2xl p-3.5 text-xs text-on-surface focus:ring-1 focus:ring-primary"
             />
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-8 py-3 rounded-xl bg-primary text-on-primary hover:bg-primary-dim font-bold text-xs uppercase tracking-[0.15em] shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              {saving ? 'Salvando...' : 'Salvar Alterações'}
-            </button>
           </div>
         </div>
       </form>

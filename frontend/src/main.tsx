@@ -3,10 +3,29 @@ import {createRoot} from 'react-dom/client';
 import * as Sentry from '@sentry/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './AuthContext';
-import { isAutoatendimentoHost } from './config/hosts';
+import { ConfirmacaoSaidaHost } from './components/ConfirmacaoSaida';
+import { isAutoatendimentoHost, noCaminho } from './config/hosts';
+// Ícones do próprio build (sem depender do Google Fonts: sem internet viravam texto cru)
+import 'material-symbols/outlined.css';
 import './index.css';
 
-const SENTRY_DSN = "SUA_DSN_DO_SENTRY_AQUI"; // Insira a chave fornecida pelo painel do Sentry
+// Cópia rápida da cor do sistema (a fonte é a configuração da empresa, que o App confere e atualiza logo depois):
+// a página já abre com a cor certa em vez de piscar a padrão enquanto a configuração carrega
+try {
+  const cor = localStorage.getItem('gestao:cor-sistema');
+  if (cor && /^#[0-9a-f]{6}$/i.test(cor)) document.documentElement.style.setProperty('--brand', cor);
+} catch { /* navegador sem localStorage: espera a configuração */ }
+
+// Libera os ícones quando a fonte deles termina de baixar (ver index.css): antes disso apareceriam como palavras.
+// Se o download falhar, libera também: a palavra ("schedule") ao menos diz o que o botão faz; invisível não diria nada
+const liberarIcones = () => document.documentElement.classList.add('icones-ok');
+if (document.fonts?.load) {
+  document.fonts.load('24px "Material Symbols Outlined"', 'spa').finally(liberarIcones).catch(() => {});
+} else {
+  liberarIcones(); // navegador sem a API de fontes: comportamento de antes
+}
+
+const SENTRY_DSN ="SUA_DSN_DO_SENTRY_AQUI"; // Insira a chave fornecida pelo painel do Sentry
 
 if (SENTRY_DSN && SENTRY_DSN !== "SUA_DSN_DO_SENTRY_AQUI") {
   // Inicialize o Sentry antes de renderizar a aplicação
@@ -104,8 +123,9 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
+      <ConfirmacaoSaidaHost />
       <QueryClientProvider client={queryClient}>
-        {isAutoatendimentoHost() ? (
+        {isAutoatendimentoHost() || noCaminho('/totem') ? (
           <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm opacity-70">Carregando Totem de Autoatendimento...</div>}>
             <AutoatendimentoStandalone />
           </Suspense>

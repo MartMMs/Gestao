@@ -1,11 +1,13 @@
+import { formatarDataHoraBR } from '@shared/datasBR';
+import { formatarDataBR } from '@shared/datasBR';
 import React, { useMemo, useState } from 'react';
+import { formatarReais } from '../../../utils/formatters';
 import { motion } from 'motion/react';
 import { isApiError, useAtendimentosDoRelatorio, useAuditoria, useRelatorioFinanceiro, type RelatorioFinanceiro } from '../../../api';
 import { useAuth } from '../../../AuthContext';
 import { periodoRapido } from '../../../utils/periodos';
+import { AcessosHistoricoClientes } from './AcessosHistoricoClientes';
 
-const reais = (valor: number) => valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const dataBr = (iso: string) => iso.split('-').reverse().join('/');
 
 // CSV com ponto e vírgula e vírgula decimal: abre direto no Excel em português
 const baixarCsv = (relatorio: RelatorioFinanceiro) => {
@@ -30,6 +32,7 @@ const baixarCsv = (relatorio: RelatorioFinanceiro) => {
 const STATUS_ROTULO: Record<string, string> = { completed: 'Concluído', no_show: 'Falta', cancelled: 'Cancelado', sem_baixa: 'Sem baixa' };
 
 const ACAO_ROTULO: Record<string, string> = {
+  'servico.criado': 'Serviço criado',
   'servico.alterado': 'Serviço alterado',
   'servico.tirado_de_linha': 'Serviço tirado de linha',
   'servico.reativado': 'Serviço voltou ao catálogo',
@@ -37,24 +40,73 @@ const ACAO_ROTULO: Record<string, string> = {
   'totem.cobranca': 'Cobrança do totem',
   'empresa.comissao': 'Comissão da empresa',
   'empresa.anamnese': 'Exigência de anamnese',
+  'empresa.habilidades': 'Exigência de habilidades nos agendamentos',
+  'habilidade.criada': 'Habilidade criada',
+  'habilidade.alterada': 'Habilidade renomeada',
+  'habilidade.reativada': 'Habilidade reativada',
+  'habilidade.arquivada': 'Habilidade arquivada',
+  'empresa.horario': 'Horário de funcionamento',
   'cliente.anamnese': 'Ficha de anamnese',
+  'formulario.anamnese': 'Formulário de anamnese alterado',
+  'formulario.preset': 'Modelo de formulário do segmento carregado',
   'agendamento.reaberto': 'Atendimento reaberto',
+  'agendamento.realocado': 'Atendimento realocado',
   'agendamento.valores': 'Valor do atendimento alterado',
   'agendamento.excluido': 'Atendimento excluído',
-  'servico.criado': 'Serviço criado',
+  'escala.ausencia.remover': 'Ausência removida da escala',
+  'conta.senha': 'Troca de senha',
+  'whatsapp.conectar': 'WhatsApp conectado',
+  'whatsapp.desconectar': 'WhatsApp desconectado',
+  'whatsapp.mensagens': 'Mensagens de lembrete (WhatsApp)',
 };
 
 const CAMPO_ROTULO: Record<string, string> = {
-  preco: 'preço', comissaoPercentual: 'comissão (%)', nome: 'nome', duracao: 'duração (min)', ativo: 'ativo',
-  exigirPagamento: 'cobrança online', percentualSinal: 'sinal (%)', usarComissao: 'usar comissão', exigirAnamnese: 'exigir ficha de anamnese', fichaAnamnese: 'ficha preenchida', existe: 'existe', status: 'situação', valorTotal: 'valor', valorComissao: 'comissão',
+  preco: 'preço',
+  comissaoPercentual: 'comissão (%)',
+  nome: 'nome',
+  duracao: 'duração (min)',
+  ativo: 'ativo',
+  exigirPagamento: 'cobrança online',
+  percentualSinal: 'sinal (%)',
+  usarComissao: 'usar comissão',
+  exigirAnamnese: 'exigir ficha de anamnese',
+  exigenciaHabilidades: 'exigir habilidades',
+  ativa: 'ativa',
+  modoElegibilidade: 'quem pode atender',
+  habilidadesPermitidas: 'habilidades exigidas',
+  fichaAnamnese: 'ficha preenchida',
+  existe: 'existe',
+  status: 'situação',
+  valorTotal: 'valor',
+  valorComissao: 'comissão',
+  profissional: 'profissional',
+  horaAbertura: 'abertura',
+  horaFechamento: 'fechamento',
+  horaLimiteAgendamento: 'último horário',
+  diasFuncionamento: 'dias de funcionamento',
+  conectado: 'conectado',
+  quantidade: 'modelos configurados',
+  pedeConfirmacao: 'pedir confirmação',
+  trocarSenha: 'senha provisória pendente',
+  motivo: 'motivo',
+  inicio: 'início',
+  fim: 'fim',
+  dias: 'dias',
+  versao: 'versão do formulário',
+  ativos: 'perguntas ativas',
+  arquivados: 'perguntas arquivadas',
+  fichaFormulario: 'ficha do formulário',
 };
 
 const valorLegivel = (campo: string, v: unknown) => {
   if (v === true) return 'sim';
   if (v === false) return 'não';
   if (v === null || v === undefined) return '—';
-  if ((campo === 'preco' || campo === 'valorTotal' || campo === 'valorComissao') && typeof v === 'number') return reais(v);
+  if ((campo === 'preco' || campo === 'valorTotal' || campo === 'valorComissao') && typeof v === 'number') return formatarReais(v);
   if (campo === 'status') return v === 'scheduled' ? 'Agendado' : STATUS_ROTULO[String(v)] ?? String(v);
+  if (campo === 'exigenciaHabilidades') return ({ sempre: 'exigir sempre', apenas_totem: 'só no totem', desligado: 'desligado' } as Record<string, string>)[String(v)] ?? String(v);
+  if (campo === 'modoElegibilidade') return ({ livre: 'qualquer profissional', cargo: 'por cargo', habilidade: 'por habilidade', profissional: 'profissionais escolhidos' } as Record<string, string>)[String(v)] ?? String(v);
+  if (Array.isArray(v)) return v.length ? v.join(', ') : 'nenhuma';
   return String(v);
 };
 
@@ -86,15 +138,15 @@ function DetalheProfissional({ colaboradorId, de, ate, usarComissao }: { colabor
       <tbody>
         {data.atendimentos.map((a) => (
           <tr key={a.id} className="border-t border-outline-variant/10">
-            <td className="py-2 px-3 tabular-nums">{dataBr(a.data)} {a.horario}</td>
+            <td className="py-2 px-3 tabular-nums">{formatarDataBR(a.data)} {a.horario}</td>
             <td className="py-2 px-3">{a.cliente} <span className="font-mono text-on-surface-variant">#{a.clienteCodigo}</span></td>
             <td className="py-2 px-3">{a.servicos.join(', ')}</td>
             <td className="py-2 px-3">
               {STATUS_ROTULO[a.status] ?? a.status}
               {a.status === 'sem_baixa' && <span className="block text-[11px] text-on-surface-variant">Conclua ou marque falta na agenda</span>}
             </td>
-            <td className="py-2 px-3 text-right tabular-nums">{reais(a.valor)}</td>
-            {usarComissao && <td className="py-2 px-3 text-right tabular-nums">{reais(a.comissao)}</td>}
+            <td className="py-2 px-3 text-right tabular-nums">{formatarReais(a.valor)}</td>
+            {usarComissao && <td className="py-2 px-3 text-right tabular-nums">{formatarReais(a.comissao)}</td>}
           </tr>
         ))}
       </tbody>
@@ -110,7 +162,7 @@ function HistoricoAlteracoes() {
   return (
     <div className="bg-surface-container-lowest border border-outline-variant/10 rounded-3xl p-5">
       <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant mb-1">Histórico de alterações</h3>
-      <p className="text-xs text-on-surface-variant mb-3">Preços, comissões, serviços fora de linha e cobrança do totem: quem mudou e quando.</p>
+      <p className="text-xs text-on-surface-variant mb-3">Serviços, preços, horários, cobrança do totem, WhatsApp, escala e alterações de conta: quem mudou e quando.</p>
       {isLoading && <p className="text-xs text-on-surface-variant">Carregando...</p>}
       {error && (
         <p role="alert" className="text-xs text-error">
@@ -124,7 +176,7 @@ function HistoricoAlteracoes() {
           <li key={r.id} className="py-2 text-xs">
             <div className="flex flex-wrap justify-between gap-2">
               <span className="font-bold text-on-surface">{ACAO_ROTULO[r.acao] ?? r.acao} · {r.alvo}</span>
-              <span className="text-on-surface-variant">{new Date(r.criadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })} · {r.usuarioNome}</span>
+              <span className="text-on-surface-variant">{formatarDataHoraBR(r.criadoEm)} · {r.usuarioNome}</span>
             </div>
             <p className="text-on-surface-variant mt-0.5">
               {Object.keys(r.depois ?? {}).map((campo) => (
@@ -147,10 +199,10 @@ export function RelatorioFinanceiroTab() {
   const maiorFaturamento = useMemo(() => Math.max(1, ...(data?.profissionais.map((p) => p.faturamento) ?? [])), [data]);
 
   const cartoes = data ? [
-    { rotulo: 'Faturamento', valor: reais(data.totais.faturamento), icone: 'payments' },
+    { rotulo: 'Faturamento', valor: formatarReais(data.totais.faturamento), icone: 'payments' },
     ...(data.usarComissao ? [
-      { rotulo: 'Comissões', valor: reais(data.totais.comissao), icone: 'percent' },
-      { rotulo: 'Líquido (após comissões)', valor: reais(data.totais.liquido), icone: 'account_balance_wallet' },
+      { rotulo: 'Comissões', valor: formatarReais(data.totais.comissao), icone: 'percent' },
+      { rotulo: 'Líquido (após comissões)', valor: formatarReais(data.totais.liquido), icone: 'account_balance_wallet' },
     ] : []),
     { rotulo: 'Atendimentos concluídos', valor: String(data.totais.concluidos), icone: 'task_alt' },
     { rotulo: 'Faltas', valor: String(data.totais.faltas), icone: 'person_off' },
@@ -167,27 +219,31 @@ export function RelatorioFinanceiroTab() {
             {data ? `Faturamento${data.usarComissao ? ' e comissão' : ''} por profissional` : 'Faturamento por profissional'}, com os valores gravados em cada atendimento concluído. Clique num profissional para ver os atendimentos.
           </p>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-wrap items-end justify-end gap-3">
+          <div className="flex flex-wrap items-end gap-2">
           {([['mes', 'Este mês'], ['mesPassado', 'Mês passado'], ['30dias', 'Últimos 30 dias']] as const).map(([tipo, rotulo]) => {
             const atalho = periodoRapido(tipo);
             const ativo = atalho.de === periodo.de && atalho.ate === periodo.ate;
             return (
-            <button key={tipo} type="button" aria-pressed={ativo} onClick={() => setPeriodo(atalho)} className={`px-3 py-2 rounded-xl text-[11px] font-bold uppercase tracking-wide ${ativo ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant hover:text-primary'}`}>
+            <button key={tipo} type="button" aria-pressed={ativo} onClick={() => setPeriodo(atalho)} className={`h-10 px-3 rounded-xl text-[11px] font-bold uppercase tracking-wide ${ativo ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant hover:text-primary'}`}>
               {rotulo}
             </button>
             );
           })}
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
           <label className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">
             De
-            <input type="date" value={periodo.de} max={periodo.ate} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, de: e.target.value }))} className="block mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-2 text-sm normal-case" />
+            <input type="date" value={periodo.de} max={periodo.ate} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, de: e.target.value }))} className="block mt-1 h-10 bg-surface-container-lowest border border-outline-variant/20 rounded-xl px-2 text-sm normal-case" />
           </label>
           <label className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">
             Até
-            <input type="date" value={periodo.ate} min={periodo.de} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, ate: e.target.value }))} className="block mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-2 text-sm normal-case" />
+            <input type="date" value={periodo.ate} min={periodo.de} onChange={(e) => e.target.value && setPeriodo((p) => ({ ...p, ate: e.target.value }))} className="block mt-1 h-10 bg-surface-container-lowest border border-outline-variant/20 rounded-xl px-2 text-sm normal-case" />
           </label>
-          <button type="button" disabled={!data || data.profissionais.length === 0} onClick={() => data && baixarCsv(data)} title={data && data.profissionais.length === 0 ? 'Sem atendimentos no período' : undefined} className="px-4 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wide bg-primary text-on-primary disabled:opacity-50 flex items-center gap-1">
-            <span className="material-symbols-outlined text-[16px]">download</span> Exportar planilha
+          <button type="button" disabled={!data || data.profissionais.length === 0} onClick={() => data && baixarCsv(data)} title={data && data.profissionais.length === 0 ? 'Sem atendimentos no período' : undefined} className="h-10 px-4 rounded-xl text-[11px] font-bold uppercase tracking-wide bg-primary text-on-primary disabled:opacity-50 flex items-center gap-1">
+            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">download</span> Exportar planilha
           </button>
+          </div>
         </div>
       </div>
 
@@ -211,14 +267,14 @@ export function RelatorioFinanceiroTab() {
 
       {data && (
         <>
-          <p className="text-xs text-on-surface-variant">Período: {dataBr(data.periodo.de)} a {dataBr(data.periodo.ate)}</p>
+          <p className="text-xs text-on-surface-variant">Período: {formatarDataBR(data.periodo.de)} a {formatarDataBR(data.periodo.ate)}</p>
           {data.totais.semBaixa > 0 && (
             <p role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-on-surface">
               {data.totais.semBaixa === 1 ? '1 atendimento' : `${data.totais.semBaixa} atendimentos`} sem baixa no período: o horário passou e
               ninguém concluiu nem marcou falta. Eles ficam fora do faturamento e da comissão até você concluir ou marcar falta na agenda.
             </p>
           )}
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
+          <div className={`grid gap-3 ${cartoes.length <= 5 ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-7'}`}>
             {cartoes.map((c) => (
               <div key={c.rotulo} className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-4">
                 <span className="material-symbols-outlined text-primary text-[20px]">{c.icone}</span>
@@ -269,12 +325,15 @@ export function RelatorioFinanceiroTab() {
                     <td className="py-3 px-4 text-right tabular-nums">{p.concluidos}</td>
                     <td className="py-3 px-4 min-w-48">
                       <div className="flex items-center gap-2">
-                        <div className="h-2 rounded-full bg-primary/70" style={{ width: `${Math.max(2, (p.faturamento / maiorFaturamento) * 100)}%`, maxWidth: '8rem' }} />
-                        <span className="tabular-nums">{reais(p.faturamento)}</span>
+                        <div
+                          className={`h-2 rounded-full ${p.faturamento > 0 ? 'bg-primary/70' : 'bg-outline-variant/30'}`}
+                          style={{ width: p.faturamento > 0 ? `${Math.max(4, (p.faturamento / maiorFaturamento) * 100)}%` : '0.5rem', maxWidth: '8rem' }}
+                        />
+                        <span className={`tabular-nums ${p.faturamento > 0 ? 'text-on-surface' : 'text-on-surface-variant'}`}>{formatarReais(p.faturamento)}</span>
                       </div>
                     </td>
-                    {data.usarComissao && <td className="py-3 px-4 text-right tabular-nums">{reais(p.comissao)}</td>}
-                    <td className="py-3 px-4 text-right tabular-nums">{reais(p.ticketMedio)}</td>
+                    {data.usarComissao && <td className="py-3 px-4 text-right tabular-nums">{formatarReais(p.comissao)}</td>}
+                    <td className="py-3 px-4 text-right tabular-nums">{formatarReais(p.ticketMedio)}</td>
                     <td className="py-3 px-4 text-right tabular-nums">{p.faltas}</td>
                     <td className={`py-3 px-4 text-right tabular-nums ${p.semBaixa > 0 ? 'font-bold text-amber-700 dark:text-amber-300' : ''}`}>{p.semBaixa}</td>
                     <td className="py-3 px-4 text-right tabular-nums">{p.cancelados}</td>
@@ -299,7 +358,7 @@ export function RelatorioFinanceiroTab() {
                 {data.servicos.slice(0, 10).map((s) => (
                   <li key={s.nome} className="flex justify-between gap-3 text-sm">
                     <span className="text-on-surface truncate">{s.nome} <span className="text-on-surface-variant">· {s.quantidade}x</span></span>
-                    <span className="tabular-nums text-on-surface">{reais(s.faturamento)}</span>
+                    <span className="tabular-nums text-on-surface">{formatarReais(s.faturamento)}</span>
                   </li>
                 ))}
               </ul>
@@ -309,6 +368,7 @@ export function RelatorioFinanceiroTab() {
       )}
 
       {currentUser?.role === 'admin' && <HistoricoAlteracoes />}
+      <AcessosHistoricoClientes />
     </motion.div>
   );
 }

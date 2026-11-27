@@ -7,18 +7,19 @@ import { valoresGravados } from '../lib/valores';
 import { usuarioEhAdmin, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
 import { redisService } from '../services/redisService';
 import { communicationService } from '../services/communicationService';
-import { comDisponibilidadePagamento, gatewayPagamento, getAutoatendimentoConfig, getEmpresaConfig, pagamentoOnlineDisponivel } from '../services/configService';
+import { empresaPublica, comDisponibilidadePagamento, gatewayPagamento, getAutoatendimentoConfig, getEmpresaConfig, pagamentoOnlineDisponivel } from '../services/configService';
 import {
   agendamentosDoDia,
   blocosDoIntervalo,
   chaveTravaProfissional,
   chaveTravaSala,
   erroElegibilidade,
+  habilidadeBarra,
   existeTrava,
   mensagemIndisponibilidadeEscala, mensagemForaDoTurno,
   verificarCLTInterjornadaEmMemoria,
 } from '../services/agendaService';
-import { HttpError, responderErro, ipDoCliente } from '../lib/http';
+import { HttpError, ServicoIndisponivelError, responderErro, ipDoCliente } from '../lib/http';
 import { redactSensitiveData } from '../../shared/redact';
 import {
   PAPEIS_ATENDIMENTO,
@@ -28,6 +29,7 @@ import {
   duracaoProduto,
   escolherProfissionalESala,
   lerClienteTotem,
+  aplicarFichaDoTotem,
   lerIdsServicos,
   liberarReserva,
   resumoServicos,
@@ -37,8 +39,12 @@ import {
 import { buscarServicosPorId } from '../services/servicoService';
 import type { Eventos } from '../lib/eventos';
 import {
-  HORA_ABERTURA,
-  HORA_FECHAMENTO,
+  diaDaSemana,
+  lerFuncionamento,
+  funcionamentoNaData,
+  abreNaData,
+  mensagemCasaFechada,
+  diaNoPlural,
   INTERVALO_SLOT_TOTEM_MIN,
   dataValida,
   duracaoServico,
@@ -52,6 +58,8 @@ import {
 } from '../../shared/agenda';
 import { normalizarTelefone, semSufixoDoTotem } from '../../shared/validadores';
 import { ESCOPOS } from '../../shared/escopos';
+import { formularioPublico } from '../../shared/formularioAnamnese';
+import { listarCampos } from '../services/formularioService';
 
 const TTL_RESULTADO_SEGUNDOS = 15 * 60;
 const TTL_CONFIRMACAO_SEGUNDOS = 120;
@@ -123,9 +131,18 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
 
   router.get('/empresa', async (_req, res) => {
     try {
-      res.json(await getEmpresaConfig());
+      res.json(empresaPublica(await getEmpresaConfig()));
     } catch (error) {
       responderErro(res, error, 'Falha ao buscar dados da empresa.');
+    }
+  });
+
+  // Formulário de anamnese do totem: lista branca dos campos ativos de "ambos" e "apenas_totem" (shared/formularioAnamnese)
+  router.get('/formulario', async (_req, res) => {
+    try {
+      res.json(formularioPublico((await listarCampos()).campos));
+    } catch (error) {
+      responderErro(res, error, 'Falha ao buscar o formulário do totem.');
     }
   });
 
@@ -160,8 +177,10 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
   router.get('/servicos', async (_req, res) => {
     try {
       const servicos = await prisma.servico.findMany({ where: { ativo: true }, orderBy: [{ ordem: 'asc' }, { nome: 'asc' }] });
-      // Profissionais exclusivos e comissão são internos; o catálogo público não precisa deles
-      res.json(servicos.map(({ profissionaisPermitidos: _ids, comissaoPercentual: _comissao, ...s }) => s));
+      // Regras de quem atende (profissionais, cargos, habilidades) e comissão são internas: o catálogo público não as leva
+      res.json(servicos.map(({
+        profissionaisPermitidos: _ids, comissaoPercentual: _comissao, cargosPermitidos: _cargos, habilidadesPermitidasLegado: _hab, ...s
+      }) => s));
     } catch (error) {
       responderErro(res, error, 'Falha ao buscar catálogo de serviços.');
     }
@@ -197,7 +216,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       const [colaboradores, salas, agendamentos, escalas, agendamentosVizinhos] = await Promise.all([
         prisma.colaborador.findMany({
           where: { ativo: true, papel: { in: PAPEIS_ATENDIMENTO } },
-          include: { bloqueios: { where: { data } } },
+          include: { bloqueios: { where: { data } }, habilidadesCadastradas: { where: { ativa: true }, select: { id: true } } },
           orderBy: { nome: 'asc' },
         }),
         prisma.sala.findMany({ where: { ativa: true }, orderBy: { numero: 'asc' } }),
@@ -221,8 +240,12 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       }
 
       const indisponivelNaEscala = new Set(escalas.filter((e) => mensagemIndisponibilidadeEscala(e)).map((e) => e.colaboradorId));
-      const elegiveis = colaboradores.filter((c) => !indisponivelNaEscala.has(c.id) && !erroElegibilidade(c, servicos));
+      const empresa = await getEmpresaConfig();
+      const checarHabilidade = habilidadeBarra(empresa.exigenciaHabilidades, 'totem');
+      const elegiveis = colaboradores.filter((c) => !indisponivelNaEscala.has(c.id) && !erroElegibilidade(c, servicos, { checarHabilidade }));
       const agora = new Date();
+      const funcionamento = lerFuncionamento(empresa);
+      const horarioDoDia = funcionamentoNaData(funcionamento, data);
 
       const slots: Array<{
         horario: string;
@@ -232,10 +255,12 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         motivoIndisponibilidade?: string;
       }> = [];
 
-      for (let inicio = HORA_ABERTURA * 60; inicio + resumo.duracaoTotalSlot <= HORA_FECHAMENTO * 60; inicio += INTERVALO_SLOT_TOTEM_MIN) {
+      // Primeiro horário alinhado aos 30 min do totem (abertura 08:15 começa em 08:30; sem isso nenhum horário passaria)
+      const primeiroHorario = Math.ceil(horarioParaMinutos(horarioDoDia.abertura) / INTERVALO_SLOT_TOTEM_MIN) * INTERVALO_SLOT_TOTEM_MIN;
+      for (let inicio = primeiroHorario; inicio + resumo.duracaoTotalSlot <= horarioParaMinutos(horarioDoDia.fechamento); inicio += INTERVALO_SLOT_TOTEM_MIN) {
         const horario = minutosParaHorario(inicio);
         // Horários que já passaram não são oferecidos
-        if (validarHorarioAgendamento(data, horario, resumo.duracaoTotalSlot, { agora, intervaloMin: INTERVALO_SLOT_TOTEM_MIN })) continue;
+        if (validarHorarioAgendamento(data, horario, resumo.duracaoTotalSlot, { agora, intervaloMin: INTERVALO_SLOT_TOTEM_MIN, funcionamento })) continue;
         const fim = inicio + resumo.duracaoTotalSlot;
         const blocos = blocosDoIntervalo(inicio, fim);
 
@@ -291,7 +316,12 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         },
         ...resumo,
         slots,
-        ...(slots.length === 0 ? { mensagem: 'Não há horários disponíveis para esta data.' } : {}),
+        ...(slots.length === 0 ? {
+          // Dia fechado não é dia lotado: o cliente precisa saber que não adianta tentar outro horário
+          mensagem: abreNaData(funcionamento, data)
+            ? 'Não há horários disponíveis para esta data.'
+            : horarioDoDia.especial?.fechado ? mensagemCasaFechada(funcionamento, data) : `Não abrimos ${diaNoPlural(diaDaSemana(data))}.`,
+        } : {}),
       });
     } catch (error) {
       responderErro(res, error, 'Erro ao calcular disponibilidade.');
@@ -324,6 +354,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       const erroHorario = validarHorarioAgendamento(data, horario, resumo.duracaoTotalSlot, {
         agora: new Date(),
         intervaloMin: INTERVALO_SLOT_TOTEM_MIN,
+        funcionamento: lerFuncionamento(await getEmpresaConfig()),
       });
       if (erroHorario) return res.status(400).json({ erro: erroHorario });
 
@@ -381,9 +412,22 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       // Com pagamento online, a cobrança (código Pix etc.) vem do gateway do banco; o totem nunca monta uma
       if (cobraOnline && gatewayPagamento) {
         // Uma cobrança para cada opção do checkout (sinal ou integral): o código mostrado tem o valor que o cliente escolher
-        const sinal = await gatewayPagamento.criarCobranca({ sessionToken, valor: valorSinal, descricao: sessao.servicoNome });
-        const integral = await gatewayPagamento.criarCobranca({ sessionToken, valor: resumo.valorTotal, descricao: `${sessao.servicoNome} (integral)` });
-        Object.assign(sessao, sinal, { pixCopiaEColaIntegral: integral.pixCopiaECola, pixQrCodeIntegral: integral.pixQrCode });
+        // Referência própria: o sessionToken lê, confirma e cancela a reserva, então não vai para terceiros
+        const referencia = crypto.randomUUID();
+        sessao.referenciaPagamento = referencia;
+        try {
+          const sinal = await gatewayPagamento.criarCobranca({ referencia, valor: valorSinal, descricao: sessao.servicoNome });
+          const integral = await gatewayPagamento.criarCobranca({ referencia, valor: resumo.valorTotal, descricao: `${sessao.servicoNome} (integral)` });
+          Object.assign(sessao, sinal, { pixCopiaEColaIntegral: integral.pixCopiaECola, pixQrCodeIntegral: integral.pixQrCode });
+        } catch (erro) {
+          // Sem cobrança o cliente não consegue pagar: solta o horário na hora, em vez de deixá-lo preso até expirar
+          // shortcut: se o sinal foi criado e o integral falhou, a cobrança do sinal fica aberta no gateway (o código não
+          // aparece na tela, e um pagamento nela dá 404 no webhook); acrescentar cancelarCobranca ao contrato quando o
+          // provedor real oferecer
+          await liberarReserva(sessionToken, { lockKeys });
+          console.error('[PAGAMENTO] Falha ao criar a cobrança:', erro instanceof Error ? erro.message : erro);
+          throw new ServicoIndisponivelError();
+        }
       }
       await redisService.setSession(`reserva:${sessionToken}`, sessao, ttlSegundos);
 
@@ -431,7 +475,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         return res.status(201).json(anterior);
       }
 
-      const cliente = lerClienteTotem(req.body.cliente);
+      const cliente = await aplicarFichaDoTotem(lerClienteTotem(req.body.cliente), req.body.cliente?.respostas);
       const tipoPagamento = req.body.tipoPagamento === 'integral' ? 'integral' : 'sinal';
       const metodoPagamento = req.body.metodoPagamento === 'cartao' ? 'cartao' : 'pix';
 
@@ -482,7 +526,10 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         try {
           await liberarReserva(sessionToken, sessao);
           await redisService.setSession(chaveResultado, resposta, TTL_RESULTADO_SEGUNDOS);
-          await communicationService.enqueueTransactionalNotifications(voucher);
+          // Sem esperar: um provedor lento não pode atrasar o voucher na tela do totem
+          communicationService.enviarConfirmacao(voucher).catch((erro: unknown) => {
+            console.error('[WHATSAPP] Falha ao enviar a confirmação:', erro instanceof Error ? erro.message : 'erro desconhecido');
+          });
         } catch (error) {
           console.error('[TOTEM] Agendamento criado, mas a finalização falhou:', redactSensitiveData(error));
         }
@@ -519,7 +566,8 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
   /**
    * Webhook do gateway de pagamento. Exige `x-webhook-timestamp` (segundos, até 5 min de diferença) e
    * `x-webhook-signature` = HMAC-SHA256 de `${timestamp}.${corpo}` com PAYMENT_WEBHOOK_SECRET.
-   * Corpo: { event: 'payment.succeeded', agendamentoId, valorPago, tipo: 'sinal' | 'integral' }
+   * Corpo: { event: 'payment.succeeded', agendamentoId | referencia, valorPago, tipo: 'sinal' | 'integral' }
+   * `referencia` é o que o gateway recebeu ao criar a cobrança (aleatória, gravada em referenciaPagamento).
    * Só confirma uma vez (reenvios não mudam nada) e o valor pago precisa cobrir o valor cobrado.
    */
   router.post('/webhook-pagamento', async (req, res) => {
@@ -531,18 +579,24 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         return limite.allowed ? res.status(401).json({ erro: 'Assinatura inválida.' }) : res.status(429).json({ erro: 'Muitas chamadas ao webhook.' });
       }
 
-      const { event, agendamentoId, valorPago, tipo } = req.body ?? {};
+      const { event, valorPago, tipo, referencia } = req.body ?? {};
+      const idInformado: unknown = req.body?.agendamentoId;
       if (event !== 'payment.succeeded') return res.json({ received: true });
-      if (typeof agendamentoId !== 'string') return res.status(400).json({ erro: 'agendamentoId obrigatório.' });
+      if (typeof idInformado !== 'string' && typeof referencia !== 'string') return res.status(400).json({ erro: 'agendamentoId ou referencia obrigatório.' });
       if (tipo !== 'sinal' && tipo !== 'integral') return res.status(400).json({ erro: 'tipo deve ser "sinal" ou "integral".' });
       const valor = Number(valorPago);
       if (!Number.isFinite(valor) || valor <= 0) return res.status(400).json({ erro: 'valorPago inválido.' });
 
       const agendamento = await prisma.agendamento.findUnique({
-        where: { id: agendamentoId },
-        select: { valorSinal: true, valorTotal: true, statusPagamento: true, status: true },
+        where: typeof idInformado === 'string' ? { id: idInformado } : { referenciaPagamento: referencia as string },
+        select: { id: true, valorSinal: true, valorTotal: true, statusPagamento: true, status: true, referenciaPagamento: true },
       });
       if (!agendamento) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
+      // Os dois informados precisam ser do mesmo agendamento
+      if (typeof idInformado === 'string' && typeof referencia === 'string' && agendamento.referenciaPagamento !== referencia) {
+        return res.status(404).json({ erro: 'Agendamento não encontrado.' });
+      }
+      const agendamentoId = agendamento.id;
       // Reenvio de um pagamento já registrado (mesmo tipo) não muda nada, nem depois de cancelado
       const jaRegistrado = agendamento.statusPagamento === 'integral_pago' || agendamento.statusPagamento === 'pago_apos_expirar'
         || (tipo === 'sinal' && agendamento.statusPagamento === 'sinal_pago');

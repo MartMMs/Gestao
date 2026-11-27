@@ -1,6 +1,7 @@
+import { useFuncionamento } from '../config/funcionamento';
+import { funcionamentoNaData } from '@shared/agenda';
 import React from 'react';
 import { Employee, Service } from '../types';
-import { SCHEDULE_CONFIG } from '../config/scheduleConfig';
 
 interface AppointmentScheduleFieldsProps {
   date: string;
@@ -27,8 +28,6 @@ interface AppointmentScheduleFieldsProps {
   employeeHelperText?: string;
 }
 
-const START_TIME = `${String(SCHEDULE_CONFIG.START_HOUR).padStart(2, '0')}:00`;
-const END_TIME = `${String(SCHEDULE_CONFIG.END_HOUR).padStart(2, '0')}:00`;
 
 export function AppointmentScheduleFields({
   date,
@@ -53,6 +52,8 @@ export function AppointmentScheduleFields({
   detailsDisabled = false,
   employeeHelperText,
 }: AppointmentScheduleFieldsProps) {
+  // Horário daquele dia: dia especial (ex.: 24/12 até 14:00) muda os limites do campo
+  const funcionamento = funcionamentoNaData(useFuncionamento(), date);
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -60,6 +61,7 @@ export function AppointmentScheduleFields({
           <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Data</label>
           <input
             required
+            aria-label="Data"
             type="date"
             value={date}
             onChange={(e) => onDateChange(e.target.value)}
@@ -71,9 +73,10 @@ export function AppointmentScheduleFields({
           <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Horário</label>
           <input
             required
+            aria-label="Horário"
             type="time"
-            min={START_TIME}
-            max={END_TIME}
+            min={funcionamento.abertura}
+            max={funcionamento.limite ?? funcionamento.fechamento}
             value={time}
             onChange={(e) => onTimeChange(e.target.value)}
             disabled={disabled}
@@ -84,6 +87,7 @@ export function AppointmentScheduleFields({
           <label className="block text-[11px] font-bold text-on-surface-variant tracking-[0.15em] uppercase mb-2">Profissional</label>
           <select
             required
+            aria-label="Profissional"
             value={employeeId}
             onChange={(e) => onEmployeeChange(e.target.value)}
             disabled={disabled}

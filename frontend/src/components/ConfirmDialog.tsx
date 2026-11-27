@@ -103,6 +103,7 @@ export function ConfirmDialog({
         {children}
         <div className="flex gap-4">
           <button
+            type="button"
             ref={cancelarRef}
             onClick={onClose}
             disabled={isSubmitting}
@@ -111,6 +112,7 @@ export function ConfirmDialog({
             {cancelLabel}
           </button>
           <button
+            type="button"
             ref={confirmarRef}
             onClick={onConfirm}
             disabled={isSubmitting}

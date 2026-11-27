@@ -12,6 +12,9 @@ import {
 } from './agendaService';
 import { DURACAO_PADRAO_MIN, duracaoTotal, instanteNoFuso } from '../../shared/agenda';
 import { versaoConsentimentoValida } from '../../shared/consentimento';
+import { PREFIXO_TOTEM } from '../../shared/anamnese';
+import { lerRespostas, resumoTexto, type ItemFicha } from '../../shared/formularioAnamnese';
+import { criarFicha, listarCampos } from './formularioService';
 import {
   LIMITE_OBSERVACAO,
   MENSAGEM_CPF_INVALIDO,
@@ -64,6 +67,8 @@ export const resumoServicos = (servicos: ServicoResumo[]) => {
 export type ClienteTotem = {
   nome: string; telefone: string; cpf: string | null; observacoesSaude: string;
   consentimentoEm: Date; consentimentoVersao: string;
+  // Respostas do formulário configurável, já validadas (ficha do totem); sem ela, só a linha de texto antiga
+  ficha?: { itens: ItemFicha[]; versao: number };
 };
 
 // A tela atual não deixa enviar sem a caixa marcada: quem chega aqui é um totem aberto desde antes da caixa existir
@@ -141,7 +146,7 @@ export const escolherProfissionalESala = async (
   });
   let terapeuta: (typeof candidatos)[number] | undefined;
   for (const colab of candidatos) {
-    if (!(await validarDisponibilidadeProfissional(prisma, colab.id, inicio, servicos))) {
+    if (!(await validarDisponibilidadeProfissional(prisma, colab.id, inicio, servicos, { origem: 'totem' }))) {
       terapeuta = colab;
       break;
     }
@@ -230,9 +235,11 @@ export type SessaoReservaTotem = {
   pixCopiaECola?: string;
   pixQrCode?: string;
   cartaoOnlineDisponivel?: boolean;
+  /** Referência enviada ao gateway e devolvida no webhook (não é o sessionToken) */
+  referenciaPagamento?: string;
 };
 
-type SessaoReserva = Pick<SessaoReservaTotem, 'servicoIds' | 'data' | 'horario' | 'terapeutaId' | 'salaId' | 'valorTotal'>;
+type SessaoReserva = Pick<SessaoReservaTotem, 'servicoIds' | 'data' | 'horario' | 'terapeutaId' | 'salaId' | 'valorTotal' | 'referenciaPagamento'>;
 
 /**
  * Cria o agendamento de uma reserva do totem, revalidando o horário no banco (a recepção pode ter usado
@@ -254,7 +261,7 @@ export const criarAgendamentoTotem = async (
   // A declaração do cliente fica numa linha só: é a linha inteira que a regra de forja (shared/anamnese.ts) protege.
   // O \s do JS não cobre o NEL (U+0085), que a regra de linha do shared conta como quebra
   const observacao = cliente.observacoesSaude
-    ? `[Anamnese Autoatendimento ${sessao.data}]: ${cliente.observacoesSaude.replace(/[\s\u0085]+/g, ' ').trim()}`
+    ? `${PREFIXO_TOTEM}${sessao.data}]: ${cliente.observacoesSaude.replace(/[\s\u0085]+/g, ' ').trim()}`
     : null;
 
   return transacaoComTravas(async (tx) => {
@@ -262,7 +269,7 @@ export const criarAgendamentoTotem = async (
     // Sala só é ocupada pelo totem: a trava dela serializa duas reservas de profissionais diferentes na mesma sala
     await travarChave(tx, `sala:${sessao.salaId}`);
 
-    const indisponivel = await validarDisponibilidadeProfissional(tx, sessao.terapeutaId, inicio, servicos, { sessaoPropria: opcoes.sessionToken });
+    const indisponivel = await validarDisponibilidadeProfissional(tx, sessao.terapeutaId, inicio, servicos, { sessaoPropria: opcoes.sessionToken, origem: 'totem' });
     if (indisponivel) throw new HttpError(409, 'Este horário acabou de ser ocupado. Por favor, escolha outro horário.');
     if (await verificarConflitoSala(tx, sessao.salaId, inicio, duracaoTotal(servicos), opcoes.sessionToken)) {
       throw new HttpError(409, 'A sala deste horário acabou de ser ocupada. Por favor, escolha outro horário.');
@@ -301,12 +308,19 @@ export const criarAgendamentoTotem = async (
       }
     }
     const dbCliente = existente
-      ?? await tx.cliente.create({ data: { nome: nomeCadastro, telefone: cliente.telefone, cpf: cliente.cpf, observacao } });
+      // Com o formulário novo, a ficha do cadastro novo é a FichaPreenchida: a linha de texto fica só no agendamento
+      // (repetida na observação do cliente, apareceria duas vezes na ficha da equipe)
+      ?? await tx.cliente.create({ data: { nome: nomeCadastro, telefone: cliente.telefone, cpf: cliente.cpf, observacao: cliente.ficha?.itens.length ? null : observacao } });
+    const gravarFicha = async (agendamentoId: string) => {
+      if (!cliente.ficha || cliente.ficha.itens.length === 0) return;
+      // Cadastro existente: fica só no agendamento (mesma regra da linha de texto acima)
+      await criarFicha(tx, { clienteId: dbCliente.id, agendamentoId, canal: 'totem', itens: cliente.ficha.itens, versao: cliente.ficha.versao, vinculadaAoCliente: !existente });
+    };
     // De propósito, o totem NÃO recusa horário sobreposto de cliente que já existe (a agenda interna recusa): qualquer
     // recusa, mesmo com a mensagem de horário ocupado, diria a quem sabe nome e telefone de alguém que essa pessoa
     // tem atendimento naquela hora. A sobreposição aparece na agenda e a recepção resolve no check-in.
 
-    return tx.agendamento.create({
+    const agendamento = await tx.agendamento.create({
       data: {
         data: inicio,
         status: 'scheduled',
@@ -322,6 +336,7 @@ export const criarAgendamentoTotem = async (
         lockExpiresAt: opcoes.cobranca.comPagamentoOnline ? new Date(Date.now() + PRAZO_PAGAMENTO_MINUTOS * 60_000) : null,
         metodoPagamento: opcoes.cobranca.comPagamentoOnline ? opcoes.metodoPagamento : 'presencial_no_local',
         reservaToken: opcoes.sessionToken,
+        referenciaPagamento: sessao.referenciaPagamento ?? null,
         reservaOrigem: ORIGEM_TOTEM,
         consentimentoDadosEm: cliente.consentimentoEm,
         consentimentoVersao: cliente.consentimentoVersao,
@@ -329,5 +344,22 @@ export const criarAgendamentoTotem = async (
         servicos: { connect: servicos.map((s) => ({ id: s.id })) },
       } satisfies Prisma.AgendamentoUncheckedCreateInput,
     });
+    await gravarFicha(agendamento.id);
+    return agendamento;
   });
 };
+
+/**
+ * Valida as respostas do formulário enviadas pelo totem (só campos visíveis no totem) e monta a linha de texto
+ * antiga a partir delas, para quem ainda lê Agendamento.observacoesSaude. Sem "respostas" (totem aberto antes
+ * desta versão), o texto digitado segue como antes.
+ */
+export const aplicarFichaDoTotem = async (cliente: ClienteTotem, respostas: unknown): Promise<ClienteTotem> => {
+  if (respostas === undefined) return cliente;
+  const { campos, versao } = await listarCampos();
+  const { itens, erro } = lerRespostas(campos, respostas, 'totem');
+  if (erro) throw new HttpError(400, erro);
+  const observacoesSaude = resumoTexto(itens).slice(0, LIMITE_OBSERVACAO);
+  return { ...cliente, observacoesSaude, ficha: { itens, versao } };
+};
+

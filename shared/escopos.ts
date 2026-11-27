@@ -15,6 +15,8 @@ export const ESCOPOS = {
   // O nome do cliente nos cards da agenda é recarregado pelo frontend (ver DEPENDENCIAS_ESCOPO)
   clientes: ['clients'],
   servicos: ['services'],
+  // Bloqueios chegam na tela dentro do profissional; "appointments" avisa o totem, que mostra os horários livres
+  bloqueios: ['employees', 'appointments'],
   // Desligar/realocar profissional move agendamentos
   equipe: ['employees', 'appointments'],
   // Override, troca e replicação de escala mexem na escala e nos dados do profissional

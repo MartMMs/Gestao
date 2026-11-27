@@ -201,7 +201,7 @@ test.describe('User flow, system and final-user simulation', () => {
         }
 
         try {
-          await expect(page.getByText(/Agendamento salvo na sua agenda/i)).toBeVisible({ timeout: 6_000 });
+          await expect(page.getByText(/Agendamento salvo/i)).toBeVisible({ timeout: 6_000 });
           saved = true;
           break;
         } catch {
@@ -250,7 +250,7 @@ test.describe('User flow, system and final-user simulation', () => {
     await expect(page.getByText(/Pr[oó]ximos Clientes/i)).toBeVisible();
 
     await page.getByRole('button', { name: /^Agenda$/i }).click();
-    await expect(page.getByPlaceholder(/Buscar Cliente ou Servi[cç]o/i)).toBeVisible();
+    await expect(page.getByRole('textbox', { name: /Buscar cliente, servi[cç]o/i })).toBeVisible();
 
     await page.getByRole('button', { name: /Servi[cç]os/i }).click();
     await expect(page.getByPlaceholder(/Buscar servi[cç]o/i)).toBeVisible();

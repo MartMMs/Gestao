@@ -1,3 +1,4 @@
+import { useFuncionamento } from '../../../config/funcionamento';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Appointment, Employee, Service } from '../../../types';
 import { AppointmentScheduleFields } from '../../../components/AppointmentScheduleFields';
@@ -6,10 +7,12 @@ import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { validateAppointmentScheduling } from '../utils/appointmentValidation';
 import { ehVersaoDesatualizada, isApiError, useCheckinAppointment, useClients } from '../../../api';
 import { normalizarNome } from '@shared/validadores';
+import { codigoReserva } from '@shared/codigoReserva';
 import { CODIGO_FORA_DA_AGENDA, statusFechado } from '@shared/statusAgendamento';
 import { useAuth } from '../../../AuthContext';
 import { formatPhone } from '../../../utils/formatters';
 import { useFormDraft } from '../../../hooks/useFormDraft';
+import { SeloAlertaClinico } from '../../../components/FichaFormulario';
 
 export interface EditAppointmentModalProps {
   appointment: Appointment;
@@ -38,6 +41,7 @@ const camposDiferentes = (a: Appointment, b: Appointment) => (Object.keys({ ...a
   .filter((k) => !CAMPOS_IGNORADOS.has(k) && JSON.stringify(a[k]) !== JSON.stringify(b[k]));
 
 export function EditAppointmentModal({ appointment, employees, services, appointments, onClose, onEditAppointment, setErrorMessage, setToastMessage }: EditAppointmentModalProps) {
+  const funcionamento = useFuncionamento();
   const [original, setOriginal] = useState<Appointment>(() => paraFormulario(appointment));
   // Rascunho por agendamento E versão: se a sessão expirar no meio da edição, o que foi digitado volta ao reabrir;
   // se o agendamento mudou no servidor nesse meio tempo, o rascunho antigo é ignorado (não sobrescreve o novo).
@@ -68,6 +72,9 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
   // Quem gerencia a agenda junta cadastros duplicados (ex.: o totem criou "Nome (tel. final 22)") digitando o nome
   // de um cadastro que já existe: o atendimento passa para ele, em vez de renomear este e dar conflito de homônimo
   const { data: carteira } = useClients(gerenciaAgenda ? token : null) as { data?: { id: string; nome: string; codigo?: number }[] };
+  // Selo de alerta clínico: a API só manda os alertas de quem vê a saúde do cliente (o profissional recebe os dele)
+  const { data: clientesVisiveis } = useClients(token);
+  const alertasCliente = clientesVisiveis?.find((c) => c.id === appointment.clientId)?.alertasClinicos;
   // Cadastro existente escolhido pelo nome: só passa o atendimento para ele depois de a pessoa confirmar
   const [trocaDeCadastro, setTrocaDeCadastro] = useState<{ id: string; nome: string; codigo?: number } | null>(null);
   // Nome que não bate com nenhum cadastro: salvar RENOMEIA a ficha atual (todos os atendimentos dela), então também confirma
@@ -155,6 +162,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
         services,
         ignoreAppointmentId: editingAppointment.id,
         permitirPassado: editingAppointment.date === appointment.date && editingAppointment.time === appointment.time,
+        funcionamento,
       });
 
       if (scheduleValidationError) {
@@ -219,7 +227,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
   return (<>
     <ModalFormulario
       showSubmitButton={!nadaEditavel}
-      title="Editar Agendamento"
+      title={`Editar Agendamento · ${codigoReserva(editingAppointment.id)}`}
       onClose={closeAndDiscard}
       hasUnsavedChanges={hasUnsavedChanges}
       onSubmit={handleEditSubmit}
@@ -268,7 +276,7 @@ export function EditAppointmentModal({ appointment, employees, services, appoint
       ) : undefined}
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div><label className="block text-[11px] font-bold text-on-surface-variant uppercase mb-2">Cliente</label><input required type="text" value={editingAppointment.clientName} onChange={e => setEditingAppointment(p => p && ({...p, clientName: e.target.value}))} disabled={encerrado || !gerenciaAgenda} title={!gerenciaAgenda ? 'Só a supervisão altera o cliente do atendimento.' : undefined} list={gerenciaAgenda ? 'edit-appointment-clientes' : undefined} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm ${encerrado || !gerenciaAgenda ? 'opacity-50 cursor-not-allowed' : ''}`} />
+        <div><label className="block text-[11px] font-bold text-on-surface-variant uppercase mb-2">Cliente <SeloAlertaClinico alertas={alertasCliente} /></label><input required type="text" value={editingAppointment.clientName} onChange={e => setEditingAppointment(p => p && ({...p, clientName: e.target.value}))} disabled={encerrado || !gerenciaAgenda} title={!gerenciaAgenda ? 'Só a supervisão altera o cliente do atendimento.' : undefined} list={gerenciaAgenda ? 'edit-appointment-clientes' : undefined} className={`w-full bg-surface-container-low border border-outline-variant/20 rounded-xl p-3 text-sm ${encerrado || !gerenciaAgenda ? 'opacity-50 cursor-not-allowed' : ''}`} />
           {gerenciaAgenda && !encerrado && (<>
             <datalist id="edit-appointment-clientes">
               {carteira?.map((c) => <option key={c.id} value={c.nome} />)}

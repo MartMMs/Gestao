@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { EXIGENCIAS_HABILIDADE } from '../services/agendaService';
 import { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
@@ -6,9 +7,11 @@ import { prisma } from '../db';
 import { config } from '../env';
 import { assinarToken, avisoTentativasSenha, dadosDoToken, getUsuario, revogarToken, senhaAtualConfere, tokenCsrfDaSessao, usuarioEhAdmin, verificarSupervisorToken, verificarToken, verificarTokenSenhaProvisoria, violaCsrf, type Papel } from '../auth';
 import { redisService } from '../services/redisService';
-import { getEmpresaConfig } from '../services/configService';
+import { empresaPublica, getEmpresaConfig } from '../services/configService';
 import { obterFeriadosNacionais } from '../../shared/feriadosBR';
 import { EMAIL_REGEX, USUARIO_REGEX } from '../../shared/validadores';
+import { dataValida, duracaoTotal, horarioValido, lerDiaEspecial, lerFuncionamento, MAX_DIAS_ESPECIAIS, partesNoFuso, validarFuncionamento, validarHorarioAgendamento, type DiaEspecial, type Funcionamento } from '../../shared/agenda';
+import { CODIGO_CONFIG_DESATUALIZADA, CODIGO_FORA_DO_HORARIO } from '../../shared/codigosErro';
 import { responderErro, ipDoCliente } from '../lib/http';
 import { registrarAuditoria } from '../lib/auditoria';
 import { provaValida, type DesafioLogin } from '../../shared/provaDeTrabalho';
@@ -96,8 +99,44 @@ const CAMPOS_EMPRESA = [
   'termoEspaco', 'termoServico', 'telefoneContato', 'emailContato', 'endereco', 'corTemaPrimaria',
 ] as const;
 
-const validarConfigEmpresa = (body: Record<string, unknown>) => {
-  const dados: Record<string, string | boolean | null> = {};
+// Campos validados do PUT; os do horário com o tipo certo (o PUT monta o horário novo sem conversões)
+type DadosEmpresa = {
+  [campo: string]: string | boolean | number[] | DiaEspecial[] | null | undefined;
+  diasEspeciais?: DiaEspecial[];
+  horaAbertura?: string;
+  horaFechamento?: string;
+  horaLimiteAgendamento?: string | null;
+  diasFuncionamento?: number[];
+};
+
+const validarConfigEmpresa = (body: Record<string, unknown>): { erro: string; dados?: undefined } | { dados: DadosEmpresa; erro?: undefined } => {
+  const dados: DadosEmpresa = {};
+  for (const campo of ['horaAbertura', 'horaFechamento'] as const) {
+    if (body[campo] === undefined) continue;
+    if (!horarioValido(body[campo])) return { erro: 'Informe abertura e fechamento no formato HH:MM.' };
+    dados[campo] = body[campo];
+  }
+  if (body.horaLimiteAgendamento !== undefined) {
+    // Vazio ou null = sem limite próprio (vale até o fechamento)
+    const limite = body.horaLimiteAgendamento === '' ? null : body.horaLimiteAgendamento;
+    if (limite !== null && !horarioValido(limite)) return { erro: 'Informe o último horário de agendamento no formato HH:MM.' };
+    dados.horaLimiteAgendamento = limite;
+  }
+  if (body.diasFuncionamento !== undefined) {
+    const dias: unknown = body.diasFuncionamento;
+    if (!Array.isArray(dias) || dias.some((d) => !Number.isInteger(d))) return { erro: 'Dias de funcionamento inválidos.' };
+    dados.diasFuncionamento = [...(dias as number[])].sort((a, b) => a - b);
+  }
+  if (body.diasEspeciais !== undefined) {
+    const lista: unknown = body.diasEspeciais;
+    // Teto bruto só contra corpo gigante; o limite de verdade (MAX_DIAS_ESPECIAIS) conta só as datas futuras
+    if (!Array.isArray(lista) || lista.length > MAX_DIAS_ESPECIAIS * 5) return { erro: `Dias especiais inválidos (no máximo ${MAX_DIAS_ESPECIAIS}).` };
+    const especiais = lista.map(lerDiaEspecial);
+    if (especiais.some((d) => d === null)) return { erro: 'Dias especiais inválidos.' };
+    // Data que já passou não vale mais nada: sai ao salvar, senão a lista cresce até travar no limite
+    const hoje = partesNoFuso(new Date()).data;
+    dados.diasEspeciais = (especiais as DiaEspecial[]).filter((d) => !(dataValida(d.data) && d.data < hoje)).sort((a, b) => a.data.localeCompare(b.data));
+  }
   if (body.usarComissao !== undefined) {
     if (typeof body.usarComissao !== 'boolean') return { erro: 'Campo usarComissao inválido.' };
     dados.usarComissao = body.usarComissao;
@@ -105,6 +144,12 @@ const validarConfigEmpresa = (body: Record<string, unknown>) => {
   if (body.exigirAnamnese !== undefined) {
     if (typeof body.exigirAnamnese !== 'boolean') return { erro: 'Campo exigirAnamnese inválido.' };
     dados.exigirAnamnese = body.exigirAnamnese;
+  }
+  if (body.exigenciaHabilidades !== undefined) {
+    if (!(EXIGENCIAS_HABILIDADE as readonly unknown[]).includes(body.exigenciaHabilidades)) {
+      return { erro: `Exigência de habilidades inválida. Use: ${EXIGENCIAS_HABILIDADE.join(', ')}.` };
+    }
+    dados.exigenciaHabilidades = body.exigenciaHabilidades as string;
   }
   for (const campo of CAMPOS_EMPRESA) {
     const valor = body[campo];
@@ -122,6 +167,7 @@ const validarConfigEmpresa = (body: Record<string, unknown>) => {
   if (typeof dados.emailContato === 'string' && !EMAIL_REGEX.test(dados.emailContato)) {
     return { erro: 'Informe um e-mail de contato válido.' };
   }
+  if (dados.corTemaPrimaria != null && !/^#[0-9a-f]{6}$/i.test(String(dados.corTemaPrimaria))) return { erro: 'Cor do tema inválida (use o formato #rrggbb).' };
   return { dados };
 };
 
@@ -356,7 +402,7 @@ export function createEmpresaRouter(eventos: Eventos) {
   // Configurações gerais da empresa (leitura pública: usadas na tela de login e no totem)
   router.get('/empresa/config', async (_req, res) => {
     try {
-      res.json(await getEmpresaConfig());
+      res.json(empresaPublica(await getEmpresaConfig()));
     } catch (error) {
       responderErro(res, error, 'Falha ao buscar configurações da empresa');
     }
@@ -368,26 +414,85 @@ export function createEmpresaRouter(eventos: Eventos) {
       if (!validacao.dados) return res.status(400).json({ erro: validacao.erro });
       // Ligar/desligar comissão muda o líquido dos relatórios: decisão do administrador
       const atual = await getEmpresaConfig();
+      // Horário confere com o que já está gravado (mudar só o fechamento não pode deixar o limite depois dele)
+      const d = validacao.dados;
+      const novoHorario: Funcionamento = {
+        abertura: d.horaAbertura ?? atual.horaAbertura,
+        fechamento: d.horaFechamento ?? atual.horaFechamento,
+        limite: d.horaLimiteAgendamento !== undefined ? d.horaLimiteAgendamento : atual.horaLimiteAgendamento,
+        dias: d.diasFuncionamento ?? atual.diasFuncionamento,
+        especiais: d.diasEspeciais ?? lerFuncionamento(atual).especiais,
+      };
+      const erroHorario = validarFuncionamento(novoHorario);
+      if (erroHorario) return res.status(400).json({ erro: erroHorario });
+      const horarioMudou = (['horaAbertura', 'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento', 'diasEspeciais'] as const)
+        .some((c) => d[c] !== undefined && JSON.stringify(d[c]) !== JSON.stringify(atual[c]));
+      // Atendimentos marcados que ficariam fora do novo horário continuam marcados: quem muda precisa saber e confirmar
+      if (horarioMudou && req.body?.confirmarForaDoHorario !== true) {
+        const marcados = await prisma.agendamento.findMany({
+          where: { status: { in: ['scheduled', 'aguardando_pagamento'] }, data: { gte: new Date() } },
+          select: { data: true, servicos: { select: { duracao: true, tempoHigienizacaoMin: true } } },
+        });
+        const fora = marcados.filter((ag) => {
+          const { data, horario } = partesNoFuso(ag.data);
+          return validarHorarioAgendamento(data, horario, duracaoTotal(ag.servicos), { funcionamento: novoHorario, intervaloMin: 1 }) !== null;
+        }).length;
+        if (fora > 0) {
+          return res.status(409).json({
+            erro: `${fora} atendimento${fora > 1 ? 's marcados ficam' : ' marcado fica'} fora do novo horário. ${fora > 1 ? 'Eles continuam marcados' : 'Ele continua marcado'}: remarque pela agenda se precisar.`,
+            code: CODIGO_FORA_DO_HORARIO,
+            quantidade: fora,
+          });
+        }
+      }
       if (validacao.dados.usarComissao !== undefined && validacao.dados.usarComissao !== atual.usarComissao && !usuarioEhAdmin(req)) {
         return res.status(403).json({ erro: 'Apenas o administrador pode ligar ou desligar a comissão.' });
       }
+      if (validacao.dados.nomeEmpresa !== undefined && validacao.dados.nomeEmpresa !== atual.nomeEmpresa && !usuarioEhAdmin(req)) {
+        return res.status(403).json({ erro: 'Apenas o administrador pode alterar o nome da empresa.' });
+      }
+      if (validacao.dados.corTemaPrimaria !== undefined && validacao.dados.corTemaPrimaria !== atual.corTemaPrimaria && !usuarioEhAdmin(req)) {
+        return res.status(403).json({ erro: 'Apenas o administrador pode alterar a cor do sistema.' });
+      }
 
       // Nada mudou: responde sem gravar nem avisar as telas (o aviso faz todas recarregarem as listas)
-      const mudou = Object.entries(validacao.dados).some(([campo, valor]) => (atual as Record<string, unknown>)[campo] !== valor);
+      const mudou = Object.entries(validacao.dados).some(([campo, valor]) => JSON.stringify((atual as Record<string, unknown>)[campo]) !== JSON.stringify(valor));
       if (!mudou) return res.json(atual);
 
-      const configAtualizada = await prisma.configuracaoEmpresa.update({
-        where: { id: 'default' },
-        data: validacao.dados as Prisma.ConfiguracaoEmpresaUpdateInput,
+      // Com `versao` (a config que a tela leu), só grava se ninguém salvou no meio: sem isso o segundo a salvar
+      // apagaria em silêncio o que o primeiro mudou (ex.: dias especiais). Sem `versao`, grava como antes.
+      const versao = typeof req.body?.versao === 'string' ? new Date(req.body.versao) : null;
+      if (versao && Number.isNaN(versao.getTime())) return res.status(400).json({ erro: 'Versão da configuração inválida.' });
+      const desatualizada = () => res.status(409).json({
+        erro: 'Outra pessoa salvou o horário enquanto você editava. Confira o horário salvo e refaça a sua mudança.',
+        code: CODIGO_CONFIG_DESATUALIZADA,
       });
 
+      // updateMany com a versão no filtro: conferir e gravar é uma operação só (sem janela entre os dois)
+      if (versao) {
+        const { count } = await prisma.configuracaoEmpresa.updateMany({
+          where: { id: 'default', atualizadoEm: versao },
+          data: validacao.dados as Prisma.ConfiguracaoEmpresaUpdateManyMutationInput,
+        });
+        if (count === 0) return desatualizada();
+      }
+      const configAtualizada = versao
+        ? await prisma.configuracaoEmpresa.findUniqueOrThrow({ where: { id: 'default' } })
+        : await prisma.configuracaoEmpresa.update({
+          where: { id: 'default' },
+          data: validacao.dados as Prisma.ConfiguracaoEmpresaUpdateInput,
+        });
+
       await registrarAuditoria(req, { acao: 'empresa.comissao', alvo: 'Comissão da empresa', antes: atual, depois: configAtualizada, campos: ['usarComissao'] });
+      // Horário muda o que a agenda e o totem aceitam: fica no histórico (só registra se mudou)
+      await registrarAuditoria(req, { acao: 'empresa.horario', alvo: 'Horário de funcionamento', antes: atual, depois: configAtualizada, campos: ['horaAbertura', 'horaFechamento', 'horaLimiteAgendamento', 'diasFuncionamento', 'diasEspeciais'] });
       // Ligar ou desligar a ficha obrigatória muda quem consegue agendar: fica no histórico (só registra se mudou)
+      await registrarAuditoria(req, { acao: 'empresa.habilidades', alvo: 'Exigir habilidades nos agendamentos', antes: atual, depois: configAtualizada, campos: ['exigenciaHabilidades'] });
       await registrarAuditoria(req, { acao: 'empresa.anamnese', alvo: 'Ficha de anamnese obrigatória', antes: atual, depois: configAtualizada, campos: ['exigirAnamnese'] });
       // Só o evento da config: notificarMudanca() sem escopo fazia todas as telas baixarem todas as listas de uma vez
       // (agenda, clientes, equipe...) e travava Clientes e Relatórios. Nenhuma lista de ESCOPOS_MUDANCA muda com a
       // config; a config e os relatórios (que usam a comissão) o front recarrega por este evento (invalidarConfigEmpresa)
-      eventos.emitirConfigEmpresa(configAtualizada);
+      eventos.emitirConfigEmpresa(empresaPublica(configAtualizada));
       res.json(configAtualizada);
     } catch (error) {
       responderErro(res, error, 'Falha ao salvar configurações da empresa');

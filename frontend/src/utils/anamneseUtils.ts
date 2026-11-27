@@ -1,4 +1,3 @@
-import { AnamneseData, initialAnamnese } from '../components/AnamneseForm';
 import type { Client } from '../types';
 
 import {
@@ -100,3 +99,61 @@ export function formatAnamneseStorage(note: string, data: AnamneseData): string 
   const ficha = `${MARCADOR_ANAMNESE}${JSON.stringify(data)}`;
   return nota ? `${nota}\n${ficha}` : ficha;
 }
+
+// Ficha antiga (campos fixos): só lida e preservada; a edição é pelo formulário configurável
+export interface AnamneseData {
+  profissao: string;
+  queixa: string;
+  proteses: string;
+  cirurgia: string;
+  gravida: string;
+  caracteristicas: string[];
+  medicamentos: string[];
+  procedimentoEstetico: string;
+  marcapasso: string;
+  outrosMedicamentos: string;
+  lentesContato: string;
+  alergia: string;
+  patologia: string;
+  partesNaoTocadas: string;
+
+  preferencia: string;
+  pressao: string;
+  banho: string;
+  aromaterapia: string;
+}
+
+export const initialAnamnese: AnamneseData = {
+  profissao: '', queixa: '', proteses: '', cirurgia: '', gravida: '',
+  caracteristicas: [], medicamentos: [], procedimentoEstetico: '', marcapasso: '',
+  outrosMedicamentos: '', lentesContato: '', alergia: '', patologia: '', partesNaoTocadas: '',
+  preferencia: '', pressao: '', banho: '', aromaterapia: ''
+};
+
+// Grava todos os campos preenchidos, inclusive os que o segmento atual esconde. De propósito, ao contrário do totem:
+// aqui eles só podem vir de uma ficha já existente (o formulário não deixa digitar o que esconde), e apagá-los ao
+// salvar perderia o histórico do cliente se a empresa trocar de segmento
+export const formatAnamnese = (data: AnamneseData): string => {
+  const parts = [];
+  if (data.profissao) parts.push(`Profissão: ${data.profissao}`);
+  if (data.queixa) parts.push(`Queixa: ${data.queixa}`);
+  if (data.proteses) parts.push(`Próteses/Pinos: ${data.proteses}`);
+  if (data.cirurgia) parts.push(`Cirurgia Recente: ${data.cirurgia}`);
+  if (data.gravida) parts.push(`Grávida: ${data.gravida}`);
+  if (data.caracteristicas.length > 0) parts.push(`Características: ${data.caracteristicas.join(', ')}`);
+  if (data.medicamentos.length > 0) parts.push(`Medicamentos: ${data.medicamentos.join(', ')}`);
+  if (data.procedimentoEstetico) parts.push(`Procedimento Estético (6m): ${data.procedimentoEstetico}`);
+  if (data.marcapasso) parts.push(`Marcapasso: ${data.marcapasso}`);
+  if (data.outrosMedicamentos) parts.push(`Outros Medicamentos: ${data.outrosMedicamentos}`);
+  if (data.lentesContato) parts.push(`Lentes de Contato: ${data.lentesContato}`);
+  if (data.alergia) parts.push(`Alergias: ${data.alergia}`);
+  if (data.patologia) parts.push(`Patologias: ${data.patologia}`);
+  if (data.partesNaoTocadas) parts.push(`Não Tocar: ${data.partesNaoTocadas}`);
+  
+  if (data.preferencia) parts.push(`Preferência de Tratamento: ${data.preferencia}`);
+  if (data.pressao) parts.push(`Pressão da Massagem: ${data.pressao}`);
+  if (data.banho) parts.push(`Banho: ${data.banho}`);
+  if (data.aromaterapia) parts.push(`Aromaterapia (Profissional): ${data.aromaterapia}`);
+  
+  return parts.length > 0 ? `\n\n--- FICHA DE ANAMNESE ---\n${parts.join(' | ')}` : '';
+};

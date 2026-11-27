@@ -60,3 +60,35 @@ describe('getAutoatendimentoUrl', () => {
     expect(getAutoatendimentoUrl()).toBe('https://autoatendimento.spa.com.br/');
   });
 });
+
+describe('isTvHost', () => {
+  it('reconhece tv. por padrão e não confunde com o portal', async () => {
+    const { isTvHost } = await carregar();
+    expect(isTvHost('tv.spa.com.br')).toBe(true);
+    expect(isTvHost('app.spa.com.br')).toBe(false);
+    expect(isTvHost('tvspa.com.br')).toBe(false);
+  });
+
+  it('com host configurado, aceita só ele', async () => {
+    vi.stubEnv('VITE_TV_HOST', 'painel.spa.com.br');
+    const { isTvHost } = await carregar();
+    expect(isTvHost('painel.spa.com.br')).toBe(true);
+    expect(isTvHost('tv.spa.com.br')).toBe(false);
+  });
+});
+
+describe('noCaminho', () => {
+  it('em produção só vale com VITE_ATALHO_CAMINHOS=1 (mesma origem do portal, sem isolamento de sessão)', async () => {
+    vi.stubEnv('DEV', false);
+    expect((await carregar()).noCaminho('/totem', '/totem')).toBe(false);
+    vi.stubEnv('VITE_ATALHO_CAMINHOS', '1');
+    expect((await carregar()).noCaminho('/totem', '/totem')).toBe(true);
+  });
+  it('casa o caminho exato e subcaminhos, não prefixos soltos', async () => {
+    const { noCaminho } = await carregar();
+    expect(noCaminho('/totem', '/totem')).toBe(true);
+    expect(noCaminho('/totem', '/totem/')).toBe(true);
+    expect(noCaminho('/totem', '/totemx')).toBe(false);
+    expect(noCaminho('/painel', '/')).toBe(false);
+  });
+});

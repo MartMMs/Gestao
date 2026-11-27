@@ -1,22 +1,27 @@
+import { formatarDataBR } from '@shared/datasBR';
+import { horasDaGrade, useFuncionamento } from '../../../config/funcionamento';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { normalizarTexto } from '@shared/validadores';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Client, Service, Bloqueio } from '../../../types';
 import { getDuration, getBrazilCurrentMinuteOfDay, getBrazilCurrentTimeString, getLocalTodayString, matchesAppointmentSearch, shiftDateString } from '../../../features/appointments/utils/appointmentCore';
 import { SCHEDULE_CONFIG } from '../../../config/scheduleConfig';
 import { BlockModal, BookingModal, EditAppointmentModal, DeleteAppointmentModal } from '../../../features/appointments/components';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
-import { isApiError } from '../../../api';
+import { isApiError, useEscalaOperacional } from '../../../api';
+import { useAuth } from '../../../AuthContext';
 import { useScheduleModals } from '../../../features/appointments/hooks';
 import { EmployeeScheduleColumn, LegendaEstadosAgenda, ScheduleGridProvider, type AcaoDeStatus, type ScheduleGridActions, type ScheduleGridContext } from '../../../components/ScheduleGridColumn';
 import { AgendaVisaoPeriodo, type VisaoAgenda } from './AgendaVisaoPeriodo';
 import { ScheduleRulerGrid } from '../../../components/ScheduleRulerGrid';
-import { isTeamMember } from '../../../utils/formatters';
+import { atendeNaAgenda, formatarReais } from '../../../utils/formatters';
 import { JANELA_AGENDA_DIAS } from '@shared/agendaJanela';
-import { bloqueioDiaInteiro, horarioParaMinutos, minutoDentroDoBloqueio, minutosParaHorario } from '@shared/agenda';
+import { ListaSemBaixa, useSemBaixa } from './ListaSemBaixa';
+import { abreNaData, bloqueioDiaInteiro, diaDaSemana, funcionamentoNaData, mensagemCasaFechada, horarioParaMinutos, INTERVALO_AGENDAMENTO_MIN, minutoDentroDoBloqueio, minutosParaHorario, validarHorarioAgendamento } from '@shared/agenda';
 import type { DiaEscala } from '@shared/escala';
+import { codigoReserva, lerCodigoReserva } from '@shared/codigoReserva';
+import { estaDeFolga, statusDoDia, type EmployeeDayStatus } from '../utils/statusDoDia';
 
-const { START_HOUR, END_HOUR, HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
+const { HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
 // Referências fixas para listas vazias (um [] novo a cada render anularia os memos e o React.memo)
 const NO_APPOINTMENTS: Appointment[] = [];
 // Sentinela: fora de hoje o relógio não é lido (atraso e linha vermelha só existem na visão de hoje)
@@ -49,16 +54,24 @@ interface SupervisorEscalaTabProps {
   setToastMessage: (msg: string | null) => void;
   setErrorMessage: (msg: string | null) => void;
   buildScaleForEmployee?: (employeeId: string) => DiaEscala[];
+  /**
+   * Quem usa a agenda da casa. Recepção: não exclui (cancela, o atendimento fica no histórico) e não cria bloqueio.
+   * O servidor confere as duas coisas de novo; aqui só some o que ela não pode fazer.
+   */
+  papel: 'supervisor' | 'recepcao'; // obrigatório: esquecer a prop não pode abrir no modo de mais poder
 }
 
-type EmployeeDayStatus = {
-  label: 'Folga' | 'FDS' | 'Férias' | 'Bloqueio';
-  reason: string;
-  isAllDayUnavailable: boolean;
-};
 
-export function SupervisorEscalaTab({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onOpenUpcomingAppointments, onReassignAppointment, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onAlterarStatus, onEditClient, onAddBloqueio, onDeleteBloqueio, setToastMessage, setErrorMessage, buildScaleForEmployee }: SupervisorEscalaTabProps) {
+export function SupervisorEscalaTab({ employees, appointments, services, clients, scaleOverrides = NO_SCALE_OVERRIDES, onOpenUpcomingAppointments, onReassignAppointment, onAddAppointment, isAddingAppointment, onDeleteAppointment, onEditAppointment, onAlterarStatus, onEditClient, onAddBloqueio, onDeleteBloqueio, setToastMessage, setErrorMessage, buildScaleForEmployee, papel }: SupervisorEscalaTabProps) {
+  const { token } = useAuth();
+  const ehRecepcao = papel === 'recepcao';
+  const funcionamento = useFuncionamento();
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
+  const intervalosDoDia = useMemo(() => appointments
+    .filter((a) => a.date === receptionDate && a.status !== 'cancelled')
+    .map((a): [number, number] => { const i = horarioParaMinutos(a.time); return [i, i + getDuration(a.services, services)]; }),
+  [appointments, receptionDate, services]);
+  const { horaInicioGrade, horaFimGrade } = horasDaGrade(funcionamentoNaData(funcionamento, receptionDate), intervalosDoDia);
   const [scheduleSearchTerm, setScheduleSearchTerm] = useState('');
   const [professionalFilter, setProfessionalFilter] = useState('all');
   const OFF_DAY_FILTER = '__off_today__';
@@ -106,16 +119,30 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   const handlePrevMonth = () => setCurrentMonthDate(new Date(year, month - 1, 1));
   const handleNextMonth = () => setCurrentMonthDate(new Date(year, month + 1, 1));
   const formatDayString = (d: number) => `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const calendarMonthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const receptionMonthStr = receptionDate.slice(0, 7);
+
+  // Recepção usa o endpoint operacional somente leitura (apenas trabalho/folga e turno do mês, sem dados sensíveis do RH)
+  const { data: escalaOperacionalMes = NO_SCALE_OVERRIDES } = useEscalaOperacional(token, calendarMonthStr, { enabled: ehRecepcao });
+  const { data: escalaOperacionalDia = NO_SCALE_OVERRIDES } = useEscalaOperacional(token, receptionMonthStr, {
+    enabled: ehRecepcao && receptionMonthStr !== calendarMonthStr,
+  });
+
+  const effectiveScaleOverrides = useMemo(() => {
+    if (!ehRecepcao) return scaleOverrides;
+    if (receptionMonthStr === calendarMonthStr) return escalaOperacionalMes;
+    return [...escalaOperacionalMes, ...escalaOperacionalDia];
+  }, [ehRecepcao, scaleOverrides, calendarMonthStr, receptionMonthStr, escalaOperacionalMes, escalaOperacionalDia]);
 
   // Overrides indexados por colaborador+dia: o calendário consulta todos os dias do mês para toda a equipe
   const overrideByEmployeeDay = useMemo(() => {
     const map = new Map<string, { tipo: 'trabalho' | 'folga' | 'fds' }>();
-    for (const override of scaleOverrides) map.set(`${override.colaboradorId}:${override.data}`, override);
+    for (const override of effectiveScaleOverrides) map.set(`${override.colaboradorId}:${override.data}`, override);
     return map;
-  }, [scaleOverrides]);
+  }, [effectiveScaleOverrides]);
 
   const getDayCoverage = useCallback((dateStr: string) => {
-    const team = employees.filter((emp) => isTeamMember(emp));
+    const team = employees.filter((emp) => atendeNaAgenda(emp));
     const ideal = Math.max(1, Math.ceil(team.length * 0.7));
     const trabalhando: string[] = [];
     const folgas: string[] = [];
@@ -127,7 +154,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
         continue;
       }
 
-      const fullDayBlock = (emp.bloqueios || []).find((bloq) => bloq.data === dateStr && bloqueioDiaInteiro(bloq));
+      const fullDayBlock = (emp.bloqueios || []).find((bloq) => bloq.data === dateStr && bloqueioDiaInteiro(bloq, funcionamento));
 
       if (fullDayBlock) {
         folgas.push(emp.name.split(' ')[0] || emp.name);
@@ -143,12 +170,12 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
       trabalhando,
       folgas,
     };
-  }, [employees, overrideByEmployeeDay]);
+  }, [employees, overrideByEmployeeDay, funcionamento]);
 
   const dayScaleOverrideByEmployee = useMemo(() => {
     const map = new Map<string, { tipo: 'trabalho' | 'folga' | 'fds'; descricao?: string }>();
 
-    for (const override of scaleOverrides) {
+    for (const override of effectiveScaleOverrides) {
       if (override.data !== receptionDate) continue;
       if (!override.colaboradorId || !override.tipo || override.tipo === 'trabalho') continue;
       map.set(override.colaboradorId, {
@@ -158,81 +185,20 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     }
 
     return map;
-  }, [scaleOverrides, receptionDate]);
+  }, [effectiveScaleOverrides, receptionDate]);
 
-  const isFeriasReason = useCallback((value?: string | null) => {
-    if (!value) return false;
-    return normalizarTexto(value).includes('ferias');
-  }, []);
-
-  const getEmployeeDayStatus = useCallback((emp: Employee): EmployeeDayStatus | null => {
-    // 1. Verifica se a escala base oficial da equipe diz que é folga neste mês
-    if (buildScaleForEmployee) {
-      const scaleDay = buildScaleForEmployee(emp.id).find((d) => d.data === receptionDate);
-      if (scaleDay && scaleDay.tipo !== 'trabalho') {
-        const isFerias = isFeriasReason(scaleDay.descricao);
-        return {
-          label: isFerias ? 'Férias' : (scaleDay.tipo === 'fds' ? 'FDS' : 'Folga'),
-          reason: scaleDay.descricao || 'Folga contratual (Escala)',
-          isAllDayUnavailable: true,
-        };
-      }
-    }
-
-    // 2. Verifica overrides e bloqueios manuais locais
-    const override = dayScaleOverrideByEmployee.get(emp.id);
-    if (override) {
-      const isFerias = isFeriasReason(override.descricao);
-      if (isFerias) {
-        return {
-          label: 'Férias',
-          reason: override.descricao || 'Férias planejadas',
-          isAllDayUnavailable: true,
-        };
-      }
-
-      if (override.tipo === 'fds') {
-        return {
-          label: 'FDS',
-          reason: override.descricao || 'Fim de semana (escala)',
-          isAllDayUnavailable: true,
-        };
-      }
-
-      return {
-        label: 'Folga',
-        reason: override.descricao || 'Folga planejada',
-        isAllDayUnavailable: true,
-      };
-    }
-
-    const dayBlocks = (emp.bloqueios || []).filter((bloq) => bloq.data === receptionDate);
-    if (dayBlocks.length === 0) return null;
-
-    const fullDayBlock = dayBlocks.find(bloqueioDiaInteiro);
-
-    if (!fullDayBlock) {
-      const reason = dayBlocks.map((bloq) => bloq.motivo).filter(Boolean).join(' | ') || 'Bloqueio parcial';
-      return {
-        label: 'Bloqueio',
-        reason,
-        isAllDayUnavailable: false,
-      };
-    }
-
-    const isFerias = isFeriasReason(fullDayBlock.motivo);
-    return {
-      label: isFerias ? 'Férias' : 'Folga',
-      reason: fullDayBlock.motivo,
-      isAllDayUnavailable: true,
-    };
-  }, [dayScaleOverrideByEmployee, receptionDate, isFeriasReason, buildScaleForEmployee]);
+  const getEmployeeDayStatus = useCallback((emp: Employee): EmployeeDayStatus | null => statusDoDia(
+    buildScaleForEmployee?.(emp.id).find((d) => d.data === receptionDate),
+    dayScaleOverrideByEmployee.get(emp.id),
+    (emp.bloqueios || []).filter((bloq) => bloq.data === receptionDate),
+    funcionamento,
+  ), [dayScaleOverrideByEmployee, receptionDate, buildScaleForEmployee, funcionamento]);
 
   // Situação do dia de cada profissional, calculada uma vez por data (gerar a escala do mês é caro)
   const dayStatusByEmployee = useMemo(() => {
     const map = new Map<string, EmployeeDayStatus | null>();
     for (const emp of employees) {
-      if (isTeamMember(emp)) map.set(emp.id, getEmployeeDayStatus(emp));
+      if (atendeNaAgenda(emp)) map.set(emp.id, getEmployeeDayStatus(emp));
     }
     return map;
   }, [employees, getEmployeeDayStatus]);
@@ -244,7 +210,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
 
   const scrollToCurrentTime = () => {
     if (bodyScrollRef.current) {
-      const currentMinuteTop = (getBrazilCurrentMinuteOfDay() - START_HOUR * 60) * (HOUR_HEIGHT / 60);
+      const currentMinuteTop = (getBrazilCurrentMinuteOfDay() - horaInicioGrade * 60) * (HOUR_HEIGHT / 60);
       bodyScrollRef.current.scrollTo({ top: Math.max(0, currentMinuteTop - 100), behavior: 'smooth' });
     }
   };
@@ -253,7 +219,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     if (e.target !== e.currentTarget) return;
     const y = e.nativeEvent.offsetY;
     const totalMinutes = y / MINUTE_HEIGHT;
-    const hours = Math.floor(totalMinutes / 60) + START_HOUR;
+    const hours = Math.floor(totalMinutes / 60) + horaInicioGrade;
     const minutes = Math.floor(totalMinutes % 60);
     const roundedMinutes = Math.ceil(minutes / 15) * 15;
     let finalHours = hours; let finalMins = roundedMinutes;
@@ -266,6 +232,13 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     const dayStatus = dayStatusByEmployee.get(empId);
     if (dayStatus?.isAllDayUnavailable) {
       setErrorMessage(`Profissional indisponível: ${dayStatus.label}${dayStatus.reason ? ` (${dayStatus.reason})` : ''}.`);
+      return;
+    }
+
+    // Dia fechado, antes da abertura ou depois do último horário: avisa já no clique, não depois de preencher a reserva
+    const foraDoHorario = validarHorarioAgendamento(receptionDate, formattedTime, INTERVALO_AGENDAMENTO_MIN, { funcionamento });
+    if (foraDoHorario) {
+      setErrorMessage(foraDoHorario);
       return;
     }
 
@@ -287,16 +260,13 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
       }
     }
     openBookingModal(formattedTime, empId);
-  }, [employees, receptionDate, setErrorMessage, todayStr, dayStatusByEmployee, openBookingModal]);
+  }, [employees, receptionDate, setErrorMessage, todayStr, dayStatusByEmployee, openBookingModal, horaInicioGrade, funcionamento]);
 
   const activeEmployees = useMemo(() => employees
-    .filter((emp) => isTeamMember(emp))
+    .filter((emp) => atendeNaAgenda(emp))
     .filter((emp) => {
       if (professionalFilter === 'all') return true;
-      if (professionalFilter === OFF_DAY_FILTER) {
-        const status = dayStatusByEmployee.get(emp.id);
-        return Boolean(status?.isAllDayUnavailable && status.label !== 'Bloqueio');
-      }
+      if (professionalFilter === OFF_DAY_FILTER) return estaDeFolga(dayStatusByEmployee.get(emp.id));
       return emp.id === professionalFilter;
     }), [employees, professionalFilter, dayStatusByEmployee]);
 
@@ -314,8 +284,8 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   const isTodayView = receptionDate === todayStr;
   // Mesma janela do servidor (GET /agendamentos devolve só o último ano)
   const isOutsideLoadedWindow = receptionDate < shiftDateString(todayStr, -JANELA_AGENDA_DIAS);
-  const currentMinuteTop = isTodayView ? (getBrazilCurrentMinuteOfDay() - START_HOUR * 60) * MINUTE_HEIGHT : -100;
-  const timelineHeight = (END_HOUR - START_HOUR + 1) * HOUR_HEIGHT;
+  const currentMinuteTop = isTodayView ? (getBrazilCurrentMinuteOfDay() - horaInicioGrade * 60) * MINUTE_HEIGHT : -100;
+  const timelineHeight = (horaFimGrade - horaInicioGrade + 1) * HOUR_HEIGHT;
 
   // Agendamentos do dia já filtrados e agrupados por profissional: cada coluna só lê a própria lista
   // Listas sem mudança reaproveitam o array anterior (o React Query mantém os objetos inalterados),
@@ -348,8 +318,8 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   const scheduleGridContext = useMemo<ScheduleGridContext>(() => ({
     receptionDate,
     services,
-    startHour: START_HOUR,
-    endHour: END_HOUR,
+    startHour: horaInicioGrade,
+    endHour: horaFimGrade,
     minuteHeight: MINUTE_HEIGHT,
     hourHeight: HOUR_HEIGHT,
     isTodayView,
@@ -358,6 +328,24 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     todayStr,
     employeeUnavailableReasons,
   }), [receptionDate, services, isTodayView, currentMinute, todayStr, employeeUnavailableReasons]);
+
+  const [mostrarSemBaixa, setMostrarSemBaixa] = useState(false);
+  const semBaixa = useSemBaixa(appointments, services);
+  const abrirAtendimento = (app: Appointment) => {
+    setReceptionDate(app.date);
+    setVisao('dia');
+    setMostrarSemBaixa(false);
+    openEditAppointmentModal(app);
+  };
+
+  // Enter com um código de reserva: vai para o dia do atendimento e abre o agendamento
+  const abrirPorCodigo = () => {
+    const codigo = lerCodigoReserva(scheduleSearchTerm);
+    if (!codigo) return;
+    const achado = appointments.find((a) => codigoReserva(a.id) === codigo);
+    if (!achado) { setErrorMessage(`Nenhuma reserva ${codigo} na agenda (canceladas e de mais de um ano não aparecem).`); return; }
+    abrirAtendimento(achado);
+  };
 
   // Arrastar o card: muda profissional e horário juntos. Vai só o necessário (o servidor mantém cliente e serviços)
   // e a versão do registro, para não sobrescrever uma edição feita por outra pessoa nesse meio tempo
@@ -398,7 +386,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
     const { app, empId, time } = movimentoPendente;
     const duracao = getDuration(app.services, services);
     const intervalo = (inicio: string) => `${inicio}–${minutosParaHorario(horarioParaMinutos(inicio) + duracao)}`;
-    const dia = app.date.split('-').reverse().join('/');
+    const dia = formatarDataBR(app.date);
     return `${app.clientName}, ${dia}: de ${intervalo(app.time)} com ${nomeProfissional(app.assignedEmployeeId)} para ${intervalo(time)} com ${nomeProfissional(empId)}.`;
   })();
 
@@ -436,9 +424,9 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
   const textoAcao = (() => {
     if (!acaoPendente) return { titulo: '', descricao: '', botao: '' };
     const { app, acao } = acaoPendente;
-    const quando = `${app.date.split('-').reverse().join('/')} às ${app.time}, com ${nomeProfissional(app.assignedEmployeeId)}`;
+    const quando = `${formatarDataBR(app.date)} às ${app.time}, com ${nomeProfissional(app.assignedEmployeeId)}`;
     if (acao === 'concluir') {
-      const valor = typeof app.valorTotal === 'number' ? ` (${app.valorTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})` : '';
+      const valor = typeof app.valorTotal === 'number' ? ` (${formatarReais(app.valorTotal)})` : '';
       return { titulo: 'Concluir atendimento?', descricao: `${app.clientName}, ${quando}. Ele entra no faturamento${valor} e na comissão.`, botao: 'Concluir' };
     }
     if (acao === 'falta') return { titulo: 'Marcar falta?', descricao: `${app.clientName}, ${quando}. O horário fica registrado como falta do cliente.`, botao: 'Marcar falta' };
@@ -507,7 +495,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
                  {/* Tooltip Hover nativo CSS */}
                  <div className="absolute z-50 bottom-full mb-2 hidden group-hover:flex flex-col w-64 p-3 bg-surface-container-highest shadow-2xl rounded-2xl text-sm border border-outline-variant pointer-events-none left-1/2 -translate-x-1/2">
                     <div className="font-bold text-primary mb-2 flex justify-between items-center border-b border-outline-variant/30 pb-1">
-                      <span>Cobertura: {dStr.split('-').reverse().join('/')}</span>
+                      <span>Cobertura: {formatarDataBR(dStr)}</span>
                       <span className={`px-2 py-0.5 rounded-full text-[11px] ${coverage.availableCount < coverage.ideal ? 'bg-orange-500/20 text-orange-600' : 'bg-emerald-500/20 text-emerald-600'}`}>
                         {coverage.availableCount} {coverage.availableCount === 1 ? 'Plantão' : 'Plantões'}
                       </span>
@@ -526,38 +514,94 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
              );
            })}
         </div>
-        <div className="mt-6 rounded-2xl border border-outline-variant/20 bg-surface-container-low p-3">
-          <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Dica operacional</p>
-          <p className="text-xs text-on-surface-variant mt-1">Use os atalhos acima da grade para Nova Reserva, Lista de Hoje e Bloqueios.</p>
+        {/* Legenda discreta das cores do mini calendário */}
+        <div className="mt-4 pt-3 border-t border-outline-variant/15 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-on-surface-variant" aria-label="Legenda do calendário">
+          <span className="inline-flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-200 border border-emerald-400" />
+            Cobertura ok
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-orange-200 border border-orange-400" />
+            Reduzida
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-full border-2 border-primary" />
+            Hoje
+          </span>
         </div>
+
+        {/* Card compacto somente leitura com quem está de folga no dia (oculto quando ninguém está de folga) */}
+        {(() => {
+          const folgasHoje = employees
+            .filter((emp) => atendeNaAgenda(emp) && estaDeFolga(dayStatusByEmployee.get(emp.id)))
+            .map((emp) => ({
+              id: emp.id,
+              nome: emp.name,
+              status: dayStatusByEmployee.get(emp.id)!,
+            }));
+          if (folgasHoje.length === 0) return null;
+          return (
+            <div className="mt-4 rounded-2xl border border-outline-variant/20 bg-surface-container-low p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">De folga no dia</p>
+                <span className="text-[11px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">{folgasHoje.length}</span>
+              </div>
+              <ul className="space-y-1">
+                {folgasHoje.map((item) => (
+                  <li key={item.id} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="font-medium text-on-surface truncate">{item.nome}</span>
+                    <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-error bg-error/10 px-2 py-0.5 rounded-full">{item.status.label}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Painel Central (Grade Visual) */}
       <div className="flex-1 bg-surface-container-lowest p-6 lg:p-8 rounded-3xl border border-outline-variant/10 shadow-sm overflow-hidden flex flex-col">
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 gap-4 shrink-0">
-          <div>
+        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-4 gap-3 shrink-0">
+          <div className="min-w-0">
             <h3 className="text-2xl font-headline text-primary">Agenda da Recepção</h3>
             <p className="text-sm text-on-surface-variant">
-              {visao === 'dia' ? `Controle do dia ${receptionDate.split('-').reverse().join('/')}` : visao === 'semana' ? 'Visão da semana' : 'Visão do mês'}
+              {visao === 'dia' ? `Controle do dia ${formatarDataBR(receptionDate)}` : visao === 'semana' ? 'Visão da semana' : 'Visão do mês'}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 w-full lg:w-auto">
-            <button onClick={() => openBookingModal('', '')} className="px-5 py-3 bg-primary text-on-primary rounded-xl text-xs font-bold uppercase tracking-widest shadow-md hover:bg-primary-dim transition-all flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px]">add</span> Nova Reserva
+          <div className="flex flex-nowrap items-center gap-2 overflow-x-auto max-w-full shrink-0">
+            <button onClick={() => openBookingModal('', '')} className="px-3.5 py-2.5 bg-primary text-on-primary rounded-xl text-xs font-bold uppercase tracking-wider shadow-md hover:bg-primary-dim transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0">
+              <span className="material-symbols-outlined text-[17px]">add</span> Nova Reserva
             </button>
-            <button onClick={() => onOpenUpcomingAppointments?.()} className="px-4 py-3 border border-primary/40 text-primary rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-primary/10 transition-all flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px]">event_note</span> Lista de Hoje
-            </button>
-            <button onClick={() => openBlockModal('', '')} className="px-4 py-3 bg-error/15 text-error rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-error/25 transition-all flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px]">block</span> Bloqueio
-            </button>
+            {ehRecepcao && onOpenUpcomingAppointments && (
+              <button onClick={() => onOpenUpcomingAppointments()} className="px-3.5 py-2.5 border border-primary/40 text-primary rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/10 transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0">
+                <span className="material-symbols-outlined text-[17px]">event_note</span> Lista de Hoje
+              </button>
+            )}
+            {semBaixa.length > 0 && (
+              <button
+                onClick={() => setMostrarSemBaixa((v) => !v)}
+                aria-expanded={mostrarSemBaixa}
+                aria-controls="lista-sem-baixa"
+                title="Total acumulado de atendimentos passados sem baixa"
+                className="px-3.5 py-2.5 border border-error/40 text-error rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-error/10 transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <span className="material-symbols-outlined text-[17px]" aria-hidden="true">pending_actions</span> Sem baixa ({semBaixa.length})
+              </button>
+            )}
+            {onAddBloqueio && !ehRecepcao && (
+              <button onClick={() => openBlockModal('', '')} className="px-3.5 py-2.5 bg-error/15 text-error rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-error/25 transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0">
+                <span className="material-symbols-outlined text-[17px]">block</span> Bloqueio
+              </button>
+            )}
           </div>
         </div>
 
+        {mostrarSemBaixa && semBaixa.length > 0 && <ListaSemBaixa itens={semBaixa} employees={employees} onAbrir={abrirAtendimento} />}
+
         <div className="flex flex-col md:flex-row gap-3 mb-6 shrink-0">
           <div className="relative flex-1">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline-variant text-[18px]">search</span>
-            <input type="text" placeholder="Buscar Cliente ou Serviço..." value={scheduleSearchTerm} onChange={e => setScheduleSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-surface-container-low border border-outline-variant/30 text-sm rounded-xl focus:ring-1 focus:ring-primary text-on-surface" />
+            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">search</span>
+            <input type="text" placeholder="Buscar cliente, serviço ou código (AG-...)" aria-label="Buscar cliente, serviço ou código da reserva" value={scheduleSearchTerm} onChange={e => setScheduleSearchTerm(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') abrirPorCodigo(); }} className="w-full pl-10 pr-4 py-2 bg-surface-container-low border border-outline-variant/30 text-sm rounded-xl focus:ring-1 focus:ring-primary text-on-surface" />
           </div>
           <select
             value={professionalFilter}
@@ -566,7 +610,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
           >
             <option value="all">Profissional: Todos</option>
             <option value={OFF_DAY_FILTER}>Profissional: Somente de folga</option>
-            {employees.filter((employee) => isTeamMember(employee)).map((employee) => (
+            {employees.filter((employee) => atendeNaAgenda(employee)).map((employee) => (
               <option key={employee.id} value={employee.id}>{employee.name}</option>
             ))}
           </select>
@@ -591,6 +635,14 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
         </div>
         {visao !== 'dia' && professionalFilter === OFF_DAY_FILTER && (
           <p className="text-[11px] text-on-surface-variant mb-2 shrink-0">"Somente de folga" vale só na visão Dia: aqui aparecem os atendimentos de todos.</p>
+        )}
+        {visao === 'dia' && professionalFilter === OFF_DAY_FILTER && activeEmployees.length === 0 && (
+          <p role="status" className="text-sm text-on-surface-variant mb-2 shrink-0">Nenhum profissional de folga neste dia.</p>
+        )}
+        {visao === 'dia' && !abreNaData(funcionamento, receptionDate) && (
+          <p role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300 mb-2 shrink-0">
+            {mensagemCasaFechada(funcionamento, receptionDate)} Novos agendamentos não são aceitos.
+          </p>
         )}
         {visao === 'dia' && (
           <p className="text-[11px] text-on-surface-variant mb-2 shrink-0">
@@ -654,8 +706,8 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
           <div className="flex flex-1 overflow-y-auto overflow-x-auto relative custom-scrollbar" ref={bodyScrollRef} onScroll={(e) => { if (headerScrollRef.current) headerScrollRef.current.scrollLeft = e.currentTarget.scrollLeft; }}>
             <div className="relative min-w-full w-max shrink-0 flex">
               <ScheduleRulerGrid
-                startHour={START_HOUR}
-                endHour={END_HOUR}
+                startHour={horaInicioGrade}
+                endHour={horaFimGrade}
                 hourHeight={HOUR_HEIGHT}
                 hourColumnClassName="w-14 shrink-0 bg-surface-container-lowest/95 backdrop-blur border-r border-outline-variant/20 sticky left-0 z-20 flex flex-col"
                 labelClassName="absolute top-1 right-2 text-[11px] font-bold text-on-surface-variant bg-surface-container-lowest px-1 leading-none"
@@ -663,7 +715,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
 
               <ScheduleGridProvider schedule={scheduleGridContext} actions={scheduleGridActions}>
                 <div
-                  className="relative flex flex-1 z-10 min-w-max"
+                  className="relative flex flex-1 min-w-max"
                 >
                   {activeEmployees.map(emp => (
                     <EmployeeScheduleColumn key={emp.id} emp={emp} appointments={dayAppointmentsByEmployee.get(emp.id) ?? NO_APPOINTMENTS} />
@@ -749,7 +801,7 @@ export function SupervisorEscalaTab({ employees, appointments, services, clients
       {appointmentToDelete && (
         <DeleteAppointmentModal
           key={appointmentToDelete}
-          appointmentId={appointmentToDelete} version={appointments.find((a) => a.id === appointmentToDelete)?.version} onClose={closeDeleteAppointmentModal} onDeleteAppointment={onDeleteAppointment} setToastMessage={setToastMessage} setErrorMessage={setErrorMessage}
+          appointmentId={appointmentToDelete} version={appointments.find((a) => a.id === appointmentToDelete)?.version} onClose={closeDeleteAppointmentModal} onDeleteAppointment={onDeleteAppointment} setToastMessage={setToastMessage} setErrorMessage={setErrorMessage} modo={ehRecepcao ? 'cancelar' : 'excluir'}
         />
       )}
     </motion.div>

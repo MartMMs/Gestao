@@ -1,6 +1,6 @@
 import React, { useId, useRef } from 'react';
 import { motion } from 'motion/react';
-import { MENSAGEM_SAIDA, useModal } from '../hooks/useModal';
+import { confirmarSaida, useModal } from '../hooks/useModal';
 
 interface ModalFormularioBase {
   title: string;
@@ -58,8 +58,7 @@ export function ModalFormulario({
   const fecharComConfirmacao = () => {
     // Enquanto salva, fechar esconderia o resultado (e um erro) do usuário
     if (isSubmitting) return;
-    if (hasUnsavedChanges && !window.confirm(MENSAGEM_SAIDA)) return;
-    onClose();
+    confirmarSaida(hasUnsavedChanges, onClose);
   };
 
   // Esc fecha como o X (com a mesma confirmação); o fundo não rola

@@ -13,7 +13,8 @@ const MAX_TURNOS = 30;
 export function createTurnosRouter(notificar: Notificar) {
   const router = Router();
 
-  router.get('/turnos', verificarToken, async (_req, res) => {
+  // Turnos padrão são configuração do RH: só supervisão e admin (recepção usa /escala/operacional)
+  router.get('/turnos', verificarSupervisorToken, async (_req, res) => {
     try {
       res.json(await prisma.turno.findMany({ orderBy: [{ inicio: 'asc' }, { fim: 'asc' }] }));
     } catch (error) {

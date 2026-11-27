@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { ModalFormulario } from '../../../components/ModalFormulario';
 import { useAuth } from '../../../AuthContext';
 import { useCompanyConfig, useCreateClient } from '../../../api';
-import { AnamneseForm, initialAnamnese, type AnamneseData } from '../../../components/AnamneseForm';
-import { formatAnamneseStorage, hasAnamnese } from '../../../utils/anamneseUtils';
+import { FichaNovaModal, usePerguntasDaFicha } from '../../../components/FichaNovaModal';
+import { temRespostas } from '@shared/formularioAnamnese';
+import type { ValorResposta } from '@shared/formularioAnamnese';
 import { formatCpf, formatPhone } from '../../../utils/formatters';
 import { lerCliente } from '@shared/clientes';
 import { MENSAGEM_ANAMNESE_OBRIGATORIA } from '@shared/anamnese';
@@ -14,12 +15,14 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
   const { token } = useAuth();
   const { mutateAsync: criar, isPending } = useCreateClient(token);
   const [form, setForm] = useState({ nome: '', telefone: '', cpf: '', email: '' });
+  const [naoReceberWhatsapp, setNaoReceberWhatsapp] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const { data: empresa } = useCompanyConfig(token);
-  const exigirAnamnese = empresa?.exigirAnamnese === true;
-  const [ficha, setFicha] = useState<AnamneseData>(initialAnamnese);
+  const { semPerguntas } = usePerguntasDaFicha();
+  const exigirAnamnese = empresa?.exigirAnamnese === true && !semPerguntas;
+  const [ficha, setFicha] = useState<Record<string, ValorResposta>>({});
   const [fichaAberta, setFichaAberta] = useState(false);
-  const fichaPreenchida = hasAnamnese(ficha);
+  const fichaPreenchida = temRespostas(ficha);
   const alterar = (campo: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const valor = campo === 'telefone' ? formatPhone(e.target.value) : campo === 'cpf' ? formatCpf(e.target.value) : e.target.value;
     setForm((atual) => ({ ...atual, [campo]: valor }));
@@ -36,7 +39,7 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
       return;
     }
     try {
-      const criado = await criar({ ...form, ...(fichaPreenchida ? { observacao: formatAnamneseStorage('', ficha) } : {}) });
+      const criado = await criar({ ...form, naoReceberWhatsapp, ...(fichaPreenchida ? { respostasFicha: ficha } : {}) });
       setToastMessage?.(`Cliente ${criado.nome} cadastrado${criado.codigo ? ` (#${criado.codigo})` : ''}.`);
       onClose();
     } catch (error) {
@@ -73,6 +76,10 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
         E-mail <span className="font-normal">(opcional)</span>
         <input type="email" maxLength={120} value={form.email} onChange={alterar('email')} className={CAMPO} />
       </label>
+      <label className="flex items-center gap-2 text-sm text-on-surface">
+        <input type="checkbox" checked={naoReceberWhatsapp} onChange={(e) => setNaoReceberWhatsapp(e.target.checked)} className="w-4 h-4 rounded" />
+        Não quer receber lembretes no WhatsApp
+      </label>
       <div className="flex items-center justify-between gap-3 rounded-xl border border-outline-variant/20 px-4 py-3">
         <p className="text-sm text-on-surface">
           Ficha de anamnese{' '}
@@ -87,7 +94,7 @@ export function NovoClienteModal({ onClose, setToastMessage }: { onClose: () => 
       {erro && <p role="alert" className="text-sm text-error">{erro}</p>}
     </ModalFormulario>
     {/* Fora do <form> do cadastro: Enter num campo da ficha não envia o cadastro */}
-    {fichaAberta && <AnamneseForm data={ficha} onChange={setFicha} onClose={() => setFichaAberta(false)} />}
+    {fichaAberta && <FichaNovaModal nome={form.nome} valoresIniciais={ficha} onConfirmar={setFicha} onClose={() => setFichaAberta(false)} />}
     </>
   );
 }

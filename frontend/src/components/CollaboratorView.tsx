@@ -1,5 +1,7 @@
+import { formatarDataBR } from '@shared/datasBR';
+import { horasDaGrade, useFuncionamento } from '../config/funcionamento';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { horarioParaMinutos, minutoDentroDoBloqueio } from '@shared/agenda';
+import { funcionamentoNaData, horarioParaMinutos, INTERVALO_AGENDAMENTO_MIN, minutoDentroDoBloqueio, validarHorarioAgendamento } from '@shared/agenda';
 import { useToast } from '../hooks/useToast';
 import { useModal } from '../hooks/useModal';
 import { Employee, Appointment, Service, Client } from '../types';
@@ -11,9 +13,11 @@ import { BookingModal, EditAppointmentModal, DeleteAppointmentModal } from '../f
 import { UpcomingAppointmentsModal } from './UpcomingAppointmentsModal';
 import { useScheduleModals } from '../features/appointments/hooks';
 import { ScheduleRulerGrid } from './ScheduleRulerGrid';
-import { SolicitarTroca, type TrocaTurnoPayload } from './SolicitarTroca';
+import { type TrocaTurnoPayload } from './SolicitarTroca';
+import { SupervisorEscalaTab } from '../features/scale/components';
+import { MinhaEscalaModal } from '../features/scale/components/MinhaEscalaModal';
 
-const { START_HOUR, END_HOUR, HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
+const { HOUR_HEIGHT, MINUTE_HEIGHT, CURRENT_TIME_LINE } = SCHEDULE_CONFIG;
 
 interface CollaboratorViewProps {
   currentUser: Employee;
@@ -28,6 +32,9 @@ interface CollaboratorViewProps {
   onDeleteAppointment?: (id: string, version?: string) => Promise<boolean | void> | void;
   onEditClient?: (id: string, clientData: Partial<Client>) => Promise<boolean | void> | void;
   onSubmitTurnoSwapRequest?: (payload: TrocaTurnoPayload) => Promise<boolean | void> | boolean | void;
+  /** Recepção: com estes dois, a aba Agenda mostra a agenda da casa (todos os profissionais) */
+  onAlterarStatus?: (appointment: Appointment, status: 'completed' | 'no_show' | 'scheduled') => Promise<unknown>;
+  onReassignAppointment?: (appointmentId: string, newEmployeeId: string, version?: string) => Promise<unknown> | void;
 }
 
 export function CollaboratorView({
@@ -42,27 +49,25 @@ export function CollaboratorView({
   onEditAppointment,
   onDeleteAppointment,
   onEditClient,
-  onSubmitTurnoSwapRequest,
+  onAlterarStatus,
+  onReassignAppointment,
 }: CollaboratorViewProps) {
+  // Recepção trabalha na agenda da casa: decidido pelo papel, não pelos callbacks que o App passa
+  const agendaDaCasa = currentUser.role === 'receptionist';
+  const funcionamento = useFuncionamento();
   const [receptionDate, setReceptionDate] = useState(getLocalTodayString());
+  const intervalosDoDia = useMemo(() => appointments
+    .filter((a) => a.date === receptionDate && a.status !== 'cancelled')
+    .map((a): [number, number] => { const i = horarioParaMinutos(a.time); return [i, i + getDuration(a.services, services)]; }),
+  [appointments, receptionDate, services]);
+  const { horaInicioGrade, horaFimGrade } = horasDaGrade(funcionamentoNaData(funcionamento, receptionDate), intervalosDoDia);
   const { toastMessage, setToastMessage } = useToast();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentMinute, setCurrentMinute] = useState(new Date());
   const [scheduleSearchTerm, setScheduleSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'agenda' | 'clientes'>('agenda');
   const [showUpcomingAppointments, setShowUpcomingAppointments] = useState(false);
-  const [showSwapModal, setShowSwapModal] = useState(false);
-  const [showFolgas, setShowFolgas] = useState(false);
-  const [showMyScheduleModal, setShowMyScheduleModal] = useState(false);
-  const WEEK_DAYS = [
-    { value: '0', label: 'DOM' },
-    { value: '1', label: 'SEG' },
-    { value: '2', label: 'TER' },
-    { value: '3', label: 'QUA' },
-    { value: '4', label: 'QUI' },
-    { value: '5', label: 'SEX' },
-    { value: '6', label: 'SÁB' },
-  ];
+  const [showMinhaEscala, setShowMinhaEscala] = useState(false);
   const {
     state: {
       showNewBookingModal,
@@ -78,10 +83,6 @@ export function CollaboratorView({
     openDeleteAppointmentModal,
     closeDeleteAppointmentModal,
   } = useScheduleModals({ defaultEmployeeId: currentUser.id });
-
-  const myScheduleDaySet = useMemo(() => {
-    return new Set((currentUser.diasTrabalho || '1,2,3,4,5,6').split(',').filter(Boolean));
-  }, [currentUser.diasTrabalho]);
 
   useEffect(() => {
     const interval = setInterval(() => setCurrentMinute(new Date()), 60000); // Update every minute
@@ -110,7 +111,7 @@ export function CollaboratorView({
   );
 
   // Calcula as estatísticas pessoais
-  const { completedCount, averageRating, nextClient } = useMemo(() => {
+  const { completedCount, nextClient } = useMemo(() => {
     const todayStr = getLocalTodayString();
     const next = myAppointments
       .filter(a => a.date === todayStr && a.status === 'scheduled')
@@ -118,7 +119,6 @@ export function CollaboratorView({
 
     return {
       completedCount: currentUser.completedServices,
-      averageRating: currentUser.rating,
       nextClient: next,
     };
   }, [myAppointments, currentUser]);
@@ -141,11 +141,19 @@ export function CollaboratorView({
   const handleGridClick = useCallback((e: React.MouseEvent<HTMLDivElement>, empId: string) => {
     if (e.target !== e.currentTarget) return; // ignore clicks on events
     const totalMinutes = e.nativeEvent.offsetY / MINUTE_HEIGHT;
-    const hours = Math.floor(totalMinutes / 60) + START_HOUR;
+    const hours = Math.floor(totalMinutes / 60) + horaInicioGrade;
     const minutes = Math.floor(totalMinutes % 60);
     const roundedMinutes = Math.round(minutes / 15) * 15;
     let finalHours = hours; let finalMins = roundedMinutes;
     if (finalMins === 60) { finalHours += 1; finalMins = 0; }
+
+    const horario = `${finalHours.toString().padStart(2, '0')}:${finalMins.toString().padStart(2, '0')}`;
+    // Dia fechado, antes da abertura ou depois do último horário: avisa já no clique
+    const foraDoHorario = validarHorarioAgendamento(receptionDate, horario, INTERVALO_AGENDAMENTO_MIN, { funcionamento });
+    if (foraDoHorario) {
+      setErrorMessage(foraDoHorario);
+      return;
+    }
 
     const clickedMinutes = finalHours * 60 + finalMins;
     const blockingReason = (currentUser.bloqueios || []).find(
@@ -157,35 +165,33 @@ export function CollaboratorView({
       return;
     }
 
-    openBookingModal(`${finalHours.toString().padStart(2, '0')}:${finalMins.toString().padStart(2, '0')}`, empId);
-  }, [currentUser.bloqueios, openBookingModal, receptionDate]);
+    openBookingModal(horario, empId);
+  }, [currentUser.bloqueios, openBookingModal, receptionDate, horaInicioGrade, funcionamento, setErrorMessage]);
 
   const handleEditAppointmentClick = useCallback((app: Appointment) => openEditAppointmentModal(app), [openEditAppointmentModal]);
 
   const handleDeleteAppointmentClick = useCallback((id: string) => openDeleteAppointmentModal(id), [openDeleteAppointmentModal]);
 
-  const handleSubmitSwapRequest = useCallback(async (_payload: TrocaTurnoPayload) => {
-    if (onSubmitTurnoSwapRequest) {
-      return onSubmitTurnoSwapRequest(_payload);
-    }
-    return true;
-  }, [onSubmitTurnoSwapRequest]);
-
   // Lógica de renderização da linha do tempo (simplificada da SupervisorView)
   const todayStr = getLocalTodayString();
   const isTodayView = receptionDate === todayStr;
-  const currentMinuteTop = isTodayView ? (getBrazilCurrentMinuteOfDay() - START_HOUR * 60) * MINUTE_HEIGHT : -100;
-  const timelineHeight = (END_HOUR - START_HOUR + 1) * HOUR_HEIGHT;
+  const currentMinuteTop = isTodayView ? (getBrazilCurrentMinuteOfDay() - horaInicioGrade * 60) * MINUTE_HEIGHT : -100;
+  const timelineHeight = (horaFimGrade - horaInicioGrade + 1) * HOUR_HEIGHT;
 
-  useModal(showFolgas, () => setShowFolgas(false));
-  useModal(showMyScheduleModal, () => setShowMyScheduleModal(false));
   useModal(!!errorMessage, () => setErrorMessage(null));
 
   return (
-    <div className="w-full max-w-4xl mx-auto">
+    <div className={`w-full ${agendaDaCasa ? 'max-w-6xl' : 'max-w-4xl'} mx-auto`}>
       <div className="mb-12">
-        <h1 className="text-4xl font-headline text-primary mb-2">Portal do <span className="italic">Colaborador</span>.</h1>
-        <p className="text-on-surface-variant font-body">Bem-vindo(a), {currentUser.name.split(' ')[0]}. Acompanhe sua agenda e seus clientes.</p>
+        <h1 className="text-3xl sm:text-4xl font-headline text-primary mb-2">
+          {agendaDaCasa ? 'Portal da Recepção' : 'Portal do Colaborador'}
+        </h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-on-surface-variant font-body">Bem-vindo(a), {currentUser.name.split(' ')[0]}. {agendaDaCasa ? 'Acompanhe a agenda da casa e os clientes.' : 'Acompanhe sua agenda e seus clientes.'}</p>
+          <button type="button" onClick={() => setShowMinhaEscala(true)} className="bg-surface-container-low text-on-surface px-3 py-2 rounded-xl text-[11px] sm:text-xs font-bold uppercase tracking-widest shadow-sm hover:bg-surface-container-high border border-outline-variant/20 flex items-center gap-1 whitespace-nowrap">
+            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">calendar_month</span> Ver minha escala
+          </button>
+        </div>
       </div>
 
       <div className="flex bg-surface-container-low p-1 rounded-full border border-outline-variant/20 overflow-x-auto max-w-full mb-8">
@@ -203,6 +209,8 @@ export function CollaboratorView({
         </button>
       </div>
 
+      {/* Agenda pessoal (profissional); a recepção usa a agenda da casa logo abaixo */}
+      {!agendaDaCasa && (<>
       {/* Cards de Estatísticas */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8 ${activeTab === 'agenda' ? '' : 'hidden'}`}>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
@@ -211,10 +219,7 @@ export function CollaboratorView({
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
           <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Sua Média</p>
-          <div className="flex items-center gap-2">
-            <p className="text-4xl font-headline text-primary">{averageRating.toFixed(1)}</p>
-            <span className="material-symbols-outlined text-primary star-active text-2xl">star</span>
-          </div>
+          <p className="text-sm text-on-surface-variant mt-3">Sem avaliações</p>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
           <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Próximo Cliente (Hoje)</p>
@@ -236,9 +241,9 @@ export function CollaboratorView({
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end mb-6 gap-4 shrink-0">
           <div className="w-full lg:w-auto">
             <h3 className="text-xl sm:text-2xl font-headline text-primary leading-tight">Minha Agenda</h3>
-            <p className="text-xs sm:text-sm text-on-surface-variant leading-tight mt-1">Dia em foco: {receptionDate.split('-').reverse().join('/')}</p>
+            <p className="text-xs sm:text-sm text-on-surface-variant leading-tight mt-1">Dia em foco: {formatarDataBR(receptionDate)}</p>
             <div className="relative w-full lg:w-80 mt-3">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline-variant text-[18px]">search</span>
+              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">search</span>
               <input
                 type="text"
                 value={scheduleSearchTerm}
@@ -257,15 +262,6 @@ export function CollaboratorView({
             />
             <button onClick={() => openBookingModal('', currentUser.id)} className="bg-primary text-on-primary px-3 py-2 rounded-xl text-[11px] sm:text-xs font-bold uppercase tracking-widest transition-all shadow-sm hover:bg-primary-dim flex items-center gap-1 whitespace-nowrap">
               <span className="material-symbols-outlined text-[18px]">add</span> Agendar
-            </button>
-            <button onClick={() => setShowFolgas(true)} className="bg-surface-container-low text-on-surface px-3 py-2 rounded-xl text-[11px] sm:text-xs font-bold uppercase tracking-widest transition-all shadow-sm hover:bg-surface-container-high border border-outline-variant/20 flex items-center gap-1 whitespace-nowrap">
-              <span className="material-symbols-outlined text-[18px]">event_busy</span> Minhas Folgas
-            </button>
-            <button onClick={() => setShowMyScheduleModal(true)} className="bg-surface-container-low text-on-surface px-3 py-2 rounded-xl text-[11px] sm:text-xs font-bold uppercase tracking-widest transition-all shadow-sm hover:bg-surface-container-high border border-outline-variant/20 flex items-center gap-1 whitespace-nowrap">
-              <span className="material-symbols-outlined text-[18px]">schedule</span> Ver Minha Escala
-            </button>
-            <button onClick={() => setShowSwapModal(true)} className="bg-tertiary-container text-on-tertiary-container px-3 py-2 rounded-xl text-[11px] sm:text-xs font-bold uppercase tracking-widest transition-all shadow-sm hover:opacity-90 flex items-center gap-1 whitespace-nowrap">
-              <span className="material-symbols-outlined text-[18px]">swap_horiz</span> Solicitar Troca
             </button>
             <button onClick={() => setShowUpcomingAppointments(true)} className="bg-secondary-container text-on-secondary-container px-3 py-2 rounded-xl text-[11px] sm:text-xs font-bold uppercase tracking-widest transition-all shadow-sm hover:bg-secondary/20 flex items-center gap-1 whitespace-nowrap">
               <span className="material-symbols-outlined text-[18px]">event_note</span> Próximos
@@ -286,8 +282,8 @@ export function CollaboratorView({
           {/* Corpo da Agenda */}
           <div className="flex flex-1 overflow-y-auto relative custom-scrollbar">
             <ScheduleRulerGrid
-              startHour={START_HOUR}
-              endHour={END_HOUR}
+              startHour={horaInicioGrade}
+              endHour={horaFimGrade}
               hourHeight={HOUR_HEIGHT}
               hourColumnClassName="w-14 shrink-0 bg-surface-container-lowest/95 backdrop-blur border-r border-outline-variant/20 sticky left-0 z-10 flex flex-col"
               labelClassName="absolute top-1 right-2 text-[11px] font-bold text-on-surface-variant bg-surface-container-lowest px-1 leading-none"
@@ -298,8 +294,9 @@ export function CollaboratorView({
 
               {/* Bloqueios */}
               {myBlockers.map(bloq => {
-                const top = (horarioParaMinutos(bloq.horaInicio) - START_HOUR * 60) * MINUTE_HEIGHT;
-                const height = Math.max((horarioParaMinutos(bloq.horaFim) - START_HOUR * 60) * MINUTE_HEIGHT - top, 20);
+                // Recortado à grade: folga (00:00–23:59) não sai da coluna
+                const top = Math.max(0, (horarioParaMinutos(bloq.horaInicio) - horaInicioGrade * 60) * MINUTE_HEIGHT);
+                const height = Math.max(Math.min(timelineHeight, (horarioParaMinutos(bloq.horaFim) - horaInicioGrade * 60) * MINUTE_HEIGHT) - top, 20);
                 return (
                   <div key={bloq.id} className="absolute left-2 right-2 bg-surface-container-high/60 backdrop-blur-sm rounded-lg border border-outline-variant/30 flex items-center justify-center group overflow-hidden" style={{ top, height }}>
                     <div className="absolute inset-0 opacity-10 repeating-linear-gradient-45 from-transparent to-on-surface-variant"></div>
@@ -308,9 +305,11 @@ export function CollaboratorView({
                 );
               })}
               {filteredAppointmentsForSelectedDate.length === 0 && myBlockers.length === 0 && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center opacity-60 pointer-events-none">
-                  <span className="material-symbols-outlined text-5xl text-outline-variant mb-2">event_available</span>
-                  <p className="text-sm font-medium text-on-surface-variant">Nenhum agendamento para este dia.</p>
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center text-center pointer-events-none">
+                  <div className="bg-surface-container-lowest/95 px-5 py-4 rounded-2xl border border-outline-variant/15 shadow-xs flex flex-col items-center">
+                    <span className="material-symbols-outlined text-4xl text-on-surface-variant/70 mb-1.5">event_available</span>
+                    <p className="text-sm font-medium text-on-surface-variant">Nenhum agendamento para este dia.</p>
+                  </div>
                 </div>
               )}
 
@@ -321,7 +320,7 @@ export function CollaboratorView({
                 const isPastDay = app.date < todayStr;
                 const isNoShow = !isCompleted && isPastDay;
                 
-                const top = (horarioParaMinutos(app.time) - START_HOUR * 60) * MINUTE_HEIGHT;
+                const top = (horarioParaMinutos(app.time) - horaInicioGrade * 60) * MINUTE_HEIGHT;
                 
                 const durationMins = getDuration(app.services, services);
                 const height = Math.max(durationMins * MINUTE_HEIGHT, 30);
@@ -343,7 +342,7 @@ export function CollaboratorView({
                     <div className={`absolute top-0 bottom-0 left-0 w-1.5 ${sideColorClass}`}></div>
                     <div className="pl-3 pr-2 py-1.5 flex flex-col h-full">
                       <div className="flex justify-between items-start">
-                        <span className={`text-xs font-bold leading-none ${isCompleted ? 'text-outline-variant line-through' : (isNoShow || delayMinutes > 0) ? 'text-error' : 'text-primary'}`}>{app.time}</span>
+                        <span className={`text-xs font-bold leading-none ${isCompleted ? 'text-on-surface-variant line-through' : (isNoShow || delayMinutes > 0) ? 'text-error' : 'text-primary'}`}>{app.time}</span>
                         {!isCompleted && (
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-surface-container-lowest/90 rounded-full shadow-sm p-1 border border-outline-variant/20 absolute right-1.5 top-1.5 z-30">
                             <button onClick={(e) => { e.stopPropagation(); void handleComplete(app.id); }} disabled={completingId === app.id} className="text-on-surface-variant hover:text-primary p-1 rounded-full flex items-center justify-center disabled:opacity-40" title="Concluir Atendimento">
@@ -381,6 +380,33 @@ export function CollaboratorView({
         </div>
       </motion.div>
 
+      </>)}
+
+      {agendaDaCasa && activeTab === 'agenda' && !(onAlterarStatus && onEditAppointment && onDeleteAppointment) && (
+        <p role="alert" className="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
+          A agenda da casa não carregou. Recarregue a página; se continuar, avise o suporte.
+        </p>
+      )}
+      {agendaDaCasa && activeTab === 'agenda' && onAlterarStatus && onEditAppointment && onDeleteAppointment && (
+          <SupervisorEscalaTab
+            employees={employees}
+            appointments={appointments}
+            services={services}
+            clients={clients}
+            onReassignAppointment={onReassignAppointment}
+            onAddAppointment={onAddAppointment}
+            isAddingAppointment={isAddingAppointment}
+            onDeleteAppointment={onDeleteAppointment}
+            onEditAppointment={onEditAppointment}
+            onAlterarStatus={onAlterarStatus}
+            onEditClient={onEditClient}
+            setToastMessage={setToastMessage}
+            setErrorMessage={setErrorMessage}
+            onOpenUpcomingAppointments={() => setShowUpcomingAppointments(true)}
+            papel="recepcao"
+          />
+      )}
+
       {showNewBookingModal && (
         <BookingModal
           receptionDate={receptionDate}
@@ -404,7 +430,7 @@ export function CollaboratorView({
           appointments={appointments}
           services={services}
           onEditClient={onEditClient}
-          somenteAnamnese
+          somenteAnamnese={!agendaDaCasa}
           setToastMessage={setToastMessage}
         />
       </div>
@@ -437,89 +463,14 @@ export function CollaboratorView({
 
       <UpcomingAppointmentsModal
         open={showUpcomingAppointments}
-        appointments={appointments}
+        appointments={agendaDaCasa ? appointments : myAppointments}
         employees={employees}
         services={services}
+        somentePropriaAgenda={!agendaDaCasa}
         onClose={() => setShowUpcomingAppointments(false)}
       />
 
-      <SolicitarTroca
-        open={showSwapModal}
-        onClose={() => setShowSwapModal(false)}
-        colaboradorId={currentUser.id}
-        appointments={appointments}
-        onSubmitTroca={handleSubmitSwapRequest}
-        setErrorMessage={setErrorMessage}
-        setToastMessage={setToastMessage}
-      />
-
-      {showFolgas && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-80 p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowFolgas(false); }}>
-          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} role="dialog" aria-modal="true" aria-label="Minhas Folgas" className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-headline text-primary">Minhas Folgas</h3>
-              <button type="button" onClick={() => setShowFolgas(false)} className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant"><span className="material-symbols-outlined">close</span></button>
-            </div>
-            <p className="text-sm text-on-surface-variant mb-4">{currentUser.name}</p>
-            <div className="space-y-2 max-h-80 overflow-y-auto custom-scrollbar pr-1">
-              {(currentUser.bloqueios || []).length === 0 ? (
-                <p className="text-sm text-on-surface-variant">Nenhuma folga cadastrada.</p>
-              ) : (
-                (currentUser.bloqueios || []).map((bloq) => (
-                  <div key={bloq.id} className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-bold text-on-surface">{bloq.motivo}</p>
-                      <span className="text-[11px] font-bold uppercase tracking-widest text-primary">{bloq.data}</span>
-                    </div>
-                    <p className="text-xs text-on-surface-variant mt-1">{bloq.horaInicio} - {bloq.horaFim}</p>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="mt-5 flex justify-end">
-              <button type="button" onClick={() => setShowFolgas(false)} className="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold uppercase tracking-widest hover:bg-primary-dim transition-colors">Fechar</button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {showMyScheduleModal && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-80 p-4 flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowMyScheduleModal(false); }}>
-          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} role="dialog" aria-modal="true" aria-label="Minha Escala" className="bg-surface-container-low p-6 rounded-3xl border border-outline-variant/10 shadow-2xl w-full max-w-lg" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-headline text-primary">Minha Escala</h3>
-              <button type="button" onClick={() => setShowMyScheduleModal(false)} className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant"><span className="material-symbols-outlined">close</span></button>
-            </div>
-            <div className="space-y-4 max-h-[72vh] overflow-y-auto pr-1 custom-scrollbar">
-              <div>
-                <p className="text-sm font-bold text-on-surface mb-2">{currentUser.name}</p>
-                <p className="text-xs text-on-surface-variant">{currentUser.specialty}</p>
-              </div>
-
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-on-surface-variant mb-3">Dias de Trabalho</p>
-                <div className="grid grid-cols-4 gap-2">
-                  {WEEK_DAYS.map((day) => (
-                    <div
-                      key={day.value}
-                      className={`rounded-xl border px-2 py-2 text-[11px] font-bold uppercase tracking-widest text-center ${myScheduleDaySet.has(day.value) ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/20'}`}
-                    >
-                      {day.label}
-                    </div>
-                  ))}
-                </div>
-                <p className="text-xs text-on-surface-variant mt-3">
-                  A alteração da escala e das folgas é feita somente pela supervisão.
-                </p>
-              </div>
-
-              <button type="button" onClick={() => setShowMyScheduleModal(false)} className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-widest text-on-primary bg-primary hover:bg-primary-dim transition-colors">
-                Fechar
-              </button>
-            </div>
-          </motion.div>
-        </div>
-      )}
+      {showMinhaEscala && <MinhaEscalaModal onClose={() => setShowMinhaEscala(false)} />}
 
       {errorMessage && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-100 p-4">

@@ -93,6 +93,37 @@ test.describe('API — travas da agenda', () => {
     }
   });
 
+  test('bloqueio criado enquanto uma marcação no mesmo horário está em andamento: o bloqueio é recusado', async ({ request }) => {
+    const admin = await auth(request, CONTAS.admin);
+    const colabs = (await (await request.get(`${apiBase()}/colaboradores`, { headers: admin })).json()) as Array<{ id: string; email?: string }>;
+    const helena = colabs.find((c) => c.email === CONTAS.colaboradora);
+    test.skip(!helena, 'Colaboradora de teste não encontrada (rode o seed:ci).');
+    const nome = `Banca Trava Bloqueio ${marca()}`;
+    const data = diaFuturo(270 + Math.floor(Math.random() * 30));
+    const portao = await abrirPortao(nome);
+    let bloqueioId: string | undefined;
+    try {
+      const marcacao = request.post(`${apiBase()}/agendamentos`, {
+        headers: admin, data: { collaboratorId: helena!.id, date: data, time: '10:00', serviceNames: ['E2E Massagem'], clientName: nome },
+      });
+      await portao.paradaNoPortao();
+      const bloqueio = request.post(`${apiBase()}/bloqueios`, {
+        headers: admin, data: { colaboradorId: helena!.id, data, horaInicio: '09:00', horaFim: '12:00', motivo: 'Teste de trava' },
+      });
+      // Sem a trava, B não espera: termina antes do portão abrir, e a asserção abaixo mostra o resultado errado
+      await Promise.race([portao.esperandoTrava(2), bloqueio]);
+      await portao.soltar();
+      const [rMarcacao, rBloqueio] = await Promise.all([marcacao, bloqueio]);
+      if (rBloqueio.status() === 201) bloqueioId = (await rBloqueio.json()).id;
+      expect(rMarcacao.status(), await rMarcacao.text()).toBe(201);
+      expect(rBloqueio.status(), await rBloqueio.text()).toBe(409);
+    } finally {
+      await portao.soltar().catch(() => {});
+      if (bloqueioId) await request.delete(`${apiBase()}/bloqueios/${bloqueioId}`, { headers: admin });
+      await limparCliente(request, admin, [nome]);
+    }
+  });
+
   test('mudança de status durante uma edição já validada: a edição vence e o status é recusado pela versão', async ({ request }) => {
     const admin = await auth(request, CONTAS.admin);
     const colabs = (await (await request.get(`${apiBase()}/colaboradores`, { headers: admin })).json()) as Array<{ id: string; email?: string }>;

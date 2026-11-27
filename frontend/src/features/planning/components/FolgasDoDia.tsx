@@ -1,3 +1,4 @@
+import { formatarDataComDiaSemanaBR } from '@shared/datasBR';
 import React, { useState } from 'react';
 import { Employee } from '../../../types';
 import type { ScaleSwapPayload } from '../../../api';
@@ -14,7 +15,7 @@ interface FolgasDoDiaProps {
   setToastMessage: (mensagem: string | null) => void;
 }
 
-const formatarDia = (data: string) => new Date(`${data}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+const formatarDia = formatarDataComDiaSemanaBR;
 const instantaneo = (dia: DiaEscala) => ({ tipo: dia.tipo, turno: dia.tipo === 'trabalho' ? dia.turno : undefined, descricao: dia.descricao });
 
 /**
@@ -110,7 +111,7 @@ export function FolgasDoDia({ employees, scaleByEmployee, mes, hoje, onSwapScale
             <li key={employee.id} className="flex items-center justify-between gap-3 rounded-2xl border border-outline-variant/15 bg-surface-container-low px-4 py-3">
               <div className="min-w-0">
                 <p className="text-sm font-bold text-on-surface truncate">{employee.name}</p>
-                <p className="text-xs text-on-surface-variant truncate">{dia.tipo === 'fds' ? 'Fim de semana' : 'Folga'}{employee.cargo ? ` · ${employee.cargo}` : ''}</p>
+                <p className="text-xs text-on-surface-variant truncate">Folga{employee.cargo ? ` · ${employee.cargo}` : ''}</p>
               </div>
               {/* Folga que já passou é histórico: não muda */}
               {onSwapScaleDays && dia.data >= hoje && (

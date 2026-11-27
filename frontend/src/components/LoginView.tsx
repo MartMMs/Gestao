@@ -92,7 +92,7 @@ export function LoginView({
           <button
             type="button"
             onClick={onOpenAutoatendimento}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 backdrop-blur-md border border-primary/30 text-primary hover:bg-primary hover:text-on-primary transition-all text-xs font-semibold cursor-pointer shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container/90 backdrop-blur-md border border-primary/30 text-primary hover:bg-primary hover:text-on-primary transition-all text-xs font-semibold cursor-pointer shadow-sm"
             title="Abrir Totem de Autoatendimento do Cliente"
           >
             <span className="material-symbols-outlined text-lg">touch_app</span>
@@ -132,11 +132,12 @@ export function LoginView({
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
-              <motion.div 
+              <motion.div
+                role="alert"
                 initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
                 className="bg-error-container text-on-error-container p-4 rounded-xl text-sm font-medium flex items-center gap-2"
               >
-                <span className="material-symbols-outlined text-lg">error</span>
+                <span className="material-symbols-outlined text-lg" aria-hidden="true">error</span>
                 {error}
               </motion.div>
             )}
@@ -165,6 +166,7 @@ export function LoginView({
                 id="password"
                 required 
                 type="password" 
+                autoComplete="current-password"
                 value={password} 
                 onChange={e => setPassword(e.target.value)} 
                 className="w-full bg-surface-container border border-outline-variant rounded-xl p-4 focus:ring-1 focus:ring-primary focus:outline-none text-sm transition-all placeholder:text-on-surface-variant text-on-surface" 

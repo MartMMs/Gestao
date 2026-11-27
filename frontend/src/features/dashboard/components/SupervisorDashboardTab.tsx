@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { formatarReais } from '../../../utils/formatters';
 import { motion } from 'motion/react';
 import { Appointment, Employee, Service } from '../../../types';
 import { getBrazilCurrentTimeString, getLocalTodayString } from '../../../features/appointments/utils/appointmentCore';
@@ -43,14 +44,17 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
 
   const maxServices = Math.max(...employees.map(e => e.completedServices), 1);
 
+  const relatorioPeriodo = revenueFilter === 'month' ? relatorioMes : relatorioAno;
+  const rotuloPeriodo = revenueFilter === 'month' ? 'no mês' : 'nos últimos 12 meses';
+
   const topEmployee = useMemo(() => {
-    const melhor = [...(relatorioMes?.profissionais ?? [])].sort((a, b) => b.concluidos - a.concluidos)[0];
+    const melhor = [...(relatorioPeriodo?.profissionais ?? [])].sort((a, b) => b.concluidos - a.concluidos)[0];
     const emp = melhor && melhor.concluidos > 0 ? employees.find((e) => e.id === melhor.colaboradorId) : undefined;
     return emp && melhor ? { ...emp, monthlyCount: melhor.concluidos } : null;
-  }, [relatorioMes, employees]);
-  const monthlyNoShows = relatorioMes?.totais.faltas ?? 0;
-  const monthlySemBaixa = relatorioMes?.totais.semBaixa ?? 0;
-  const totalRevenue = (revenueFilter === 'month' ? relatorioMes : relatorioAno)?.totais.faturamento ?? 0;
+  }, [relatorioPeriodo, employees]);
+  const periodNoShows = relatorioPeriodo?.totais.faltas ?? 0;
+  const periodSemBaixa = relatorioPeriodo?.totais.semBaixa ?? 0;
+  const totalRevenue = relatorioPeriodo?.totais.faturamento ?? 0;
 
   const { last7DaysData } = useMemo(() => {
     // Dias no fuso do negócio (meio-dia UTC evita trocar o dia), com o valor gravado de cada atendimento
@@ -68,27 +72,36 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
   }, [appointments, services]);
 
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-headline text-primary">Resumo de Indicadores</h2>
+          <p className="text-xs text-on-surface-variant">Faturamento, destaque e faltas exibidos conforme o período selecionado.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="dashboard-periodo" className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Período</label>
+          <select
+            id="dashboard-periodo"
+            value={revenueFilter}
+            onChange={(e) => setRevenueFilter(e.target.value as 'all' | 'month')}
+            className="bg-surface-container-low border border-outline-variant/25 text-primary hover:bg-primary/10 transition-colors text-xs uppercase tracking-wider font-bold rounded-xl px-3 py-2 outline-none cursor-pointer"
+          >
+            <option value="month">Este mês</option>
+            <option value="all">Últimos 12 meses</option>
+          </select>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
           <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Total de Atendimentos</p>
           <p className="text-4xl font-headline text-primary">{appointments.filter(a => a.status === 'completed').length}</p>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm flex flex-col justify-center overflow-hidden">
-          <div className="flex justify-between items-center mb-2 gap-2">
-            <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">Faturamento</p>
-            <select 
-              value={revenueFilter}
-              onChange={(e) => setRevenueFilter(e.target.value as 'all' | 'month')}
-              className="bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-[10px] uppercase tracking-widest font-bold rounded px-1.5 py-0.5 border-none outline-none cursor-pointer shrink-0"
-            >
-              <option value="month">Este mês</option>
-              <option value="all">Últimos 12 meses</option>
-            </select>
-          </div>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Faturamento ({rotuloPeriodo})</p>
           <div className="flex items-center gap-2 mt-1 w-full">
-            <p className="text-3xl font-headline text-primary font-bold truncate flex-1" title={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalRevenue)}>
-            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalRevenue)}
+            <p className="text-3xl font-headline text-primary font-bold truncate flex-1" title={formatarReais(totalRevenue)}>
+            {formatarReais(totalRevenue)}
           </p>
           <span className="material-symbols-outlined text-primary text-2xl shrink-0 opacity-80 hidden sm:block">payments</span>
         </div>
@@ -99,37 +112,32 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm">
           <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Média da Equipe</p>
-          <div className="flex items-center gap-2">
-            <p className="text-4xl font-headline text-primary">
-              {employees.length > 0 ? (employees.reduce((acc, emp) => acc + emp.rating, 0) / employees.length).toFixed(1) : '0.0'}
-            </p>
-            <span className="material-symbols-outlined text-primary star-active text-2xl">star</span>
-          </div>
+          <p className="text-sm text-on-surface-variant mt-3">Sem avaliações</p>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm flex flex-col justify-center">
-          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Destaque do Mês</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Destaque ({rotuloPeriodo})</p>
           {topEmployee ? (
             <div className="flex items-center gap-3 mt-1">
               <img src={topEmployee.avatar} alt={topEmployee.name} className="w-10 h-10 rounded-full object-cover border border-primary/20" />
               <div>
               <p className="text-sm font-bold text-primary leading-tight">{topEmployee.name?.split(' ')[0] || 'Desconhecido'}</p>
-                <p className="text-[11px] text-on-surface-variant font-medium">{topEmployee.monthlyCount} concluídos</p>
+                <p className="text-[11px] text-on-surface-variant font-medium">{topEmployee.monthlyCount} {topEmployee.monthlyCount === 1 ? 'concluído' : 'concluídos'}</p>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-on-surface-variant italic mt-1">Sem dados no mês</p>
+            <p className="text-sm text-on-surface-variant italic mt-1">Sem dados {rotuloPeriodo}</p>
           )}
         </div>
         <div className="bg-surface-container-lowest p-6 rounded-3xl border border-outline-variant/10 shadow-sm flex flex-col justify-center">
-          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Faltas no Mês</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Faltas ({rotuloPeriodo})</p>
           <div className="flex items-center gap-2 mt-1">
-            <p className="text-4xl font-headline text-error">{monthlyNoShows}</p>
+            <p className="text-4xl font-headline text-error">{periodNoShows}</p>
             <span className="material-symbols-outlined text-error text-2xl">event_busy</span>
           </div>
           {/* Pendência da recepção, separada da falta confirmada: ainda dá para concluir ou marcar falta */}
-          {monthlySemBaixa > 0 && (
+          {periodSemBaixa > 0 && (
             <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium mt-1">
-              + {monthlySemBaixa} sem baixa (conclua ou marque falta na agenda)
+              + {periodSemBaixa} sem baixa {rotuloPeriodo} (conclua ou marque falta na agenda)
             </p>
           )}
         </div>
@@ -152,7 +160,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
                         style={{ height: `${(day.revenue / last7DaysData.maxRev) * 100}%` }}
                       >
                         <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-surface-container-highest text-on-surface text-[11px] font-bold py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap shadow-md">
-                          {day.revenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          {formatarReais(day.revenue)}
                         </div>
                       </div>
                     </div>
@@ -176,7 +184,7 @@ export function SupervisorDashboardTab({ appointments, services, employees }: Su
                   </div>
                   <div className="flex-grow w-full">
                     <div className="flex justify-between text-xs text-on-surface-variant mb-1">
-                      <span>{emp.completedServices} serviços</span>
+                      <span>{emp.completedServices} {emp.completedServices === 1 ? 'serviço' : 'serviços'}</span>
                     </div>
                     <div className="h-2 w-full bg-surface-container-high rounded-full overflow-hidden">
                       <div className="h-full bg-primary rounded-full transition-all duration-1000" style={{ width: `${(emp.completedServices / maxServices) * 100}%` }}></div>

@@ -1,12 +1,19 @@
+import { formatarDataBR } from '../../shared/datasBR';
 import { Router } from 'express';
 import { prisma } from '../db';
 import { usuarioEhAdmin, usuarioEhSupervisor, verificarSupervisorToken, verificarToken } from '../auth';
-import { responderErro, type Notificar } from '../lib/http';
+import { HttpError, responderErro, type Notificar } from '../lib/http';
+import { transacaoComTravas, travarAgenda } from '../lib/transacao';
 import { prepararBloqueio } from '../lib/privacidade';
 import { registrarAuditoria } from '../lib/auditoria';
 import { MODOS_ELEGIBILIDADE, agendamentosDoDia, normalizarModoElegibilidade } from '../services/agendaService';
 import { dataValida, horarioValido, horarioParaMinutos } from '../../shared/agenda';
 import { normalizarNome } from '../../shared/validadores';
+import { SELECT_HABILIDADE, servicoParaResposta, validarHabilidadeIds } from '../services/habilidadeService';
+
+// Nomes do pedido do Pacote 2 aceitos como sinônimos dos modos gravados
+const ALIAS_MODO: Record<string, string> = { qualquer: 'livre', por_habilidade: 'habilidade', por_profissional: 'profissional', por_cargo: 'cargo' };
+const INCLUIR_HABILIDADES = { habilidadesExigidas: SELECT_HABILIDADE };
 
 const listaDeTextos = (valor: unknown): string[] => {
   if (!Array.isArray(valor)) return [];
@@ -38,12 +45,12 @@ const validarServico = (entrada: unknown) => {
     ? null
     : numeroOuNaN(payload.comissaoPercentual);
 
+  if (typeof payload.modoElegibilidade === 'string' && ALIAS_MODO[payload.modoElegibilidade]) payload.modoElegibilidade = ALIAS_MODO[payload.modoElegibilidade];
   if (payload?.modoElegibilidade !== undefined && !(MODOS_ELEGIBILIDADE as readonly unknown[]).includes(payload.modoElegibilidade)) {
     return { erro: 'Modo de elegibilidade inválido.' };
   }
   const modoElegibilidade = normalizarModoElegibilidade(payload?.modoElegibilidade);
   const cargosPermitidos = modoElegibilidade === 'cargo' ? listaDeTextos(payload?.cargosPermitidos) : [];
-  const habilidadesPermitidas = modoElegibilidade === 'habilidade' ? listaDeTextos(payload?.habilidadesPermitidas) : [];
   const profissionaisPermitidos = modoElegibilidade === 'profissional' ? listaDeTextos(payload?.profissionaisPermitidos) : [];
 
   if (nome.length < 3) return { erro: 'O nome do serviço deve ter ao menos 3 caracteres.' };
@@ -70,9 +77,6 @@ const validarServico = (entrada: unknown) => {
   if (modoElegibilidade === 'cargo' && cargosPermitidos.length === 0) {
     return { erro: 'Selecione ao menos um cargo para serviços com restrição por cargo.' };
   }
-  if (modoElegibilidade === 'habilidade' && habilidadesPermitidas.length === 0) {
-    return { erro: 'Selecione ao menos uma habilidade para serviços com restrição por habilidade.' };
-  }
   if (modoElegibilidade === 'profissional' && profissionaisPermitidos.length === 0) {
     return { erro: 'Selecione ao menos um profissional para serviços exclusivos.' };
   }
@@ -80,9 +84,17 @@ const validarServico = (entrada: unknown) => {
   return {
     data: {
       nome, preco: Math.round(preco * 100) / 100, duracao, icone: icone || 'design_services', descricao, categoria, tempoHigienizacaoMin, comissaoPercentual, ordem,
-      modoElegibilidade, cargosPermitidos, habilidadesPermitidas, profissionaisPermitidos,
+      modoElegibilidade, cargosPermitidos, profissionaisPermitidos,
     },
   };
+};
+
+// "Por habilidade" exige ao menos uma habilidade ativa; nos outros modos o vínculo é limpo
+const habilidadesDoServico = async (modo: string, valor: unknown, jaVinculadas: string[] = []) => {
+  if (modo !== 'habilidade') return [];
+  const ids = await validarHabilidadeIds(prisma, valor ?? [], jaVinculadas);
+  if (!ids || ids.length === 0) throw new HttpError(400, 'Selecione ao menos uma habilidade para serviços com restrição por habilidade.');
+  return ids;
 };
 
 const MAX_DIAS_BLOQUEIO = 62;
@@ -100,12 +112,13 @@ const profissionalDesconhecido = async (permitidos: string[], jaGravados: string
 };
 const erroProfissional = (nome: string) => `"${nome}" não está na equipe. Escolha um profissional ativo (use os botões com os nomes).`;
 
-export function createServicosRouter(notificar: Notificar) {
+export function createServicosRouter(notificar: Notificar, notificarBloqueio: Notificar) {
   const router = Router();
 
   router.get('/servicos', verificarToken, async (req, res) => {
     try {
-      const servicos = await prisma.servico.findMany({ orderBy: [{ ordem: 'asc' }, { nome: 'asc' }] });
+      const servicos = (await prisma.servico.findMany({ orderBy: [{ ordem: 'asc' }, { nome: 'asc' }], include: INCLUIR_HABILIDADES }))
+        .map(servicoParaResposta);
       // Percentual de comissão é política da supervisão (com o valor do atendimento, daria a comissão dos colegas)
       // Lista de profissionais exclusivos também é interna (o catálogo do totem já a esconde)
       res.json(usuarioEhSupervisor(req)
@@ -129,7 +142,10 @@ export function createServicosRouter(notificar: Notificar) {
       const desconhecido = await profissionalDesconhecido(validacao.data.profissionaisPermitidos);
       if (desconhecido) return res.status(400).json({ erro: erroProfissional(desconhecido) });
 
-      const servico = await prisma.servico.create({ data: validacao.data });
+      const habilidadeIds = await habilidadesDoServico(validacao.data.modoElegibilidade, req.body?.habilidadeIds);
+      const servico = servicoParaResposta(await prisma.servico.create({
+        data: { ...validacao.data, habilidadesExigidas: { connect: habilidadeIds.map((id) => ({ id })) } }, include: INCLUIR_HABILIDADES,
+      }));
       // Serviço que já nasce com preço e comissão entra no histórico, como as alterações depois
       await registrarAuditoria(req, { acao: 'servico.criado', alvo: `Serviço ${servico.nome}`, antes: {}, depois: servico, campos: ['preco', 'comissaoPercentual'] });
       notificar();
@@ -145,8 +161,10 @@ export function createServicosRouter(notificar: Notificar) {
       const { id } = req.params;
       const validacao = validarServico(req.body);
       if (!validacao.data) return res.status(400).json({ erro: validacao.erro });
-      const anterior = await prisma.servico.findUnique({ where: { id } });
-      if (!anterior) return res.status(404).json({ erro: 'Serviço não encontrado.' });
+      const anteriorBruto = await prisma.servico.findUnique({ where: { id }, include: INCLUIR_HABILIDADES });
+      if (!anteriorBruto) return res.status(404).json({ erro: 'Serviço não encontrado.' });
+      const anterior = servicoParaResposta(anteriorBruto);
+      const habilidadeIds = await habilidadesDoServico(validacao.data.modoElegibilidade, req.body?.habilidadeIds, anteriorBruto.habilidadesExigidas.map((h) => h.id));
       const desconhecido = await profissionalDesconhecido(validacao.data.profissionaisPermitidos, anterior.profissionaisPermitidos ?? []);
       if (desconhecido) return res.status(400).json({ erro: erroProfissional(desconhecido) });
       if (!usuarioEhAdmin(req)) {
@@ -156,8 +174,10 @@ export function createServicosRouter(notificar: Notificar) {
       }
       if (await nomeEmUso(validacao.data.nome, id)) return res.status(409).json({ erro: 'Já existe um serviço com este nome.' });
 
-      const servico = await prisma.servico.update({ where: { id }, data: validacao.data });
-      await registrarAuditoria(req, { acao: 'servico.alterado', alvo: `Serviço ${servico.nome}`, antes: anterior, depois: servico, campos: ['nome', 'preco', 'comissaoPercentual', 'duracao'] });
+      const servico = servicoParaResposta(await prisma.servico.update({
+        where: { id }, data: { ...validacao.data, habilidadesExigidas: { set: habilidadeIds.map((hid) => ({ id: hid })) } }, include: INCLUIR_HABILIDADES,
+      }));
+      await registrarAuditoria(req, { acao: 'servico.alterado', alvo: `Serviço ${servico.nome}`, antes: anterior, depois: servico, campos: ['nome', 'preco', 'comissaoPercentual', 'duracao', 'modoElegibilidade', 'habilidadesPermitidas'] });
       notificar();
       res.json(servico);
     } catch (error) {
@@ -235,24 +255,26 @@ export function createServicosRouter(notificar: Notificar) {
 
       const unicas = Array.from(new Set(datas as string[]));
 
-      // Não bloqueia dias com atendimentos marcados no intervalo (férias/folga com clientes agendados)
+      // Não bloqueia dias com atendimentos marcados no intervalo (férias/folga com clientes agendados).
+      // Mesma trava da marcação (agenda do profissional): nenhum agendamento entra entre a conferência e a gravação
       const inicioMin = horarioParaMinutos(horaInicio);
       const fimMin = horarioParaMinutos(horaFim);
-      const comConflito: string[] = [];
-      for (const data of unicas) {
-        const doDia = await agendamentosDoDia(prisma, data, { colaboradorId });
-        if (doDia.some((ag) => ag.inicioMin < fimMin && inicioMin < ag.fimMin)) comConflito.push(data);
-      }
-      if (comConflito.length > 0) {
-        const lista = comConflito.slice(0, 5).map((d) => d.split('-').reverse().join('/')).join(', ');
-        return res.status(409).json({
-          erro: `Há atendimentos marcados em ${comConflito.length} dia(s) do período (${lista}${comConflito.length > 5 ? '…' : ''}). Realoque-os antes de bloquear.`,
-        });
-      }
-      const criados = await prisma.$transaction(unicas.map((data) => prisma.bloqueio.create({
-        data: { data, horaInicio, horaFim, motivo, colaboradorId },
-      })));
-      notificar();
+      const criados = await transacaoComTravas(async (tx) => {
+        await travarAgenda(tx, colaboradorId);
+        const comConflito: string[] = [];
+        for (const data of unicas) {
+          const doDia = await agendamentosDoDia(tx, data, { colaboradorId });
+          if (doDia.some((ag) => ag.inicioMin < fimMin && inicioMin < ag.fimMin)) comConflito.push(data);
+        }
+        if (comConflito.length > 0) {
+          const lista = comConflito.slice(0, 5).map((d) => formatarDataBR(d)).join(', ');
+          throw new HttpError(409, `Há atendimentos marcados em ${comConflito.length} dia(s) do período (${lista}${comConflito.length > 5 ? '…' : ''}). Realoque-os antes de bloquear.`);
+        }
+        const gravados = [];
+        for (const data of unicas) gravados.push(await tx.bloqueio.create({ data: { data, horaInicio, horaFim, motivo, colaboradorId } }));
+        return gravados;
+      });
+      notificarBloqueio();
       res.status(201).json(Array.isArray(req.body?.datas) ? criados : criados[0]);
     } catch (error) {
       responderErro(res, error, 'Erro ao criar bloqueio');
@@ -263,7 +285,7 @@ export function createServicosRouter(notificar: Notificar) {
     try {
       const removido = await prisma.bloqueio.deleteMany({ where: { id: req.params.id } });
       if (removido.count === 0) return res.status(404).json({ erro: 'Bloqueio não encontrado.' });
-      notificar();
+      notificarBloqueio();
       res.json({ mensagem: 'Bloqueio removido com sucesso' });
     } catch (error) {
       responderErro(res, error, 'Erro ao excluir bloqueio');

@@ -1,11 +1,17 @@
+import { formatarDataComDiaSemanaBR } from '@shared/datasBR';
 import React, { useEffect, useState } from 'react';
 import { AutoatendimentoReservaSession } from '../../../types';
 import { formatPhone, formatCpf } from '../../../utils/formatters';
 import { cpfValido, telefoneValido } from '@shared/validadores';
 import { perguntasDoSegmento } from '@shared/segmento';
+import { obrigatoriaPendente, type CampoPublico, type ValorResposta } from '@shared/formularioAnamnese';
+import { CamposDinamicos } from '../../../components/CamposDinamicos';
 import { textoConsentimento } from '@shared/consentimento';
 import { LinksDocumentosLegais } from '../../../components/DocumentosLegais';
-import type { DadosClienteTotem } from '../services/autoatendimentoService';
+import { fetchFormularioTotem, type DadosClienteTotem } from '../services/autoatendimentoService';
+
+// "2026-11-21" -> "sáb, 21/11" (meio-dia UTC: o dia não muda com o fuso)
+export const dataHumana = (data: string) => formatarDataComDiaSemanaBR(data);
 
 interface StepIdentificationProps {
   reservation: AutoatendimentoReservaSession;
@@ -13,6 +19,8 @@ interface StepIdentificationProps {
   nomeEmpresa?: string;
   // Segmento da empresa: decide quais perguntas aparecem (as de saúde e as de spa não servem para todo negócio)
   segmento?: string;
+  // A API tem provedor de WhatsApp: só então prometemos voucher e lembretes por mensagem
+  whatsappAtivo?: boolean;
   onSubmit: (data: DadosClienteTotem) => void;
   onBack: () => void;
 }
@@ -21,9 +29,7 @@ interface StepIdentificationProps {
 // o que foi digitado. Fica só na memória da aba (nada de localStorage num totem público com dados de saúde)
 // e é limpo ao concluir ou recomeçar o atendimento.
 type Rascunho = {
-  nome: string; telefone: string; cpf: string; gestante: boolean | null; pressao: 'normal' | 'alta' | 'baixa';
-  cirurgiaRecente: boolean | null; alergia: boolean | null; detalheAlergia: string;
-  pressaoMassagem: 'suave' | 'media' | 'firme'; aroma: string; areasEvitar: string; consentimento: boolean;
+  nome: string; telefone: string; cpf: string; respostas: Record<string, ValorResposta>; consentimento: boolean;
 };
 let rascunho: Rascunho | null = null;
 
@@ -31,34 +37,39 @@ export const limparRascunhoIdentificacao = () => {
   rascunho = null;
 };
 
-export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmit, onBack }: StepIdentificationProps) {
-  const { saude, spa } = perguntasDoSegmento(segmento);
-  const termo = textoConsentimento(nomeEmpresa, saude);
+export function StepIdentification({ reservation, nomeEmpresa, segmento, whatsappAtivo, onSubmit, onBack }: StepIdentificationProps) {
+  const { saude } = perguntasDoSegmento(segmento);
+  
   const salvo = rascunho;
   const [nome, setNome] = useState(salvo?.nome ?? '');
   const [telefone, setTelefone] = useState(salvo?.telefone ?? '');
   const [cpf, setCpf] = useState(salvo?.cpf ?? '');
 
-  // Anamnese Dinâmica
-  const [gestante, setGestante] = useState<boolean | null>(salvo?.gestante ?? null);
-  const [pressao, setPressao] = useState<'normal' | 'alta' | 'baixa'>(salvo?.pressao ?? 'normal');
-  const [cirurgiaRecente, setCirurgiaRecente] = useState<boolean | null>(salvo?.cirurgiaRecente ?? null);
-  const [alergia, setAlergia] = useState<boolean | null>(salvo?.alergia ?? null);
-  const [detalheAlergia, setDetalheAlergia] = useState(salvo?.detalheAlergia ?? '');
-  const [pressaoMassagem, setPressaoMassagem] = useState<'suave' | 'media' | 'firme'>(salvo?.pressaoMassagem ?? 'media');
-  const [aroma, setAroma] = useState<string>(salvo?.aroma ?? 'lavanda');
-  const [areasEvitar, setAreasEvitar] = useState<string>(salvo?.areasEvitar ?? '');
+  // Perguntas do formulário configurável (Empresa & Segmento > Personalizar formulário). null = carregando;
+  // se a busca falhar, o cliente segue sem as perguntas (a recepção completa a ficha no check-in)
+  const [campos, setCampos] = useState<CampoPublico[] | null>(null);
+  const [falhaFormulario, setFalhaFormulario] = useState(false);
+  useEffect(() => {
+    let ativo = true;
+    fetchFormularioTotem()
+      .then((f) => { if (ativo) setCampos(f.campos); })
+      .catch(() => { if (ativo) { setCampos([]); setFalhaFormulario(true); } });
+    return () => { ativo = false; };
+  }, []);
+  // A autorização (LGPD) é sempre pedida: nome e telefone já são dados pessoais. O texto segue o segmento, como antes
+  const termo = textoConsentimento(nomeEmpresa, saude);
+  const [respostas, setRespostas] = useState<Record<string, ValorResposta>>(salvo?.respostas ?? {});
   const [consentimento, setConsentimento] = useState<boolean>(salvo?.consentimento ?? false);
 
   useEffect(() => {
-    rascunho = { nome, telefone, cpf, gestante, pressao, cirurgiaRecente, alergia, detalheAlergia, pressaoMassagem, aroma, areasEvitar, consentimento };
-  }, [nome, telefone, cpf, gestante, pressao, cirurgiaRecente, alergia, detalheAlergia, pressaoMassagem, aroma, areasEvitar, consentimento]);
+    rascunho = { nome, telefone, cpf, respostas, consentimento };
+  }, [nome, telefone, cpf, respostas, consentimento]);
 
-  const [erros, setErros] = useState<{ nome?: string; telefone?: string; cpf?: string; consentimento?: string }>({});
+  const [erros, setErros] = useState<{ nome?: string; telefone?: string; cpf?: string; consentimento?: string; ficha?: string }>({});
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const newErros: { nome?: string; telefone?: string; cpf?: string; consentimento?: string } = {};
+    const newErros: { nome?: string; telefone?: string; cpf?: string; consentimento?: string; ficha?: string } = {};
 
     if (!nome.trim() || nome.trim().length < 3) {
       newErros.nome = 'Por favor, informe seu nome completo.';
@@ -76,6 +87,11 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
       newErros.cpf = 'CPF inválido. Confira os dígitos ou deixe o campo em branco.';
     }
 
+    // Só os campos que estão na tela (o rascunho pode ter respostas de um formulário que mudou)
+    const visiveis = campos ?? [];
+    const pendente = obrigatoriaPendente(visiveis, respostas);
+    if (pendente) newErros.ficha = `Responda: ${pendente.rotulo}`;
+
     if (!consentimento) {
       newErros.consentimento = 'Para continuar, marque a autorização de uso dos seus dados.';
     }
@@ -85,25 +101,13 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
       return;
     }
 
-    // Resumo para a equipe. Só entra o que está na tela: o segmento pode ter mudado com o rascunho já preenchido
-    const healthSummaryParts: string[] = [];
-    if (saude) {
-      if (gestante) healthSummaryParts.push('GESTANTE: Sim');
-      if (pressao !== 'normal') healthSummaryParts.push(`Pressão: ${pressao}`);
-      if (cirurgiaRecente) healthSummaryParts.push('Cirurgia/Procedimento recente: Sim');
-    }
-    if (alergia) healthSummaryParts.push(`Alergia: ${detalheAlergia || 'Sim'}`);
-    if (spa) {
-      healthSummaryParts.push(`Pressão massagem: ${pressaoMassagem}`);
-      healthSummaryParts.push(`Aroma preferido: ${aroma}`);
-    }
-    if (areasEvitar.trim()) healthSummaryParts.push(`${spa ? 'Áreas a evitar' : 'Observações'}: ${areasEvitar.trim()}`);
-
     onSubmit({
       nome: nome.trim(),
       telefone,
       cpf,
-      observacoesSaude: healthSummaryParts.join(' | '),
+      // A API monta o resumo de texto a partir das respostas (e grava a ficha com as perguntas desta versão)
+      observacoesSaude: '',
+      ...(campos && !falhaFormulario ? { respostas: Object.fromEntries(visiveis.map((c) => [c.id, respostas[c.id]]).filter(([, v]) => v !== undefined)) } : {}),
       consentimento: true,
       // A versão do mesmo texto que está na tela
       consentimentoVersao: termo.versao,
@@ -113,7 +117,7 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="text-center max-w-xl mx-auto space-y-2">
-        <span className="text-[11px] font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-3 py-1 rounded-full">
+        <span className="text-xs font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-3 py-1 rounded-full">
           Etapa 3 de 4 · {saude ? 'Identificação e Saúde' : 'Identificação'}
         </span>
         <h2 className="text-2xl sm:text-3xl font-headline text-primary">
@@ -129,10 +133,10 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
         <div className="flex items-center gap-2">
           <span className="material-symbols-outlined text-primary text-[18px]">lock</span>
           <span className="text-on-surface">
-            Horário pré-reservado: <strong>{reservation.data} às {reservation.horario}</strong> ({reservation.servicoNome})
+            Horário pré-reservado: <strong>{dataHumana(reservation.data)} às {reservation.horario}</strong> ({reservation.servicoNome})
           </span>
         </div>
-        <span className="text-[11px] text-primary font-bold">
+        <span className="text-xs text-primary font-bold">
           {reservation.salaNome} · {reservation.terapeutaNome}
         </span>
       </div>
@@ -146,12 +150,14 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2">
-            <label className="block text-xs font-bold text-on-surface-variant mb-1.5">
+            <label htmlFor="totem-nome" className="block text-xs font-bold text-on-surface-variant mb-1.5">
               Nome Completo *
             </label>
             <input
+              id="totem-nome"
               type="text"
               required
+              autoComplete="name"
               value={nome}
               onChange={(e) => {
                 setNome(e.target.value);
@@ -164,11 +170,14 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-on-surface-variant mb-1.5">
+            <label htmlFor="totem-telefone" className="block text-xs font-bold text-on-surface-variant mb-1.5">
               WhatsApp / Celular *
             </label>
             <input
+              id="totem-telefone"
               type="tel"
+              inputMode="tel"
+              autoComplete="tel-national"
               required
               value={telefone}
               onChange={(e) => {
@@ -180,17 +189,22 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
               className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-3 focus:ring-1 focus:ring-primary text-sm text-on-surface"
             />
             {erros.telefone && <p className="text-xs text-error mt-1">{erros.telefone}</p>}
-            <p className="text-[11px] text-outline-variant mt-1">
-              Enviaremos seu voucher e lembretes por este número.
+            <p className="text-xs text-on-surface-variant mt-1">
+              {whatsappAtivo
+                ? 'Enviaremos seu voucher e lembretes por este número.'
+                : 'Usado apenas para contato da recepção sobre o seu agendamento.'}
             </p>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-on-surface-variant mb-1.5">
+            <label htmlFor="totem-cpf" className="block text-xs font-bold text-on-surface-variant mb-1.5">
               CPF (Opcional para recibo)
             </label>
             <input
+              id="totem-cpf"
               type="text"
+              inputMode="numeric"
+              autoComplete="off"
               value={cpf}
               onChange={(e) => {
                 setCpf(formatCpf(e.target.value));
@@ -205,208 +219,33 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
         </div>
       </div>
 
-      {/* Formulário Dinâmico de Saúde & Cuidados */}
+      {/* Formulário de anamnese configurável (campos "ambos" e "apenas_totem") */}
+      {(campos === null || campos.length > 0) && (
       <div className="bg-surface-container-lowest border border-outline-variant/25 rounded-2xl p-5 sm:p-6 shadow-sm space-y-5">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
             <span className="material-symbols-outlined text-[18px]">health_and_safety</span>
             {saude ? 'Saúde e cuidados' : 'Informações para o atendimento'}
           </h3>
-          <span className="text-[11px] text-outline-variant">Importante para sua segurança</span>
+          <span className="text-xs text-on-surface-variant">Importante para sua segurança</span>
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {saude && (<>
-          {/* Gestante */}
-          <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
-            <div>
-              <p className="text-xs font-bold text-on-surface">Está gestante?</p>
-              <p className="text-[11px] text-on-surface-variant">Requer cuidados de postura e óleos seguros</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setGestante(false)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  gestante === false ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
-                }`}
-              >
-                Não
-              </button>
-              <button
-                type="button"
-                onClick={() => setGestante(true)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  gestante === true ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
-                }`}
-              >
-                Sim
-              </button>
-            </div>
-          </div>
-
-          {/* Pressão Arterial */}
-          <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
-            <div>
-              <p className="text-xs font-bold text-on-surface">Pressão Arterial</p>
-              <p className="text-[11px] text-on-surface-variant">Para ajuste térmico e intensidade</p>
-            </div>
-            <div className="flex gap-1.5">
-              {(['normal', 'alta', 'baixa'] as const).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPressao(p)}
-                  className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold capitalize transition-colors ${
-                    pressao === p ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Cirurgias Recentes */}
-          <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
-            <div>
-              <p className="text-xs font-bold text-on-surface">Cirurgia Recente (últimos 6 meses)?</p>
-              <p className="text-[11px] text-on-surface-variant">Para evitar áreas sensíveis ou em cicatrização</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setCirurgiaRecente(false)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  cirurgiaRecente === false ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
-                }`}
-              >
-                Não
-              </button>
-              <button
-                type="button"
-                onClick={() => setCirurgiaRecente(true)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  cirurgiaRecente === true ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
-                }`}
-              >
-                Sim
-              </button>
-            </div>
-          </div>
-
-          </>)}
-          {/* Alergias */}
-          <div className="p-3.5 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col justify-between gap-2">
-            <div>
-              <p className="text-xs font-bold text-on-surface">{spa ? 'Alergia a cosméticos ou óleos?' : 'Tem alguma alergia?'}</p>
-              <p className="text-[11px] text-on-surface-variant">{spa ? 'Usaremos produtos hipoalergênicos neutros' : 'Para a equipe se preparar'}</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setAlergia(false);
-                  setDetalheAlergia('');
-                }}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  alergia === false ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
-                }`}
-              >
-                Não
-              </button>
-              <button
-                type="button"
-                onClick={() => setAlergia(true)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  alergia === true ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
-                }`}
-              >
-                Sim
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {alergia && (
-          <div>
-            <label className="block text-xs font-bold text-on-surface-variant mb-1">
-              Descreva as alergias conhecidas:
-            </label>
-            <input
-              type="text"
-              value={detalheAlergia}
-              onChange={(e) => setDetalheAlergia(e.target.value)}
-              placeholder={spa ? 'Ex: Alergia a canela, lavanda, amêndoas...' : 'Ex.: látex, algum produto ou medicamento...'}
-              className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 text-xs text-on-surface"
-            />
-          </div>
-        )}
-
-        {/* Preferências de Massagem e Aroma */}
-        {spa && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-          <div>
-            <label className="block text-xs font-bold text-on-surface-variant mb-1.5">
-              Pressão Desejada na Massagem
-            </label>
-            <div className="flex gap-2">
-              {([
-                { id: 'suave', label: 'Suave' },
-                { id: 'media', label: 'Média' },
-                { id: 'firme', label: 'Firme' },
-              ] as const).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setPressaoMassagem(item.id)}
-                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
-                    pressaoMassagem === item.id
-                      ? 'bg-primary text-on-primary shadow-sm'
-                      : 'bg-surface-container-low border border-outline-variant/20 text-on-surface-variant'
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-on-surface-variant mb-1.5">
-              Experiência Aromática
-            </label>
-            <select
-              value={aroma}
-              onChange={(e) => setAroma(e.target.value)}
-              className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 text-xs text-on-surface"
-            >
-              <option value="lavanda">Lavanda Francesa (Relaxamento Profundo)</option>
-              <option value="alecrim">Alecrim & Eucalipto (Descongestionante & Foco)</option>
-              <option value="bergamota">Bergamota & Capim-Limão (Revigorante)</option>
-              <option value="sem_aroma">Sem Aroma (Neutro Hipoalergênico)</option>
-            </select>
-          </div>
-        </div>
-        )}
-
-        <div>
-          <label className="block text-xs font-bold text-on-surface-variant mb-1">
-            {spa ? 'Partes do corpo a evitar ou áreas com maior tensão:' : 'Alguma observação ou preferência para o atendimento?'}
-          </label>
-          <input
-            type="text"
-            value={areasEvitar}
-            onChange={(e) => setAreasEvitar(e.target.value)}
-                        placeholder={spa ? 'Ex: Foco nos ombros e pescoço; não massagear pés...' : 'Opcional'}
-            className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-2.5 text-xs text-on-surface"
+        {campos === null ? (
+          <p className="text-xs text-on-surface-variant" role="status">Carregando perguntas...</p>
+        ) : (
+          <CamposDinamicos
+            idBase="totem-campo"
+            campos={campos}
+            valores={respostas}
+            onChange={(id, valor) => { setRespostas((atual) => ({ ...atual, [id]: valor })); setErros((e) => ({ ...e, ficha: undefined })); }}
           />
-        </div>
+        )}
+        {erros.ficha && <p role="alert" className="text-xs font-bold text-error">{erros.ficha}</p>}
       </div>
+      )}
 
       {/* Consentimento LGPD (dados de saúde exigem autorização específica, art. 11) */}
       <div className={`rounded-xl border p-4 ${erros.consentimento ? 'border-error bg-error/5' : 'border-outline-variant/30 bg-surface-container-low'}`}>
-        <label className="flex items-start gap-3 text-xs text-on-surface cursor-pointer">
+        <label className="flex items-center gap-3 min-h-11 text-sm text-on-surface cursor-pointer">
           <input
             type="checkbox"
             checked={consentimento}
@@ -414,18 +253,18 @@ export function StepIdentification({ reservation, nomeEmpresa, segmento, onSubmi
               setConsentimento(e.target.checked);
               if (e.target.checked) setErros((atual) => ({ ...atual, consentimento: undefined }));
             }}
-            className="mt-0.5 h-5 w-5 shrink-0 accent-primary"
+            className="h-6 w-6 shrink-0 accent-primary"
             aria-describedby="consentimento-detalhe"
             aria-invalid={Boolean(erros.consentimento)}
           />
           <span>{termo.autorizacao}</span>
         </label>
-        <p id="consentimento-detalhe" className="mt-2 pl-8 text-[11px] text-on-surface-variant">
+        <p id="consentimento-detalhe" className="mt-2 pl-8 text-xs text-on-surface-variant">
           {termo.detalhe}
         </p>
         {/* Fora da descrição do checkbox (o leitor de tela não lê o link como parte dela). Os Termos de Uso são da equipe */}
-        <p className="mt-1 pl-8 text-[11px] text-on-surface-variant"><LinksDocumentosLegais documentos={['privacidade']} /></p>
-        {erros.consentimento && <p role="alert" className="mt-2 pl-8 text-[11px] font-bold text-error">{erros.consentimento}</p>}
+        <p className="mt-1 pl-8 text-xs text-on-surface-variant"><LinksDocumentosLegais documentos={['privacidade']} /></p>
+        {erros.consentimento && <p role="alert" className="mt-2 pl-8 text-xs font-bold text-error">{erros.consentimento}</p>}
       </div>
 
       {/* Botões de Ação */}

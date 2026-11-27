@@ -1,13 +1,19 @@
+import { formatarDataBR } from '../../shared/datasBR';
 import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
-import { getUsuario, usuarioEhSupervisor, verificarSupervisorToken, verificarToken } from '../auth';
+import { getUsuario, usuarioEhSupervisor, usuarioGerenciaAgenda, verificarSupervisorToken, verificarToken } from '../auth';
+import { PAPEIS_ATENDIMENTO } from '../lib/usuarios';
 import { HttpError, responderErro, type Notificar } from '../lib/http';
 import { transacaoComTravas, travarAgenda, travarChave } from '../lib/transacao';
 import { dataValida, horarioParaMinutos, partesNoFuso, TURNO_PADRAO, TURNO_REGEX } from '../../shared/agenda';
 import { agendamentosDoDia } from '../services/agendaService';
-import { aplicarAjusteEscala, gerarEscalaComRegras, type TipoEscala as TipoContrato } from '../../shared/escala';
+import { aplicarAjusteEscala, folgaAcimaDoLimite, gerarEscalaComRegras, limiteFolgasPorSemana, mensagemFolgaAcimaDoLimite, segundaDaSemana, type TipoEscala as TipoContrato } from '../../shared/escala';
 import { analisarConformidadeCLT } from '../../shared/clt';
+import { MOTIVOS_AUSENCIA } from '../../shared/escala';
+import { registrarAuditoria } from '../lib/auditoria';
+import { montarMinhaEscala } from '../services/minhaEscalaService';
+import { planejarMesGerado } from '../services/gerarMesService';
 
 type TipoEscala = 'trabalho' | 'folga' | 'fds';
 type DiaEscala = { tipo: TipoEscala; turno: string | null; descricao: string | null };
@@ -47,9 +53,9 @@ const gravarDiaValidado = async (tx: Prisma.TransactionClient, colaboradorId: st
   // A mesma trava da marcação: sem ela, uma marcação simultânea entraria num dia que está virando folga
   await travarAgenda(tx, colaboradorId);
   if (data < partesNoFuso(new Date()).data) {
-    throw new HttpError(409, `Não é possível alterar a escala de ${data.split('-').reverse().join('/')}: a data já passou.`);
+    throw new HttpError(409, `Não é possível alterar a escala de ${formatarDataBR(data)}: a data já passou.`);
   }
-  const dataBr = data.split('-').reverse().join('/');
+  const dataBr = formatarDataBR(data);
   if (dia.tipo !== 'trabalho') {
     const marcados = await agendamentosDoDia(tx, data, { colaboradorId });
     if (marcados.length > 0) {
@@ -72,34 +78,66 @@ const gravarDiaValidado = async (tx: Prisma.TransactionClient, colaboradorId: st
 
 const TIPOS_CONTRATO: TipoContrato[] = ['6x1', '5x2', '5x1', '12x36', 'rotativo'];
 
-// Escala do mês do profissional (contrato + ajustes salvos) analisada com as mesmas regras de CLT da tela.
-// A API não bloqueia (a supervisão decide), mas devolve os alertas: a regra não depende mais só do frontend.
-const alertasCltDoMes = async (tx: Prisma.TransactionClient, colaboradorId: string, data: string): Promise<string[]> => {
-  const colaborador = await tx.colaborador.findUnique({ where: { id: colaboradorId } });
-  if (!colaborador) return [];
-  // Tipo de contrato desconhecido não vira 6x1 em silêncio: sem contrato válido não há o que analisar
-  if (!TIPOS_CONTRATO.includes(colaborador.tipoEscala as TipoContrato)) return [];
-  const mes = data.slice(0, 7);
-  const [ano, numeroMes] = mes.split('-').map(Number);
-  // Inclui a última semana do mês anterior: descanso e 7º dia atravessam a virada do mês. A malha é gerada desde o
-  // dia 1 do mês anterior e depois recortada, para as folgas de domingo daquele mês saírem iguais às da tela dele.
-  const inicioGeracao = new Date(Date.UTC(ano, numeroMes - 2, 1)).toISOString().slice(0, 10);
-  const inicioIso = new Date(Date.UTC(ano, numeroMes - 1, 1 - 7)).toISOString().slice(0, 10);
-  const fimIso = new Date(Date.UTC(ano, numeroMes, 0)).toISOString().slice(0, 10);
-  const totalDias = Math.round((Date.parse(fimIso) - Date.parse(inicioGeracao)) / 86_400_000) + 1;
-  const base = gerarEscalaComRegras(
-    { tipo: colaborador.tipoEscala as TipoContrato, dataInicio: inicioGeracao },
-    totalDias,
-    { folgasDomingoNoMes: colaborador.folgasDomingoNoMes ?? 2 },
-  ).filter((dia) => dia.data >= inicioIso);
+type Contrato = { id: string; tipoEscala: string | null; folgasDomingoNoMes: number | null; turnoPadrao: string | null };
+
+// Tipo de contrato desconhecido não vira 6x1 em silêncio: sem contrato válido não há o que analisar
+const contratoDe = async (tx: Prisma.TransactionClient, colaboradorId: string): Promise<Contrato | null> => {
+  const c = await tx.colaborador.findUnique({ where: { id: colaboradorId }, select: { id: true, tipoEscala: true, folgasDomingoNoMes: true, turnoPadrao: true } });
+  return c && TIPOS_CONTRATO.includes(c.tipoEscala as TipoContrato) ? c : null;
+};
+
+// Escala efetiva (contrato + ajustes salvos) de `de` a `ate`, a mesma da tela. Gerada desde o dia 1 do mês anterior a
+// `de` e recortada: as folgas de domingo de cada mês saem iguais às da tela daquele mês
+const malhaEfetiva = async (tx: Prisma.TransactionClient, c: Contrato, de: string, ate: string) => {
+  const [ano, mes] = de.split('-').map(Number);
+  const inicioGeracao = new Date(Date.UTC(ano, mes - 2, 1)).toISOString().slice(0, 10);
+  const totalDias = Math.round((Date.parse(ate) - Date.parse(inicioGeracao)) / 86_400_000) + 1;
   const ajustes = new Map(
-    (await tx.escalaOverride.findMany({ where: { colaboradorId, data: { gte: inicioIso, lte: fimIso } } })).map((o) => [o.data, o]),
+    (await tx.escalaOverride.findMany({ where: { colaboradorId: c.id, data: { gte: de, lte: ate } } })).map((o) => [o.data, o]),
   );
-  const analise = analisarConformidadeCLT(
-    base.map((dia) => aplicarAjusteEscala(dia, ajustes.get(dia.data))),
-    { tipoEscala: colaborador.tipoEscala ?? undefined },
-  );
+  return gerarEscalaComRegras(
+    { tipo: c.tipoEscala as TipoContrato, dataInicio: inicioGeracao },
+    totalDias,
+    { folgasDomingoNoMes: c.folgasDomingoNoMes ?? 2, turnoPadrao: c.turnoPadrao },
+  ).filter((dia) => dia.data >= de).map((dia) => aplicarAjusteEscala(dia, ajustes.get(dia.data)));
+};
+
+const somarDias = (data: string, dias: number) => new Date(Date.parse(`${data}T12:00:00Z`) + dias * 86_400_000).toISOString().slice(0, 10);
+
+// Escala do mês do profissional analisada com as mesmas regras de CLT da tela, incluindo a última semana do mês
+// anterior (descanso e 7º dia atravessam a virada). A API não bloqueia (a supervisão decide), mas devolve os alertas
+const alertasCltDoMes = async (tx: Prisma.TransactionClient, colaboradorId: string, data: string): Promise<string[]> => {
+  const c = await contratoDe(tx, colaboradorId);
+  if (!c) return [];
+  const [ano, mes] = data.slice(0, 7).split('-').map(Number);
+  const fimDoMes = new Date(Date.UTC(ano, mes, 0)).toISOString().slice(0, 10);
+  const analise = analisarConformidadeCLT(await malhaEfetiva(tx, c, somarDias(`${data.slice(0, 7)}-01`, -7), fimDoMes), { tipoEscala: c.tipoEscala ?? undefined });
   return analise.statusGeral ? [] : analise.resumo;
+};
+
+
+// Escala das semanas inteiras (segunda a domingo) das datas
+const semanasDe = async (tx: Prisma.TransactionClient, c: Contrato, datas: string[]) => {
+  const dias = [];
+  for (const segunda of new Set(datas.map(segundaDaSemana))) dias.push(...await malhaEfetiva(tx, c, segunda, somarDias(segunda, 6)));
+  return dias;
+};
+
+/**
+ * Regra do 6x1 (uma folga por semana, shared/escala.ts folgaAcimaDoLimite): lida ANTES das gravações e conferida
+ * DEPOIS de todas (uma troca no meio fica com duas folgas por um instante).
+ */
+const vigiarFolgasDaSemana = async (tx: Prisma.TransactionClient, colaboradorId: string, datas: string[]) => {
+  const c = await contratoDe(tx, colaboradorId);
+  const limite = limiteFolgasPorSemana(c?.tipoEscala);
+  if (!c || !limite) return async () => {};
+  // Trava da semana (além da do dia): duas abas marcando folga em dias diferentes da mesma semana não passam juntas
+  for (const segunda of [...new Set(datas.map(segundaDaSemana))].sort()) await travarChave(tx, `escala-semana:${colaboradorId}:${segunda}`);
+  const antes = await semanasDe(tx, c, datas);
+  return async () => {
+    const excesso = folgaAcimaDoLimite(c.tipoEscala, antes, await semanasDe(tx, c, datas));
+    if (excesso) throw new HttpError(409, mensagemFolgaAcimaDoLimite(c.tipoEscala!, excesso));
+  };
 };
 
 const garantirColaborador = async (colaboradorId: unknown) => {
@@ -111,6 +149,138 @@ const garantirColaborador = async (colaboradorId: unknown) => {
 
 export function createEscalaRouter(notificar: Notificar) {
   const router = Router();
+
+  // Visão operacional somente leitura (Recepção, Supervisão e Admin): apenas status de trabalho/folga e turno do mês,
+  // sem motivos sensíveis do RH (atestado, licença) nem dados contratuais/administrativos.
+  router.get('/escala/operacional', verificarToken, async (req, res) => {
+    try {
+      if (!usuarioGerenciaAgenda(req)) {
+        return res.status(403).json({ erro: 'Acesso restrito à recepção e supervisão.' });
+      }
+      const monthRaw = typeof req.query.month === 'string' ? req.query.month.trim() : '';
+      const month = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : partesNoFuso(new Date()).data.slice(0, 7);
+      const [ano, mes] = month.split('-').map(Number);
+      const de = `${month}-01`;
+      const ate = new Date(Date.UTC(ano, mes, 0)).toISOString().slice(0, 10);
+
+      const profissionais = await prisma.colaborador.findMany({
+        where: { ativo: true, papel: { in: PAPEIS_ATENDIMENTO } },
+        select: { id: true, tipoEscala: true, folgasDomingoNoMes: true, turnoPadrao: true },
+      });
+
+      const overrides = await prisma.escalaOverride.findMany({
+        where: { data: { gte: de, lte: ate }, colaboradorId: { in: profissionais.map((p) => p.id) } },
+        select: { colaboradorId: true, data: true, tipo: true, turno: true },
+      });
+      const overridesPorColab = new Map<string, Map<string, { tipo: TipoEscala; turno: string | null }>>();
+      for (const o of overrides) {
+        let mapa = overridesPorColab.get(o.colaboradorId);
+        if (!mapa) {
+          mapa = new Map();
+          overridesPorColab.set(o.colaboradorId, mapa);
+        }
+        mapa.set(o.data, { tipo: normalizarTipo(o.tipo), turno: o.turno });
+      }
+
+      const inicioGeracao = new Date(Date.UTC(ano, mes - 2, 1)).toISOString().slice(0, 10);
+      const totalDias = Math.round((Date.parse(ate) - Date.parse(inicioGeracao)) / 86_400_000) + 1;
+
+      const resultado: Array<{ colaboradorId: string; data: string; tipo: 'trabalho' | 'folga'; turno: string | null }> = [];
+      for (const prof of profissionais) {
+        const ajustes = overridesPorColab.get(prof.id);
+        const tipoContrato: TipoContrato = TIPOS_CONTRATO.includes(prof.tipoEscala as TipoContrato)
+          ? (prof.tipoEscala as TipoContrato)
+          : '6x1';
+        const dias = gerarEscalaComRegras(
+          { tipo: tipoContrato, dataInicio: inicioGeracao },
+          totalDias,
+          { folgasDomingoNoMes: prof.folgasDomingoNoMes ?? 2, turnoPadrao: prof.turnoPadrao },
+        ).filter((d) => d.data >= de && d.data <= ate);
+
+        for (const dia of dias) {
+          const ajuste = ajustes?.get(dia.data);
+          const efetivo = aplicarAjusteEscala(dia, ajuste ? { tipo: ajuste.tipo as TipoEscala, turno: ajuste.turno ?? undefined } : undefined);
+          const tipoOperacional: 'trabalho' | 'folga' = efetivo.tipo === 'trabalho' ? 'trabalho' : 'folga';
+          resultado.push({
+            colaboradorId: prof.id,
+            data: efetivo.data,
+            tipo: tipoOperacional,
+            turno: tipoOperacional === 'trabalho' ? (efetivo.turno ?? null) : null,
+          });
+        }
+      }
+
+      res.json(resultado);
+    } catch (error) {
+      responderErro(res, error, 'Erro ao buscar disponibilidade operacional da escala');
+    }
+  });
+
+  // Escala da própria pessoa logada. O colaborador vem SÓ da sessão: nenhum id da query/corpo é lido (sem IDOR)
+  router.get('/minha-escala', verificarToken, async (req, res) => {
+    try {
+      const usuario = getUsuario(req);
+      if (!usuario) return res.status(401).json({ erro: 'Sessão inválida.' });
+      const monthRaw = typeof req.query.month === 'string' ? req.query.month.trim() : '';
+      const hoje = partesNoFuso(new Date()).data;
+      const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(monthRaw) ? monthRaw : hoje.slice(0, 7);
+      const [ano, mes] = month.split('-').map(Number);
+      const de = `${month}-01`;
+      const ate = new Date(Date.UTC(ano, mes, 0)).toISOString().slice(0, 10);
+      const c = await prisma.$transaction((tx) => contratoDe(tx, usuario.id));
+      if (!c) return res.json({ mes: month, resumo: { hoje: null, amanha: null, proximaFolga: null, atualizadaEm: null }, dias: [] });
+      // Janela: o mês pedido e de hoje até ~6 semanas à frente (próxima folga e turno de amanhã mesmo vendo outro mês)
+      const inicio = de < hoje ? de : hoje;
+      const limite = somarDias(hoje, 45);
+      const fim = ate > limite ? ate : limite;
+      const [dias, turnos, ultimo] = await Promise.all([
+        prisma.$transaction((tx) => malhaEfetiva(tx, c, inicio, fim)),
+        prisma.turno.findMany({ select: { nome: true, inicio: true, fim: true } }),
+        prisma.escalaOverride.findFirst({ where: { colaboradorId: c.id }, orderBy: { atualizadoEm: 'desc' }, select: { atualizadoEm: true } }),
+      ]);
+      const nomes = new Map(turnos.map((t) => [`${t.inicio}-${t.fim}`, t.nome]));
+      res.json(montarMinhaEscala(dias, month, hoje, nomes, ultimo?.atualizadoEm ?? null));
+    } catch (error) {
+      responderErro(res, error, 'Erro ao buscar sua escala');
+    }
+  });
+
+  // Gera a escala de UM mês e grava cada dia com o turno escolhido (snapshot): outros meses ficam como estavam.
+  // Férias/afastamentos do mês são preservados. O contrato (tipo e domingos) é atualizado no cadastro; o turno não.
+  router.post('/escala/gerar-mes', verificarSupervisorToken, async (req, res) => {
+    try {
+      const colaboradorId = await garantirColaborador(req.body?.colaboradorId);
+      const { mes, turno, tipoEscala } = req.body ?? {};
+      const folgasDomingoNoMes = Number(req.body?.folgasDomingoNoMes);
+      if (typeof mes !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) return res.status(400).json({ erro: 'Mês inválido.' });
+      if (typeof turno !== 'string' || !TURNO_REGEX.test(turno)) return res.status(400).json({ erro: 'Escolha um turno válido.' });
+      if (!TIPOS_CONTRATO.includes(tipoEscala)) return res.status(400).json({ erro: 'Tipo de escala inválido.' });
+      if (!Number.isInteger(folgasDomingoNoMes) || folgasDomingoNoMes < 0 || folgasDomingoNoMes > 5) {
+        return res.status(400).json({ erro: 'Folgas aos domingos no mês deve ficar entre 0 e 5.' });
+      }
+      const hoje = partesNoFuso(new Date()).data;
+      const gravados = await transacaoComTravas(async (tx) => {
+        await travarChave(tx, `escala-mes:${colaboradorId}:${mes}`);
+        await tx.colaborador.update({ where: { id: colaboradorId }, data: { tipoEscala, folgasDomingoNoMes } });
+        const existentes = await tx.escalaOverride.findMany({
+          where: { colaboradorId, data: { startsWith: mes } },
+          select: { data: true, tipo: true, descricao: true },
+        });
+        const plano = planejarMesGerado({ tipoEscala, folgasDomingoNoMes, mes, turno, hoje, existentes });
+        for (const { data, dia } of plano) {
+          await travarChave(tx, `escala:${chaveEscala(colaboradorId, data)}`);
+          if (data < hoje) await gravarDia(tx, colaboradorId, data, dia);
+          else await gravarDiaValidado(tx, colaboradorId, data, dia);
+        }
+        return plano.length;
+      });
+      await registrarAuditoria(req, { acao: 'escala.gerar_mes', alvo: `Colaborador ${colaboradorId}`, antes: {}, depois: { mes, turno, tipoEscala, folgasDomingoNoMes, dias: gravados } });
+      notificar();
+      res.json({ mes, dias: gravados });
+    } catch (error) {
+      responderErro(res, error, 'Erro ao gerar a escala');
+    }
+  });
 
   router.get('/escala/overrides', verificarSupervisorToken, async (req, res) => {
     try {
@@ -139,13 +309,37 @@ export function createEscalaRouter(notificar: Notificar) {
 
       const { salvo, alertasClt } = await transacaoComTravas(async (tx) => {
         await travarChave(tx, `escala:${chaveEscala(colaboradorId, data)}`);
+        const conferirFolgas = await vigiarFolgasDaSemana(tx, colaboradorId, [data]);
         const gravado = await gravarDiaValidado(tx, colaboradorId, data, dia);
+        await conferirFolgas();
         return { salvo: gravado, alertasClt: await alertasCltDoMes(tx, colaboradorId, data) };
       });
       notificar();
       res.json({ ...salvo, alertasClt });
     } catch (error) {
       responderErro(res, error, 'Erro ao salvar a escala');
+    }
+  });
+
+  // Desfaz férias/atestado/afastamento lançado no RH: apaga os dias daquele motivo no período e cada dia volta ao
+  // rodízio da escala (o que a malha calcula). Só apaga ausência: folga comum e trabalho do período ficam
+  router.post('/escala/ausencia/remover', verificarSupervisorToken, async (req, res) => {
+    try {
+      const colaboradorId = await garantirColaborador(req.body?.colaboradorId);
+      const { inicio, fim, motivo } = req.body ?? {};
+      if (!dataValida(inicio) || !dataValida(fim) || fim < inicio) return res.status(400).json({ erro: 'Período inválido.' });
+      if (!MOTIVOS_AUSENCIA.includes(motivo)) return res.status(400).json({ erro: 'Motivo inválido.' });
+      const { count } = await transacaoComTravas(async (tx) => {
+        const dias = await tx.escalaOverride.findMany({ where: { colaboradorId, data: { gte: inicio, lte: fim }, tipo: 'folga', descricao: { startsWith: motivo } }, select: { key: true } });
+        for (const { key } of [...dias].sort((a, b) => a.key.localeCompare(b.key))) await travarChave(tx, `escala:${key}`);
+        return tx.escalaOverride.deleteMany({ where: { key: { in: dias.map((d) => d.key) } } });
+      });
+      if (count === 0) return res.status(404).json({ erro: 'Nenhum dia desse período foi encontrado (já pode ter sido removido).' });
+      await registrarAuditoria(req, { acao: 'escala.ausencia.remover', alvo: `Colaborador ${colaboradorId}`, antes: { motivo, inicio, fim, dias: count }, depois: { dias: 0 } });
+      notificar();
+      res.json({ removidos: count });
+    } catch (error) {
+      responderErro(res, error, 'Erro ao remover a ausência');
     }
   });
 
@@ -171,10 +365,15 @@ export function createEscalaRouter(notificar: Notificar) {
         const diaOrigem = await lerDia(from);
         const diaDestino = await lerDia(to);
 
+        const mesmoColaborador = from.colaboradorId === to.colaboradorId;
+        const conferirOrigem = await vigiarFolgasDaSemana(tx, from.colaboradorId, mesmoColaborador ? [from.data, to.data] : [from.data]);
+        const conferirDestino = mesmoColaborador ? async () => {} : await vigiarFolgasDaSemana(tx, to.colaboradorId, [to.data]);
         const gravados = {
           from: await gravarDiaValidado(tx, from.colaboradorId, from.data, diaDestino),
           to: await gravarDiaValidado(tx, to.colaboradorId, to.data, diaOrigem),
         };
+        await conferirOrigem();
+        await conferirDestino();
         const alertasClt = [
           ...await alertasCltDoMes(tx, from.colaboradorId, from.data),
           ...(to.colaboradorId !== from.colaboradorId || to.data.slice(0, 7) !== from.data.slice(0, 7)
@@ -206,8 +405,10 @@ export function createEscalaRouter(notificar: Notificar) {
         const origem = normalizarDia(salvo) ?? normalizarDia(source);
         if (!origem) throw new HttpError(404, 'Dia de origem não encontrado para replicação.');
 
+        const conferirFolgas = await vigiarFolgasDaSemana(tx, colaboradorId, targetDates);
         const criados = [];
         for (const alvo of new Set<string>(targetDates)) criados.push(await gravarDiaValidado(tx, colaboradorId, alvo, origem));
+        await conferirFolgas();
         const meses = [...new Set<string>(targetDates.map((alvo: string) => alvo.slice(0, 7)))];
         const alertasClt: string[] = [];
         for (const mes of meses) alertasClt.push(...await alertasCltDoMes(tx, colaboradorId, `${mes}-01`));
@@ -305,7 +506,7 @@ export function createEscalaRouter(notificar: Notificar) {
           await travarAgenda(tx, atual.colaboradorId);
           const marcados = await agendamentosDoDia(tx, atual.dataOriginal, { colaboradorId: atual.colaboradorId });
           if (marcados.length > 0) {
-            throw new HttpError(409, `O colaborador tem ${marcados.length} atendimento(s) em ${atual.dataOriginal.split('-').reverse().join('/')}. Realoque-os antes de aprovar a troca.`);
+            throw new HttpError(409, `O colaborador tem ${marcados.length} atendimento(s) em ${formatarDataBR(atual.dataOriginal)}. Realoque-os antes de aprovar a troca.`);
           }
         }
 

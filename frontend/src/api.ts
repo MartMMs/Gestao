@@ -1,6 +1,7 @@
+import type { CampoFormulario, CampoPublico, SnapshotFicha, ValorResposta } from '@shared/formularioAnamnese';
 import { CODIGO_VERSAO_DESATUALIZADA } from '@shared/statusAgendamento';
-import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { Appointment, Bloqueio, Client, Employee, EmployeeUpdate, Service, ServiceEligibilityMode, TurnoSwapRequest, TurnoSwapStatus, ConfiguracaoEmpresa } from './types';
+import { keepPreviousData, useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { Appointment, Bloqueio, Client, Employee, EmployeeUpdate, Service, ServiceEligibilityMode, TurnoSwapRequest, TurnoSwapStatus, ConfiguracaoEmpresa, Habilidade } from './types';
 import { getApiUrl } from './config/api';
 import { redactSensitiveData } from '@shared/redact';
 import { CODIGO_CSRF, CODIGO_TROCAR_SENHA } from '@shared/codigosErro';
@@ -157,6 +158,7 @@ export const fetchApi = async (url: string, token: string | null, options: Reque
 };
 
 interface BackendAppointment {
+  clienteAvisouAusenciaEm?: string | null;
   id: string | number;
   data?: string;
   date?: string;
@@ -196,9 +198,11 @@ interface BackendEmployee {
   diasTrabalho?: string;
   cargo?: string;
   tipoEscala?: string;
+  turnoPadrao?: string | null;
   cargaHorariaSemanal?: number;
   folgasDomingoNoMes?: number;
   habilidades?: string[];
+  habilidadeIds?: string[];
   bloqueios?: Employee['bloqueios'];
 }
 
@@ -214,6 +218,7 @@ interface BackendService {
   modoElegibilidade?: string | null;
   cargosPermitidos?: string[] | null;
   habilidadesPermitidas?: string[] | null;
+  habilidadeIds?: string[] | null;
   profissionaisPermitidos?: string[] | null;
   categoria?: string | null;
   tempoHigienizacaoMin?: number | string | null;
@@ -282,6 +287,7 @@ const normalizeAppointment = (appointment: BackendAppointment): Appointment => {
     valorTotal: typeof appointment.valorTotal === 'number' ? appointment.valorTotal : undefined,
     clientCode: typeof appointment.cliente?.codigo === 'number' ? appointment.cliente.codigo : undefined,
     version: appointment.atualizadoEm,
+    clienteAvisouAusencia: Boolean(appointment.clienteAvisouAusenciaEm),
   };
 };
 
@@ -304,8 +310,10 @@ const normalizeEmployee = (employee: BackendEmployee): Employee => {
     cargo: employee.cargo || undefined,
     tipoEscala: (employee.tipoEscala as Employee['tipoEscala']) || undefined,
     folgasDomingoNoMes: typeof employee.folgasDomingoNoMes === 'number' ? employee.folgasDomingoNoMes : undefined,
+    turnoPadrao: employee.turnoPadrao || null,
     cargaHorariaSemanal: typeof employee.cargaHorariaSemanal === 'number' ? employee.cargaHorariaSemanal : undefined,
     habilidades: Array.isArray(employee.habilidades) ? employee.habilidades : [],
+    habilidadeIds: Array.isArray(employee.habilidadeIds) ? employee.habilidadeIds : [],
     bloqueios: Array.isArray(employee.bloqueios) ? employee.bloqueios : [],
   };
 };
@@ -335,6 +343,7 @@ const normalizeService = (service: BackendService): Service => {
     modoElegibilidade: normalizeServiceEligibilityMode(service.modoElegibilidade),
     cargosPermitidos: Array.isArray(service.cargosPermitidos) ? service.cargosPermitidos.filter((value): value is string => typeof value === 'string') : [],
     habilidadesPermitidas: Array.isArray(service.habilidadesPermitidas) ? service.habilidadesPermitidas.filter((value): value is string => typeof value === 'string') : [],
+    habilidadeIds: Array.isArray(service.habilidadeIds) ? service.habilidadeIds.filter((value): value is string => typeof value === 'string') : [],
     profissionaisPermitidos: Array.isArray(service.profissionaisPermitidos) ? service.profissionaisPermitidos.filter((value): value is string => typeof value === 'string') : [],
     categoria: typeof service.categoria === 'string' ? service.categoria : '',
     tempoHigienizacaoMin: Number.isFinite(parsedHigiene) && parsedHigiene >= 0 ? parsedHigiene : 0,
@@ -451,7 +460,11 @@ export const useAddAppointment = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: NewAppointmentPayload) => fetchApi('/agendamentos', token, { method: 'POST', body: JSON.stringify(data) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+    // Agendar pode criar o cliente ou gravar a ficha: a lista de clientes não depende só do aviso em tempo real
+    onSuccess: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['appointments'] }),
+      queryClient.invalidateQueries({ queryKey: ['clients'] }),
+    ])
   });
 };
 
@@ -532,6 +545,19 @@ export interface RegistroAuditoria {
   antes: Record<string, unknown> | null; depois: Record<string, unknown> | null;
 }
 
+export interface AcessoHistorico {
+  id: string; criadoEm: string; ip: string | null; registros: number; colaboradorNome: string; clienteNome: string;
+}
+export interface PaginaAcessosHistorico { total: number; pagina: number; porPagina: number; itens: AcessoHistorico[] }
+export interface FiltroAcessosHistorico { de: string; ate: string; colaboradorId: string; cliente: string; pagina: number }
+
+export const useAcessosHistorico = (token: string | null, filtro: FiltroAcessosHistorico) => useQuery<PaginaAcessosHistorico>({
+  queryKey: ['auditoria', 'acessos-historico', filtro],
+  queryFn: () => fetchApi(`/auditoria/acessos-historico?${new URLSearchParams({ ...filtro, pagina: String(filtro.pagina) })}`, token),
+  enabled: Boolean(token),
+  placeholderData: keepPreviousData,
+});
+
 export const useAuditoria = (token: string | null, habilitado: boolean) => useQuery<RegistroAuditoria[]>({
   queryKey: ['auditoria'],
   queryFn: () => fetchApi('/auditoria', token),
@@ -552,7 +578,10 @@ export const useEditAppointment = (token: string | null) => {
   return useMutation({
     mutationFn: (data: EditAppointmentPayload) => fetchApi(`/agendamentos/${data.id}`, token, { method: 'PUT', body: JSON.stringify(data) }),
     // Também no erro: num conflito (409) a agenda passa a mostrar a versão atual, e a próxima tentativa já parte dela
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['appointments'] })
+    onSettled: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['appointments'] }),
+      queryClient.invalidateQueries({ queryKey: ['clients'] }),
+    ])
   });
 };
 
@@ -603,9 +632,10 @@ export const useAddEmployee = (token: string | null) => {
           especialidade: data.specialty || undefined,
           cargo: data.cargo,
           tipoEscala: data.tipoEscala,
+          turnoPadrao: data.turnoPadrao,
           folgasDomingoNoMes: data.folgasDomingoNoMes,
           cargaHorariaSemanal: data.cargaHorariaSemanal,
-          habilidades: data.habilidades,
+          habilidadeIds: data.habilidadeIds,
           papel: data.role,
           diasTrabalho: data.diasTrabalho,
           senha: data.password,
@@ -641,9 +671,10 @@ export const useEditEmployee = (token: string | null) => {
           especialidade: data.specialty,
           cargo: data.cargo,
           tipoEscala: data.tipoEscala,
+          turnoPadrao: data.turnoPadrao,
           folgasDomingoNoMes: data.folgasDomingoNoMes,
           cargaHorariaSemanal: data.cargaHorariaSemanal,
-          habilidades: data.habilidades,
+          habilidadeIds: data.habilidadeIds,
           papel: data.role,
           diasTrabalho: data.diasTrabalho,
           senha: data.password,
@@ -722,6 +753,37 @@ export const useScaleOverrides = (
   enabled: !!token && (options?.enabled ?? true),
 });
 
+// Visão operacional somente leitura da escala (Recepção, Supervisão, Admin): apenas trabalho/folga e turno do mês
+export const useEscalaOperacional = (
+  token: string | null,
+  month?: string,
+  options?: QueryHookOptions,
+) => useQuery({
+  queryKey: ['scale-overrides', 'operacional', month || 'current'],
+  queryFn: async () => {
+    const suffix = month ? `?month=${encodeURIComponent(month)}` : '';
+    const result = await fetchApi(`/escala/operacional${suffix}`, token);
+    if (!Array.isArray(result)) return [];
+    return result
+      .map((item) => normalizeScaleOverridePayload(item))
+      .filter((item): item is ScaleOverridePayload => Boolean(item));
+  },
+  enabled: !!token && (options?.enabled ?? true),
+});
+
+// Desfaz férias/atestado/afastamento do RH: os dias voltam ao rodízio da escala
+export const useRemoverAusencia = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { colaboradorId: string; inicio: string; fim: string; motivo: string }) =>
+      fetchApi('/escala/ausencia/remover', token, { method: 'POST', body: JSON.stringify(data) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['scale-overrides'] });
+    },
+  });
+};
+
 export const useSaveScaleOverride = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -730,6 +792,19 @@ export const useSaveScaleOverride = (token: string | null) => {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['scale-overrides'] });
+    },
+  });
+};
+
+// Gera a escala de um mês gravando o turno escolhido em cada dia (não muda outros meses)
+export const useGerarEscalaMes = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { colaboradorId: string; mes: string; turno: string; tipoEscala: string; folgasDomingoNoMes: number }) =>
+      fetchApi('/escala/gerar-mes', token, { method: 'POST', body: JSON.stringify(data) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       queryClient.invalidateQueries({ queryKey: ['scale-overrides'] });
@@ -800,6 +875,41 @@ export const useDeleteTurno = (token: string | null) => {
   });
 };
 
+// =======================
+// HABILIDADES (só supervisão e admin)
+// =======================
+export const useHabilidades = (token: string | null, incluirArquivadas = false) => useQuery({
+  queryKey: ['habilidades', incluirArquivadas],
+  queryFn: async () => {
+    const lista = await fetchApi(`/habilidades${incluirArquivadas ? '?incluirArquivadas=true' : ''}`, token);
+    return Array.isArray(lista) ? (lista as Habilidade[]) : [];
+  },
+  enabled: !!token,
+});
+
+// Habilidade muda quem pode atender: serviços e equipe trazem os nomes delas
+const invalidarHabilidades = (queryClient: ReturnType<typeof useQueryClient>) => {
+  for (const queryKey of [['habilidades'], ['services'], ['employees']]) queryClient.invalidateQueries({ queryKey });
+};
+
+export const useSalvarHabilidade = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, nome, ativa }: { id?: string; nome?: string; ativa?: true }) => fetchApi(id ? `/habilidades/${id}` : '/habilidades', token, {
+      method: id ? 'PUT' : 'POST', body: JSON.stringify({ nome, ativa }),
+    }) as Promise<Habilidade>,
+    onSuccess: () => invalidarHabilidades(queryClient),
+  });
+};
+
+export const useArquivarHabilidade = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => fetchApi(`/habilidades/${id}/arquivar`, token, { method: 'PATCH' }) as Promise<{ totalServicosAfetados: number }>,
+    onSuccess: () => invalidarHabilidades(queryClient),
+  });
+};
+
 export const useServices = (token: string | null) => useQuery({
   queryKey: ['services'],
   queryFn: async () => {
@@ -842,7 +952,7 @@ export const useClients = (token: string | null) => useQuery<Client[]>({
   enabled: !!token,
 });
 
-export type NovoCliente = { nome: string; telefone?: string; cpf?: string; email?: string; observacao?: string };
+export type NovoCliente = { nome: string; telefone?: string; cpf?: string; email?: string; observacao?: string; naoReceberWhatsapp?: boolean; respostasFicha?: Record<string, ValorResposta> };
 export type PreviaImportacao = { total: number; validos: number; erros: { linha: number; mensagem: string }[]; ignoradas?: number; importados?: number };
 
 export const useCreateClient = (token: string | null) => {
@@ -879,6 +989,75 @@ export const useDeleteClient = (token: string | null) => {
   });
 };
 
+// =======================
+// FORMULÁRIO DE ANAMNESE (configurável) E FICHAS PREENCHIDAS
+// =======================
+export type FormularioAnamnese = { campos: CampoFormulario[]; versao: number; segmento?: string; formularioVazio?: boolean };
+export type FichaDoCliente = { id: string; canal: 'totem' | 'profissional' | 'recepcao'; preenchidoEm: string; alertas: string[]; snapshot: SnapshotFicha | null };
+
+// Gestão (admin e supervisão): ativos e arquivados
+export const useFormularioAnamnese = (token: string | null, ativo = true) => useQuery<FormularioAnamnese>({
+  queryKey: ['formulario-anamnese', 'gestao'],
+  queryFn: () => fetchApi('/formulario-anamnese', token),
+  enabled: !!token && ativo,
+});
+
+// Ficha da equipe: campos "ambos" e "apenas_profissional"
+export const useFormularioEquipe = (token: string | null, ativo = true) => useQuery<FormularioAnamnese>({
+  queryKey: ['formulario-anamnese', 'equipe'],
+  queryFn: () => fetchApi('/formulario-anamnese/equipe', token),
+  enabled: !!token && ativo,
+});
+
+export const useSalvarFormulario = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dados: { campos: Array<Omit<CampoFormulario, 'id' | 'versao'> & { id: string | null }>; versao: number }) =>
+      fetchApi('/formulario-anamnese', token, { method: 'PUT', body: JSON.stringify(dados) }) as Promise<FormularioAnamnese>,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['formulario-anamnese'] }),
+  });
+};
+
+export const useAplicarPreset = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => fetchApi('/formulario-anamnese/preset', token, { method: 'POST', body: JSON.stringify({ aplicar: true }) }) as Promise<FormularioAnamnese>,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['formulario-anamnese'] }),
+  });
+};
+
+// Debaixo de ['clients']: o aviso em tempo real de clientes também recarrega as fichas
+// Recepção: perguntas do totem/ambos (sem regras de alerta) e gravação às cegas, sem ler a ficha de volta
+export const useFormularioRecepcao = (token: string | null) => useQuery<{ campos: CampoPublico[]; formularioVazio?: boolean }>({
+  queryKey: ['formulario-anamnese', 'recepcao'],
+  queryFn: () => fetchApi('/formulario-anamnese/recepcao', token),
+  enabled: !!token,
+});
+
+export const useSalvarFichaRecepcao = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clienteId, respostas }: { clienteId: string; respostas: Record<string, ValorResposta> }) =>
+      fetchApi(`/clientes/${clienteId}/fichas/recepcao`, token, { method: 'POST', body: JSON.stringify({ respostas }) }) as Promise<{ id: string; preenchidoEm: string }>,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['clients'] }),
+  });
+};
+
+export const useFichasCliente = (token: string | null, clienteId: string | null) => useQuery<FichaDoCliente[]>({
+  queryKey: ['clients', 'fichas', clienteId],
+  queryFn: () => fetchApi(`/clientes/${clienteId}/fichas`, token),
+  enabled: !!token && !!clienteId,
+});
+
+export const useSalvarFichaCliente = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clienteId, respostas }: { clienteId: string; respostas: Record<string, ValorResposta> }) =>
+      fetchApi(`/clientes/${clienteId}/fichas`, token, { method: 'POST', body: JSON.stringify({ respostas }) }) as Promise<FichaDoCliente>,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['clients'] }),
+  });
+};
+
 export const useAddBloqueio = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -912,7 +1091,8 @@ export const invalidarConfigEmpresa = (queryClient: QueryClient) => Promise.all(
 export const useUpdateCompanyConfig = (token: string | null) => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: Partial<ConfiguracaoEmpresa>) =>
+    // confirmarForaDoHorario: grava o horário mesmo com atendimentos marcados fora dele (o servidor avisou antes)
+    mutationFn: (data: Partial<ConfiguracaoEmpresa> & { confirmarForaDoHorario?: boolean; versao?: string }) =>
       fetchApi('/empresa/config', token, {
         method: 'PUT',
         body: JSON.stringify(data),
@@ -920,3 +1100,17 @@ export const useUpdateCompanyConfig = (token: string | null) => {
     onSuccess: () => { void invalidarConfigEmpresa(queryClient); },
   });
 };
+export type TipoMeuDia = 'trabalho' | 'folga' | 'feriado' | 'ferias' | 'afastamento';
+export type MeuDia = { data: string; tipo: TipoMeuDia; turno: string | null; turnoNome: string | null; descricao: string | null };
+export type MinhaEscala = {
+  mes: string;
+  resumo: { hoje: MeuDia | null; amanha: MeuDia | null; proximaFolga: string | null; atualizadaEm: string | null };
+  dias: MeuDia[];
+};
+
+// Escala da pessoa logada (o servidor usa só a sessão). Fica sob 'scale-overrides' para o tempo real atualizar
+export const useMinhaEscala = (token: string | null, mes: string, ativo: boolean) => useQuery({
+  queryKey: ['scale-overrides', 'minha-escala', mes],
+  queryFn: async () => (await fetchApi(`/minha-escala?month=${encodeURIComponent(mes)}`, token)) as MinhaEscala,
+  enabled: !!token && ativo,
+});

@@ -14,7 +14,10 @@ test('serviço: cria pelo formulário agrupado e edita a partir do card', async 
   const form = page.getByRole('region', { name: 'Novo serviço' });
   await expect(form.getByRole('group', { name: '1. Dados básicos' })).toBeVisible();
   await form.getByLabel(/^Nome/).fill(nome);
-  await form.getByLabel('Categoria').fill('Avaliação');
+  // Categoria é uma lista com "+ Criar categoria…": cria uma nova sem perder o resto do formulário
+  await form.getByRole('combobox', { name: /^Categoria/ }).selectOption('__nova__');
+  await form.getByLabel('Nome da categoria').fill('Avaliação');
+  await form.getByRole('button', { name: 'Criar e usar' }).click();
   await form.getByLabel(/^Preço/).fill('120');
   await form.getByLabel(/^Duração/).fill('50');
   await form.getByLabel(/^Preparo/).fill('10');

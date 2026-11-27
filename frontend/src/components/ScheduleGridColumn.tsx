@@ -192,17 +192,19 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
       style={{ height: (endHour - startHour + 1) * hourHeight }}
     >
       {isUnavailable && (
-        <div className="absolute inset-0 pointer-events-none z-0 flex flex-col items-center justify-center opacity-30 grayscale">
-           <div className="sticky top-1/2 -translate-y-1/2 flex flex-col items-center justify-center text-on-surface-variant">
-             <span className="material-symbols-outlined text-4xl mb-2">event_busy</span>
-             <span className="text-xs font-bold uppercase tracking-widest bg-surface-container/80 px-3 py-1 rounded-full shadow-sm backdrop-blur-sm border border-outline-variant/20">Profissional Indisponível</span>
+        <div className="absolute inset-0 pointer-events-none z-20 flex flex-col items-center justify-center">
+           <div className="sticky top-1/2 -translate-y-1/2 flex flex-col items-center justify-center text-on-surface-variant bg-surface-container-lowest/95 px-4 py-3 rounded-2xl border border-outline-variant/25 shadow-sm">
+             <span className="material-symbols-outlined text-3xl mb-1 opacity-70">event_busy</span>
+             <span className="text-xs font-bold uppercase tracking-widest">Profissional Indisponível</span>
            </div>
         </div>
       )}
 
       {empBlockers.map((bloq) => {
-        const top = (horarioParaMinutos(bloq.horaInicio) - startHour * 60) * minuteHeight;
-        const endTop = (horarioParaMinutos(bloq.horaFim) - startHour * 60) * minuteHeight;
+        // Recortado à grade: folga (00:00–23:59) e bloqueio fora do expediente não saem da coluna
+        const alturaGrade = (endHour - startHour + 1) * hourHeight;
+        const top = Math.max(0, (horarioParaMinutos(bloq.horaInicio) - startHour * 60) * minuteHeight);
+        const endTop = Math.min(alturaGrade, (horarioParaMinutos(bloq.horaFim) - startHour * 60) * minuteHeight);
         const height = Math.max(endTop - top, 20);
 
         return (
@@ -345,6 +347,11 @@ export const EmployeeScheduleColumn = React.memo(({ emp, appointments: empAppoin
                 </div>
               </div>
               <h5 className={`font-bold text-on-surface text-[11px] leading-tight mt-0.5 break-words ${height > 52 ? 'line-clamp-2' : 'truncate'}`} title={app.clientName}>{app.clientName}</h5>
+              {app.clienteAvisouAusencia && app.status === 'scheduled' && (
+                <span className="inline-block mt-0.5 rounded-full bg-error/10 px-1.5 text-[10px] font-bold uppercase tracking-wide text-error" title="O cliente respondeu ao lembrete do WhatsApp que não poderá vir">
+                  Cliente não pode comparecer
+                </span>
+              )}
               {app.aguardandoCheckin && app.status === 'scheduled' && (
                 <span className="inline-block mt-0.5 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-700" title="Reserva do totem: abra o agendamento e confirme a chegada do cliente para liberar a ficha">
                   Totem · confirmar chegada

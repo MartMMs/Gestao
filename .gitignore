@@ -43,3 +43,18 @@ install.sh
 
 # Relatórios e snapshots gerados localmente
 generated/
+
+# Sessão do WhatsApp conectado por QR code (equivale a estar logado no número)
+.whatsapp-sessao/
+
+# Dumps do banco feitos pelo scripts/deploy-producao.sh (dados reais de clientes)
+backups/
+# Cópia temporária e versão anterior guardadas pelo deploy
+.deploy-*/
+node_modules.anterior/
+frontend/dist.anterior/
+.versao-publicada
+.deploy-pendente
+backend/.versao
+# Capturas de tela geradas localmente (podem mostrar dados das telas)
+prints-sistema/

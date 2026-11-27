@@ -1,7 +1,10 @@
+import './lib/horaNosLogs';
 import { config, validarConfigProducao } from './env';
 import express, { Request, Response, NextFunction } from 'express';
 import cors, { type CorsOptions } from 'cors';
 import http from 'http';
+import { execFileSync } from 'child_process';
+import { existsSync, readFileSync } from 'fs';
 import { Server } from 'socket.io';
 import { createRouter } from './routes';
 import { createAutoatendimentoRouter } from './routes/autoatendimentoRoutes';
@@ -11,6 +14,11 @@ import { configurarSocket, criarEventos } from './lib/eventos';
 import { hostDaRequisicao, responderErro } from './lib/http';
 import { redactSensitiveData } from '../shared/redact';
 import { ESCOPOS } from '../shared/escopos';
+import { whatsapp } from './services/communicationService';
+import { aoReceberMensagemWhatsapp, retomarWhatsappQr, whatsappQr } from './services/whatsappQr';
+import { criarJobLembretes, tratarMensagemRecebida } from './services/lembretesWhatsapp';
+import { getEmpresaConfig } from './services/configService';
+import { redisService } from './services/redisService';
 
 // Falha cedo: sem segredo JWT forte qualquer um poderia forjar tokens
 try {
@@ -91,6 +99,24 @@ const jsonPadrao = lerJson('100kb');
 app.use('/api/clientes/importar', lerJson('400kb'));
 app.use(jsonPadrao);
 
+// Versão em execução: APP_VERSAO, ou backend/.versao gravado pelo deploy, ou o commit do git (desenvolvimento).
+// O arquivo evita depender do git no servidor (usuário do systemd diferente do dono do repositório, sem .git)
+const VERSAO = process.env.APP_VERSAO || (() => {
+  try { return readFileSync(new URL('./.versao', import.meta.url), 'utf8').trim(); } catch { /* sem deploy ainda */ }
+  try { return execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); }
+  catch { return 'desconhecida'; }
+})();
+
+// Saúde para o deploy e o monitoramento: API, banco e commit (nada de host ou erro). No host público o nginx dá 404
+app.get(['/health', '/api/health'], async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', versao: VERSAO });
+  } catch {
+    res.status(503).json({ status: 'erro' });
+  }
+});
+
 app.use('/api', createRouter(eventos));
 app.use('/api/autoatendimento', createAutoatendimentoRouter(eventos));
 
@@ -129,6 +155,15 @@ const manutencaoAgenda = async () => {
 };
 setInterval(manutencaoAgenda, 5 * 60 * 1000);
 
+// Lembrete de 24h por WhatsApp: pelo número conectado por QR code (aba Totem, Autoatendimento & WhatsApp do admin)
+// ou, sem ele, pelo WHATSAPP_WEBHOOK_URL. Regras em services/lembretesWhatsapp.ts
+const rodadaDeLembretes = criarJobLembretes(() => (whatsappQr.ativo ? whatsappQr : whatsapp));
+setInterval(rodadaDeLembretes, 10 * 60 * 1000);
+// Primeira rodada 1 min depois de subir (tempo de o QR reconectar), sem esperar os primeiros 10 min
+setTimeout(rodadaDeLembretes, 60 * 1000);
+aoReceberMensagemWhatsapp(tratarMensagemRecebida(eventos));
+void retomarWhatsappQr().catch((erro) => console.error('[WHATSAPP] Não foi possível retomar a sessão do QR code:', erro instanceof Error ? erro.message : 'erro desconhecido'));
+
 // Porta definida no .env (padrão 3333)
 const PORT = config.porta;
 // Rede de segurança: uma promessa rejeitada sem tratamento (ex.: erro em middleware async, que o Express 4 não
@@ -137,6 +172,9 @@ process.on('unhandledRejection', (motivo) => {
   console.error('[API] Promessa rejeitada sem tratamento:', redactSensitiveData(motivo));
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor escutando em todas as interfaces na porta ${PORT}`);
+// Só a própria máquina (o nginx ou o túnel ficam na frente). Em Docker precisa de 0.0.0.0 para o mapeamento de
+// porta funcionar; HOST no .env vence os dois
+const HOST = process.env.HOST || (existsSync('/.dockerenv') || existsSync('/run/.containerenv') ? '0.0.0.0' : '127.0.0.1');
+server.listen(PORT, HOST, () => {
+  console.log(`🚀 Servidor escutando em ${HOST}:${PORT}`);
 });

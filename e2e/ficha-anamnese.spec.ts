@@ -33,7 +33,7 @@ const abrirClientes = async (page: Page, conta: string, nome: string) => {
 
 
 test.describe('Ficha de anamnese: visualização e edição', () => {
-  test('supervisor: nome abre o resumo com JSON e totem; "Alterar ficha" edita e grava sem perder nota nem totem', async ({ page, request }) => {
+  test('supervisor: nome abre o resumo; a ficha antiga fica em "Ficha anterior (legado)" e a edição é pelo formulário, sem perder nota nem totem', async ({ page, request }) => {
     test.skip(!process.env.E2E_DATABASE_URL, 'precisa do banco de testes');
     const nome = nomeClienteTeste('BancaTeste Lista');
     const c = await criarCliente(request, nome, `${NOTA}\n${TOTEM}\n${JSON_FICHA}`);
@@ -43,40 +43,43 @@ test.describe('Ficha de anamnese: visualização e edição', () => {
       // Pelo ícone
       await linha.getByRole('button', { name: 'Ver ficha de anamnese' }).click();
       const resumo = page.getByRole('dialog', { name: 'Resumo da ficha de anamnese' });
-      await expect(resumo.getByText('Alergias: Lavanda')).toBeVisible();
-      await expect(resumo.getByText('Queixa: lombar')).toBeVisible();
-      await expect(resumo.getByText(TOTEM)).toBeVisible();
+      // Legado recolhido e só para leitura; nada de editar a ficha antiga (perguntas repetidas)
+      await resumo.getByText('Ficha anterior (legado)').click();
+      const legado = resumo.getByRole('list', { name: 'Ficha anterior (legado)' });
+      await expect(legado.getByText('Alergias: Lavanda')).toBeVisible();
+      await expect(legado.getByText('Queixa: lombar')).toBeVisible();
+      await expect(legado.getByText(TOTEM)).toBeVisible();
+      await expect(resumo.getByRole('button', { name: /Alterar ficha|Preencher ficha/ })).toHaveCount(0);
       await resumo.getByRole('button', { name: 'Fechar' }).last().click();
       await expect(resumo).toBeHidden();
       // Pelo nome
       await linha.getByRole('button', { name: nome, exact: true }).click();
-      await expect(resumo.getByText(TOTEM)).toBeVisible();
-      await resumo.getByRole('button', { name: 'Alterar ficha' }).click();
-      const ficha = page.getByRole('dialog', { name: 'Ficha de anamnese', exact: true });
-      const alergia = ficha.locator('label:has-text("Tem alguma alergia?") + input');
-      await expect(alergia).toHaveValue('Lavanda');
-      await alergia.fill('Lavanda e rosa');
-      await ficha.getByRole('button', { name: /Concluir ficha/ }).click();
-      await expect(ficha).toBeHidden();
-      await expect.poll(async () => (await clientes(request, CONTAS.supervisor)).find((x) => x.id === c.id)?.observacao ?? '').toContain('Lavanda e rosa');
+      await resumo.getByRole('button', { name: 'Tem alguma alergia?: Sim' }).click();
+      await resumo.getByLabel('Descreva as alergias conhecidas').fill('Lavanda e rosa');
+      await resumo.getByRole('button', { name: 'Salvar respostas' }).click();
+      await expect(resumo.getByRole('status')).toContainText('Ficha salva');
+      const fichas = await request.get(`${apiBase()}/clientes/${c.id}/fichas`, { headers: await authHeaders(request, CONTAS.supervisor) });
+      expect(JSON.stringify(await fichas.json())).toContain('Lavanda e rosa');
+      // A observação antiga (nota, totem e ficha JSON) não é reescrita
       const obs = (await clientes(request, CONTAS.supervisor)).find((x) => x.id === c.id)!.observacao!;
       expect(obs).toContain(NOTA);
       expect(obs).toContain(TOTEM);
+      expect(obs).toContain(JSON_FICHA);
     } finally {
       await apagarClienteDeTeste(request, nome);
     }
   });
 
-  test('supervisor: cliente sem ficha mostra "Nenhuma ficha" e "Preencher ficha" abre o formulário', async ({ page, request }) => {
+  test('supervisor: cliente sem ficha mostra o formulário vazio para preencher, sem o bloco de legado', async ({ page, request }) => {
     const nome = nomeClienteTeste('BancaTeste Sem');
     await criarCliente(request, nome);
     try {
       await abrirClientes(page, CONTAS.supervisor, nome);
       await page.getByRole('row', { name: new RegExp(nome) }).getByRole('button', { name: nome, exact: true }).click();
       const resumo = page.getByRole('dialog', { name: 'Resumo da ficha de anamnese' });
-      await expect(resumo.getByText(/Nenhuma ficha de anamnese registrada/)).toBeVisible();
-      await resumo.getByRole('button', { name: 'Preencher ficha', exact: true }).click();
-      await expect(page.getByRole('dialog', { name: 'Ficha de anamnese', exact: true })).toBeVisible();
+      await expect(resumo.getByText(/Nenhuma resposta registrada no formulário/)).toBeVisible();
+      await expect(resumo.getByText('Ficha anterior (legado)')).toHaveCount(0);
+      await expect(resumo.getByRole('button', { name: 'Salvar respostas' })).toBeVisible();
     } finally {
       await apagarClienteDeTeste(request, nome);
     }
@@ -94,13 +97,14 @@ test.describe('Ficha de anamnese: visualização e edição', () => {
       await expect(resumo.getByText(/Lavanda|lavanda/)).toHaveCount(0);
       await expect(resumo.getByText('Sem ficha')).toHaveCount(0);
       await resumo.getByRole('button', { name: 'Atualizar ficha' }).click();
-      const ficha = page.getByRole('dialog', { name: 'Ficha de anamnese', exact: true });
-      const alergia = ficha.locator('label:has-text("Tem alguma alergia?") + input');
-      await expect(alergia).toHaveValue('');
-      await alergia.fill('Alecrim');
-      await ficha.getByRole('button', { name: /Concluir ficha/ }).click();
+      // Ficha nova às cegas no formulário dinâmico: grava uma FichaPreenchida e não mexe na observação antiga
+      const ficha = page.getByRole('dialog', { name: 'Nova ficha de anamnese' });
+      await expect(ficha.getByText(/Lavanda|lavanda/)).toHaveCount(0);
+      await ficha.locator('button[aria-pressed]').first().click();
+      await ficha.getByRole('button', { name: 'Salvar ficha' }).click();
       await expect(ficha).toBeHidden();
-      await expect.poll(async () => (await clientes(request, CONTAS.supervisor)).find((x) => x.id === c.id)?.observacao ?? '').toContain('Alecrim');
+      const sup = await authHeaders(request, CONTAS.supervisor);
+      await expect.poll(async () => ((await (await request.get(`${apiBase()}/clientes/${c.id}/fichas`, { headers: sup })).json()) as Array<{ canal: string }>)[0]?.canal).toBe('recepcao');
       const obs = (await clientes(request, CONTAS.supervisor)).find((x) => x.id === c.id)!.observacao!;
       expect(obs).toContain(NOTA);
       expect(obs).toContain(TOTEM);
@@ -109,7 +113,7 @@ test.describe('Ficha de anamnese: visualização e edição', () => {
     }
   });
 
-  test('profissional com acesso: "Ver ficha" mostra JSON e totem, edita e o agendamento grava a ficha nova sem perder nota/totem', async ({ page, request }) => {
+  test('profissional com acesso: "Ver ficha" mostra o legado e grava pelo formulário; o agendamento sai sem perder nota/totem', async ({ page, request }) => {
     test.skip(!process.env.E2E_DATABASE_URL, 'precisa do banco de testes');
     test.setTimeout(150_000);
     const nome = nomeClienteTeste('BancaTeste Prof');
@@ -140,18 +144,13 @@ test.describe('Ficha de anamnese: visualização e edição', () => {
       await modal.getByRole('button', { name: new RegExp(nome) }).first().click();
       await modal.getByRole('button', { name: 'Ver ficha', exact: true }).click();
       const resumo = page.getByRole('dialog', { name: 'Resumo da ficha de anamnese' });
+      await resumo.getByText('Ficha anterior (legado)').click();
       await expect(resumo.getByText('Alergias: Lavanda')).toBeVisible();
       await expect(resumo.getByText(TOTEM)).toBeVisible();
-      await resumo.getByRole('button', { name: 'Alterar ficha' }).click();
-      const ficha = page.getByRole('dialog', { name: 'Ficha de anamnese', exact: true });
-      const alergia = ficha.locator('label:has-text("Tem alguma alergia?") + input');
-      await expect(alergia).toHaveValue('Lavanda');
-      await alergia.fill('Lavanda e cravo');
-      await ficha.getByRole('button', { name: /Concluir ficha/ }).click();
-      await expect(ficha).toBeHidden();
-      // "Ver Ficha do Cliente" reflete a alteração ainda não gravada
-      await modal.getByRole('button', { name: 'Ver Ficha do Cliente' }).click();
-      await expect(resumo.getByText('Alergias: Lavanda e cravo')).toBeVisible();
+      await expect(resumo.getByRole('button', { name: 'Alterar ficha' })).toHaveCount(0);
+      await resumo.getByLabel('Descreva as alergias conhecidas').fill('Lavanda e cravo');
+      await resumo.getByRole('button', { name: 'Salvar respostas' }).click();
+      await expect(resumo.getByRole('status')).toContainText('Ficha salva');
       await resumo.getByRole('button', { name: 'Fechar' }).last().click();
 
       await modal.locator('input[type="date"]').first().fill(dia);
@@ -166,8 +165,9 @@ test.describe('Ficha de anamnese: visualização e edição', () => {
         }
       }
       expect(salvo, 'agendamento da Helena não foi salvo').toBe(true);
+      const fichas = await request.get(`${apiBase()}/clientes/${c.id}/fichas`, { headers: sup });
+      expect(JSON.stringify(await fichas.json())).toContain('Lavanda e cravo');
       const obs = (await clientes(request, CONTAS.supervisor)).find((x) => x.id === c.id)!.observacao!;
-      expect(obs).toContain('Lavanda e cravo');
       expect(obs).toContain(NOTA);
       expect(obs).toContain(TOTEM);
     } finally {
@@ -214,7 +214,9 @@ test.describe('Criar Usuário no Admin', () => {
       await page.getByRole('button', { name: /Criar Usuário/i }).click();
       const dialogo = page.getByRole('dialog', { name: /Criar Usuário/i });
       await dialogo.getByPlaceholder('Nome', { exact: true }).fill('Ab');
-      await dialogo.getByLabel('Usuário de acesso').fill(`banca.${Date.now()}`);
+      // O diálogo de credenciais mostra o login: o usuário de acesso (o e-mail só quando não há usuário)
+      const usuario = `banca.${Date.now()}`;
+      await dialogo.getByLabel('Usuário de acesso').fill(usuario);
       await dialogo.getByPlaceholder('Cargo (ex.: Massagista)').fill('Teste');
       await dialogo.getByRole('button', { name: 'Cadastrar' }).click();
       const alerta = page.getByRole('alert').filter({ hasText: 'Informe o nome completo do colaborador.' });
@@ -224,7 +226,7 @@ test.describe('Criar Usuário no Admin', () => {
       await dialogo.getByPlaceholder('E-mail (opcional)').fill(email);
       await dialogo.getByRole('button', { name: 'Cadastrar' }).click();
       await expect(page.getByText(/Senha provisória/)).toBeVisible();
-      await expect(page.getByText(email).first()).toBeVisible();
+      await expect(page.getByRole('dialog', { name: 'Credenciais' }).getByText(usuario)).toBeVisible();
       await expect(alerta).toHaveCount(0);
     } finally {
       await apagarColaboradorDeTeste(request, email);
@@ -254,7 +256,7 @@ test.describe('Ficha: recepção no balcão e abusos de tela', () => {
     try {
       await page.goto('/');
       await loginPelaTela(page, CONTAS.recepcao);
-      await page.getByRole('button', { name: /Agendar/i }).first().click();
+      await page.getByRole('button', { name: /Nova Reserva/i }).click();
       const modal = page.getByRole('dialog', { name: /Novo Agendamento/i });
       await modal.getByPlaceholder('Digite nome, telefone ou CPF').fill(nome);
       await modal.getByRole('button', { name: new RegExp(nome) }).first().click();

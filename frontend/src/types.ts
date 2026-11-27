@@ -1,3 +1,6 @@
+import type { DiaEspecial } from '@shared/agenda';
+export type ExigenciaHabilidades = 'sempre' | 'apenas_totem' | 'desligado';
+export interface Habilidade { id: string; nome: string; ativa: boolean; servicosAtivos?: number; colaboradores?: number }
 export type Role = 'collaborator' | 'supervisor' | 'admin' | 'receptionist';
 export type TipoEscala = '6x1' | '5x1' | '5x2' | '12x36' | 'rotativo' | 'personalizado';
 export type TurnoSwapStatus = 'pendente' | 'aprovada' | 'rejeitada';
@@ -21,7 +24,17 @@ export interface ConfiguracaoEmpresa {
   usarComissao?: boolean;
   // Ligado: agendar e cadastrar cliente exigem ficha de anamnese
   exigirAnamnese?: boolean;
+  // Serviço "por habilidade": 'sempre' barra no totem e na agenda; 'apenas_totem' só avisa na agenda; 'desligado' ignora
+  exigenciaHabilidades?: ExigenciaHabilidades;
+  // Horário de funcionamento (HH:MM) e dias abertos (0 = domingo); limite = último início aceito
+  horaAbertura?: string;
+  horaFechamento?: string;
+  horaLimiteAgendamento?: string | null;
+  diasFuncionamento?: number[];
+  diasEspeciais?: DiaEspecial[];
   atualizadoEm?: string;
+  // Só na config pública: a API tem provedor de WhatsApp para a confirmação da reserva
+  whatsappAtivo?: boolean;
 }
 
 export interface Bloqueio {
@@ -43,9 +56,13 @@ export interface Employee {
   specialty: string;
   cargo?: string;
   tipoEscala?: TipoEscala;
+  // Horário padrão dos dias de trabalho ("HH:MM-HH:MM"); sem ele, horário da casa
+  turnoPadrao?: string | null;
   folgasDomingoNoMes?: number;
   cargaHorariaSemanal?: number;
+  // Nomes das habilidades ativas (exibição) e os ids (para gravar)
   habilidades?: string[];
+  habilidadeIds?: string[];
   avatar: string;
   rating: number;
   completedServices: number;
@@ -82,6 +99,8 @@ export interface Appointment {
   clientCode?: number;
   // Versão do registro no servidor (detecta edição simultânea)
   version?: string;
+  // Cliente respondeu "Não poderei ir" ao lembrete do WhatsApp
+  clienteAvisouAusencia?: boolean;
 }
 
 export interface Service {
@@ -97,6 +116,7 @@ export interface Service {
   modoElegibilidade?: ServiceEligibilityMode;
   cargosPermitidos?: string[];
   habilidadesPermitidas?: string[];
+  habilidadeIds?: string[];
   profissionaisPermitidos?: string[];
   categoria?: string;
   tempoHigienizacaoMin?: number;
@@ -116,7 +136,11 @@ export interface Client {
   temAnamnese?: boolean;
   // Calculado pela API: quem está logado vê e grava a ficha de saúde deste cliente
   acessoSaude?: boolean;
+  // Rótulos marcados como alerta na última ficha do formulário (vazio para quem não vê a saúde do cliente)
+  alertasClinicos?: string[];
   observacao?: string;
+  // LGPD: pediu para não receber lembretes no WhatsApp
+  naoReceberWhatsapp?: boolean;
   alergias?: string[];
   preferencias?: string[];
 }
@@ -146,6 +170,8 @@ export interface AutoatendimentoSlot {
 
 export interface AutoatendimentoDisponibilidadeResponse {
   data: string;
+  // Só sem horários: por que (dia fechado ou sem vaga)
+  mensagem?: string;
   servico: {
     id: string;
     nome: string;

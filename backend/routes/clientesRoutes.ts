@@ -16,12 +16,11 @@ import {
   temFichaAnamnese,
 } from '../../shared/anamnese';
 import { getEmpresaConfig } from '../services/configService';
+import { gravarFichaNoAto } from '../services/formularioService';
+import { formatarDataHoraBR as formatarDataHora } from '../../shared/datasBR';
 import { MAX_LINHAS_IMPORTACAO, MENSAGEM_EMAIL_INVALIDO, emailValido, erroNomeCliente, lerCliente, limparTexto, validarImportacao, type DadosCliente } from '../../shared/clientes';
-import { LIMITE_OBSERVACAO, MENSAGEM_CPF_INVALIDO, MENSAGEM_TELEFONE_INVALIDO, apenasDigitos, cpfValido, normalizarNome, normalizarTelefone, telefoneValido, valorMascarado } from '../../shared/validadores';
+import { LIMITE_OBSERVACAO, MENSAGEM_CPF_INVALIDO, MENSAGEM_TELEFONE_INVALIDO, apenasDigitos, cpfValido, normalizarNome, normalizarTelefone, normalizarTexto, telefoneValido, valorMascarado } from '../../shared/validadores';
 
-const formatarDataHora = (data: Date) => new Intl.DateTimeFormat('pt-BR', {
-  timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-}).format(data);
 
 export function createClientesRouter(notificar: Notificar) {
   const router = Router();
@@ -40,13 +39,43 @@ export function createClientesRouter(notificar: Notificar) {
         },
         orderBy: { nome: 'asc' },
       });
+      const buscaRaw = typeof req.query.q === 'string'
+        ? req.query.q
+        : (typeof req.query.busca === 'string' ? req.query.busca : '');
+      const buscaNorm = normalizarTexto(buscaRaw);
+      const buscaDigitos = apenasDigitos(buscaRaw);
+      const supervisor = usuarioEhSupervisor(req);
+      const gerencia = usuarioGerenciaAgenda(req);
+
+      const filtrados = buscaNorm
+        ? clientes.filter((c) => {
+            if (normalizarTexto(c.nome).includes(buscaNorm)) return true;
+            // Colaborador só pesquisa pelo nome: nunca por CPF, telefone ou código (impede oráculo de dados mascarados)
+            if (!gerencia) return false;
+            if (c.codigo && `#${c.codigo}`.includes(buscaNorm)) return true;
+            if (buscaDigitos && c.telefone && apenasDigitos(c.telefone).includes(buscaDigitos)) return true;
+            if (!supervisor) return false;
+            if (buscaDigitos && c.cpf && apenasDigitos(c.cpf).includes(buscaDigitos)) return true;
+            if (c.email && normalizarTexto(c.email).includes(buscaNorm)) return true;
+            return false;
+          })
+        : clientes;
+
       // temAnamnese: só se há ficha, sem o conteúdo (quem não vê saúde, como a recepção, também precisa do aviso).
       // acessoSaude: quem pede vê e grava a ficha deste cliente (a tela não oferece edição que a API recusaria)
-      const comAviso = <T extends { observacao: string | null }>(c: T, original: { observacao: string | null }, acessoSaude: boolean) =>
-        ({ ...c, temAnamnese: temFichaAnamnese(original.observacao), acessoSaude });
-      if (usuarioEhSupervisor(req)) return res.json(clientes.map((c) => comAviso(c, c, true)));
-      const meus = await clientesComAcessoSaude(req);
-      res.json(clientes.map((c) => comAviso(prepararCliente(c, req, meus.has(c.id)), c, meus.has(c.id))));
+      // alertasClinicos: rótulos marcados como alerta na última ficha do formulário (só para quem vê a saúde do cliente;
+      // a existência da ficha conta no temAnamnese para todos, como a ficha antiga)
+      const meus = supervisor ? null : await clientesComAcessoSaude(req);
+      const comSaude = filtrados.map((c) => c.id);
+      const ultimas = comSaude.length ? await prisma.fichaPreenchida.findMany({
+        where: { clienteId: { in: comSaude }, vinculadaAoCliente: true },
+        orderBy: { preenchidoEm: 'desc' }, distinct: ['clienteId'], select: { clienteId: true, alertas: true },
+      }) : [];
+      const alertas = new Map(ultimas.map((f) => [f.clienteId, f.alertas]));
+      const comAviso = <T extends { id: string; observacao: string | null }>(c: T, original: { observacao: string | null }, acessoSaude: boolean) =>
+        ({ ...c, temAnamnese: temFichaAnamnese(original.observacao) || alertas.has(c.id), acessoSaude, alertasClinicos: acessoSaude ? alertas.get(c.id) ?? [] : [] });
+      if (!meus) return res.json(filtrados.map((c) => comAviso(c, c, true)));
+      res.json(filtrados.map((c) => comAviso(prepararCliente(c, req, meus.has(c.id)), c, meus.has(c.id))));
     } catch (error) {
       responderErro(res, error, 'Erro ao buscar clientes');
     }
@@ -54,28 +83,39 @@ export function createClientesRouter(notificar: Notificar) {
 
   // Grava clientes já validados, todos ou nenhum. Pega as travas de nome e de CPF antes de reler a base (outro
   // cadastro pode ter entrado depois da validação), em ordem fixa para dois envios simultâneos não se cruzarem
-  const gravarClientes = (lista: DadosCliente[], observacao: string | null = null) => transacaoComTravas(async (tx) => {
+  const gravarClientes = (
+    lista: Array<DadosCliente & { naoReceberWhatsapp?: boolean }>, observacao: string | null = null,
+    depois?: (tx: Prisma.TransactionClient, criados: Array<{ id: string; codigo: number | null }>) => Promise<void>,
+  ) => transacaoComTravas(async (tx) => {
     for (const nome of [...new Set(lista.map((d) => normalizarNome(d.nome)))].sort()) await travarNomeCliente(tx, nome);
     for (const cpf of [...new Set(lista.flatMap((d) => (d.cpf ? [d.cpf] : [])))].sort()) await travarChave(tx, `cliente-cpf:${cpf}`);
     const existentes = await tx.cliente.findMany({ where: { removidoEm: null }, select: { nome: true, cpf: true, codigo: true } });
     const { erros } = validarImportacao(lista, existentes);
     if (erros.length) throw new HttpError(409, erros[0].mensagem);
-    return tx.cliente.createManyAndReturn({ data: lista.map((d) => ({ ...d, observacao })) });
+    const criados = await tx.cliente.createManyAndReturn({ data: lista.map((d) => ({ ...d, observacao })) });
+    if (depois) await depois(tx, criados);
+    return criados;
   });
 
-  // Cadastro manual (apenas supervisão, como a edição dos dados cadastrais)
-  router.post('/clientes', verificarSupervisorToken, async (req, res) => {
+  // Cadastro manual: supervisão, admin e recepção (colaborador não cadastra direto na base)
+  router.post('/clientes', verificarToken, async (req, res) => {
     try {
+      if (!usuarioGerenciaAgenda(req)) {
+        return res.status(403).json({ erro: 'Apenas recepção ou supervisão podem cadastrar clientes.' });
+      }
       const { dados, erros } = lerCliente(req.body ?? {});
       if (erros.length) return res.status(400).json({ erro: erros[0].mensagem, erros });
       const observacao = typeof req.body?.observacao === 'string' ? req.body.observacao.slice(0, LIMITE_OBSERVACAO) : '';
       if (forjaFichaDoTotem(observacao, null)) return res.status(400).json({ erro: MENSAGEM_FICHA_TOTEM_RESERVADA });
-      if ((await getEmpresaConfig()).exigirAnamnese && !temFichaAnamnese(observacao)) {
-        return res.status(400).json({ erro: MENSAGEM_ANAMNESE_OBRIGATORIA, code: CODIGO_ANAMNESE_OBRIGATORIA });
-      }
-      const [criado] = await gravarClientes([dados], observacao || null);
+      const exigir = (await getEmpresaConfig()).exigirAnamnese && !temFichaAnamnese(observacao);
+      // Ficha do formulário configurável na mesma transação: sem ela (quando exigida), o cliente não é criado
+      const [criado] = await gravarClientes([{ ...dados, naoReceberWhatsapp: req.body?.naoReceberWhatsapp === true }], observacao || null, async (tx, [novo]) => {
+        if ((await gravarFichaNoAto(tx, req, novo, req.body?.respostasFicha)) === 'sem_ficha' && exigir) {
+          throw new HttpError(400, MENSAGEM_ANAMNESE_OBRIGATORIA, CODIGO_ANAMNESE_OBRIGATORIA);
+        }
+      });
       notificar();
-      res.status(201).json(criado);
+      res.status(201).json(usuarioEhSupervisor(req) ? criado : prepararCliente(criado, req, false));
     } catch (error) {
       responderErro(res, error, 'Erro ao criar cliente');
     }
@@ -173,6 +213,8 @@ export function createClientesRouter(notificar: Notificar) {
         if (erroNome) return res.status(400).json({ erro: erroNome });
         dados.nome = nomeLimpo.slice(0, 120);
       }
+      // LGPD: o pedido de não receber lembretes vale assim que a recepção ou a supervisão registra
+      if (gerencia && typeof req.body?.naoReceberWhatsapp === 'boolean') dados.naoReceberWhatsapp = req.body.naoReceberWhatsapp;
       if (gerencia && telefone !== undefined && !valorMascarado(telefone)) {
         if (telefone && !telefoneValido(telefone)) return res.status(400).json({ erro: MENSAGEM_TELEFONE_INVALIDO });
         dados.telefone = normalizarTelefone(telefone) || null;
@@ -194,7 +236,8 @@ export function createClientesRouter(notificar: Notificar) {
         await travarChave(tx, `cliente:${id}`);
         const atual = await tx.cliente.findUnique({ where: { id }, select: { removidoEm: true, observacao: true, codigo: true } });
         if (!atual || atual.removidoEm) throw new HttpError(404, 'Cliente não encontrado.');
-        if (dados.nome) {
+        // Só quando o nome muda: a tela reenvia o nome em toda edição, e um homônimo antigo travava até trocar o telefone
+        if (dados.nome && mudaNome) {
           const homonimo = await clienteComMesmoNome(tx, dados.nome as string, id);
           if (homonimo) throw new HttpError(409, mensagemNomeDuplicado(homonimo, 'carteira'));
         }
@@ -252,6 +295,8 @@ export function createClientesRouter(notificar: Notificar) {
           return { tipo: 'excluido' as const };
         }
         await tx.agendamento.updateMany({ where: { clienteId: id }, data: { observacoesSaude: null } });
+        // Fichas do formulário são dado de saúde: saem junto com a observação
+        await tx.fichaPreenchida.deleteMany({ where: { clienteId: id } });
         await tx.cliente.update({
           where: { id },
           data: { nome: NOME_CLIENTE_REMOVIDO, telefone: null, cpf: null, email: null, observacao: null, removidoEm: new Date() },

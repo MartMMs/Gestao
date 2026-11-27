@@ -7,6 +7,7 @@ import {
 } from '../services/autoatendimentoService';
 import { getLocalTodayString } from '../../appointments/utils/appointmentCore';
 import { mensagemDeErro } from '../utils/erros';
+import { dataHumana } from './StepIdentification';
 
 interface StepScheduleProps {
   services?: Service[];
@@ -43,6 +44,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
   // "Hoje" no fuso de Brasília (toISOString usaria UTC e pularia para amanhã depois das 21h)
   const [selectedDate, setSelectedDate] = useState<string>(() => getLocalTodayString());
   const [slots, setSlots] = useState<AutoatendimentoSlot[]>([]);
+  const [mensagemSemHorario, setMensagemSemHorario] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<AutoatendimentoSlot | null>(null);
@@ -82,6 +84,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
       const res = await fetchAutoatendimentoDisponibilidade(ids, dateStr);
       if (ultimaBuscaRef.current !== dateStr) return;
       setSlots(res.slots || []);
+      setMensagemSemHorario(res.mensagem ?? null);
     } catch (err: unknown) {
       if (ultimaBuscaRef.current !== dateStr) return;
       setError(mensagemDeErro(err, 'Falha ao carregar horários disponíveis.'));
@@ -158,7 +161,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
             <span className="material-symbols-outlined text-[17px]">{icon}</span>
           </div>
           <span>{title}</span>
-          <span className="text-[11px] text-on-surface-variant/70 font-normal">
+          <span className="text-xs text-on-surface-variant/70 font-normal">
             ({items.filter((i) => i.disponivel).length} vagas livres)
           </span>
         </div>
@@ -189,7 +192,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
                       }`}
                     />
                   ) : (
-                    <span className="material-symbols-outlined text-[14px] text-outline-variant">
+                    <span className="material-symbols-outlined text-[14px] text-on-surface-variant">
                       lock
                     </span>
                   )}
@@ -197,7 +200,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
 
                 {slot.disponivel && slot.sala && (
                   <p
-                    className={`text-[11px] truncate ${
+                    className={`text-xs truncate ${
                       isSelected ? 'text-on-primary/90' : 'text-on-surface-variant'
                     }`}
                   >
@@ -206,7 +209,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
                 )}
                 {slot.disponivel && slot.terapeuta && (
                   <p
-                    className={`text-[11px] truncate ${
+                    className={`text-xs truncate ${
                       isSelected ? 'text-on-primary/80' : 'text-on-surface-variant/80'
                     }`}
                   >
@@ -214,7 +217,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
                   </p>
                 )}
                 {!slot.disponivel && (
-                  <p className="text-[10px] text-error/80 truncate">Ocupado</p>
+                  <p className="text-xs text-error/80 truncate">Ocupado</p>
                 )}
               </button>
             );
@@ -227,7 +230,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
   return (
     <div className="space-y-6">
       <div className="text-center max-w-xl mx-auto space-y-2">
-        <span className="text-[11px] font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-3 py-1 rounded-full">
+        <span className="text-xs font-bold tracking-[0.2em] uppercase text-primary bg-primary/10 px-3 py-1 rounded-full">
           Etapa 2 de 4 · Selecione Dia e Horário
         </span>
         <h2 className="text-2xl sm:text-3xl font-headline text-primary">
@@ -247,7 +250,7 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
 
       {/* Carrossel de Datas */}
       <div className="space-y-2">
-        <label className="block text-[11px] font-bold tracking-wider uppercase text-on-surface-variant">
+        <label className="block text-xs font-bold tracking-wider uppercase text-on-surface-variant">
           Datas Disponíveis
         </label>
         <div className="flex gap-3 overflow-x-auto pb-3 pt-1 px-1 custom-scrollbar">
@@ -267,11 +270,11 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
                     : 'bg-surface-container-lowest border-outline-variant/25 text-on-surface hover:border-primary/40'
                 }`}
               >
-                <span className="block text-[11px] uppercase font-bold tracking-wider mb-0.5 opacity-80">
+                <span className="block text-xs uppercase font-bold tracking-wider mb-0.5 opacity-80">
                   {item.isToday ? 'Hoje' : item.weekday}
                 </span>
                 <span className="block text-lg font-bold font-headline">{item.day}</span>
-                <span className="block text-[11px] opacity-75">{item.month}</span>
+                <span className="block text-xs opacity-75">{item.month}</span>
               </button>
             );
           })}
@@ -289,12 +292,12 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
           </div>
         ) : slots.length === 0 ? (
           <div className="h-48 flex flex-col items-center justify-center gap-2 text-on-surface-variant text-center">
-            <span className="material-symbols-outlined text-3xl text-outline-variant">
+            <span className="material-symbols-outlined text-3xl text-on-surface-variant">
               event_busy
             </span>
             <p className="text-sm font-bold text-on-surface">Nenhum horário livre nesta data.</p>
             <p className="text-xs text-on-surface-variant">
-              Por favor, selecione outro dia no calendário acima.
+              {mensagemSemHorario && mensagemSemHorario.startsWith('Não abrimos') ? `${mensagemSemHorario} ` : ''}Por favor, selecione outro dia no calendário acima.
             </p>
           </div>
         ) : (
@@ -323,9 +326,9 @@ export function StepSchedule({ services, service, onSlotReserved, onBack }: Step
           {selectedSlot && (
             <div className="text-xs text-right hidden sm:block">
               <span className="text-on-surface-variant block">
-                {selectedDate} às <strong className="text-primary">{selectedSlot.horario}</strong>
+                {dataHumana(selectedDate)} às <strong className="text-primary">{selectedSlot.horario}</strong>
               </span>
-              <span className="text-[11px] text-outline-variant">
+              <span className="text-xs text-on-surface-variant">
                 {selectedSlot.sala?.nome} · {selectedSlot.terapeuta?.nome}
               </span>
             </div>

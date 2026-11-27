@@ -235,7 +235,7 @@ test.describe('Anamnese obrigatória', () => {
       await modal.getByRole('button', { name: /Confirmar Agendamento/i }).click();
       // Bloqueia antes de enviar e abre a ficha para preencher
       await expect(page.getByText(/exige ficha de anamnese/)).toBeVisible();
-      await expect(page.getByRole('dialog', { name: 'Ficha de anamnese' })).toBeVisible();
+      await expect(page.getByRole('dialog', { name: 'Nova ficha de anamnese' })).toBeVisible();
       // E nada foi gravado
       const lista = await clientesDa(request, await authHeaders(request, CONTAS.supervisor));
       expect(lista.some((c) => c.nome === nome)).toBe(false);

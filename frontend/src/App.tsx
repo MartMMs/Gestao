@@ -9,9 +9,6 @@ import { LoginView } from './components/LoginView';
 import { TrocarSenhaView } from './components/TrocarSenhaView';
 import io from 'socket.io-client';
 import { getSocketUrl } from './config/api';
-import { aplicarAjusteEscala, gerarEscalaComRegras, type DiaEscala } from './utils/escalaCalculator';
-import { analisarConformidadeCLT } from './utils/cltValidator';
-import { AuditorModal } from './components/AuditorModal';
 import { Appointment, Service, Client, Role, TurnoSwapRequest, TurnoSwapStatus, ServiceEligibilityMode, EmployeeUpdate } from './types'; // Tipos mais fortes
 import {
   useAppointments, useAddAppointment, useCompleteAppointment, useChangeAppointmentStatus,
@@ -29,9 +26,15 @@ import {
 } from './api'; // Importando os novos hooks
 
 const AdminViewLazy = lazy(() => import('./components/AdminView').then((module) => ({ default: module.AdminView })));
-import { isTeamMember } from './utils/formatters';
-import { getAutoatendimentoUrl } from './config/hosts';
+import { atendeNaAgenda } from './utils/formatters';
+import { getAutoatendimentoUrl, isTvHost, noCaminho } from './config/hosts';
 import { DEPENDENCIAS_ESCOPO, ESCOPOS_MUDANCA, ehEscopoMudanca } from '@shared/escopos';
+import { AvisosAusencia } from './components/AvisosAusencia';
+import { COR_PADRAO } from './features/company/components/CompanySettingsTab';
+import { EVENTO_CLIENTE_AUSENTE, type AvisoAusencia } from '@shared/eventosSocket';
+
+// Aparelho da TV (subdomínio tv. ou /painel no desenvolvimento): o endereço não muda depois de carregar
+const ABRIR_NA_TV = isTvHost() || noCaminho('/painel');
 const SupervisorViewLazy = lazy(() => import('./components/SupervisorView').then((module) => ({ default: module.SupervisorView })));
 const CollaboratorViewLazy = lazy(() => import('./components/CollaboratorView').then((module) => ({ default: module.CollaboratorView })));
 const TVPanelViewLazy = lazy(() => import('./components/TVPanelView').then((module) => ({ default: module.TVPanelView })));
@@ -53,7 +56,7 @@ type ServicePayload = {
   descricao?: string;
   modoElegibilidade?: ServiceEligibilityMode;
   cargosPermitidos?: string[];
-  habilidadesPermitidas?: string[];
+  habilidadeIds?: string[];
   profissionaisPermitidos?: string[];
   categoria?: string;
   tempoHigienizacaoMin?: number | string;
@@ -85,8 +88,8 @@ const normalizeServicePayload = (service: ServicePayload): { data?: Omit<Service
   const cargosPermitidos = modoElegibilidade === 'cargo'
     ? normalizeStringArray(service.cargosPermitidos)
     : [];
-  const habilidadesPermitidas = modoElegibilidade === 'habilidade'
-    ? normalizeStringArray(service.habilidadesPermitidas)
+  const habilidadeIds = modoElegibilidade === 'habilidade'
+    ? normalizeStringArray(service.habilidadeIds)
     : [];
   const profissionaisPermitidos = modoElegibilidade === 'profissional'
     ? normalizeStringArray(service.profissionaisPermitidos)
@@ -128,7 +131,7 @@ const normalizeServicePayload = (service: ServicePayload): { data?: Omit<Service
     return { error: 'Selecione ao menos um cargo para serviços com restrição por cargo.' };
   }
 
-  if (modoElegibilidade === 'habilidade' && habilidadesPermitidas.length === 0) {
+  if (modoElegibilidade === 'habilidade' && habilidadeIds.length === 0) {
     return { error: 'Selecione ao menos uma habilidade para serviços com restrição por habilidade.' };
   }
 
@@ -145,7 +148,7 @@ const normalizeServicePayload = (service: ServicePayload): { data?: Omit<Service
       descricao: descricao || '',
       modoElegibilidade,
       cargosPermitidos,
-      habilidadesPermitidas,
+      habilidadeIds,
       profissionaisPermitidos,
       categoria: categoria || '',
       tempoHigienizacaoMin,
@@ -159,15 +162,30 @@ export default function App() {
   const { currentUser, token, loginError, handleLogin, handleLogout, concluirTrocaDeSenha } = useAuth();
   const queryClient = useQueryClient();
   const { data: companyConfig } = useCompanyConfig(token);
-  const [activeRoleView, setActiveRoleView] = useState<Role | 'tv' | 'autoatendimento'>(() => currentUser?.role ?? 'collaborator');
-  const [isPublicTVMode, setIsPublicTVMode] = useState(false);
+  // Título da aba do navegador com o nome da empresa (Empresa & Segmento, só o admin altera)
+  useEffect(() => { document.title = companyConfig?.nomeEmpresa || 'Gestão'; }, [companyConfig?.nomeEmpresa]);
+  // Cor escolhida pelo admin (Empresa & Segmento) vale para todos. A padrão do banco não troca o tema atual
+  useEffect(() => {
+    if (!companyConfig) return; // ainda carregando: fica a cópia rápida do main.tsx
+    const cor = companyConfig.corTemaPrimaria;
+    const escolhida = cor && cor !== COR_PADRAO ? cor : null;
+    if (escolhida) document.documentElement.style.setProperty('--brand', escolhida);
+    else document.documentElement.style.removeProperty('--brand');
+    try {
+      if (escolhida) localStorage.setItem('gestao:cor-sistema', escolhida);
+      else localStorage.removeItem('gestao:cor-sistema');
+    } catch { /* sem localStorage: só não guarda a cópia */ }
+  }, [companyConfig]);
+  const [activeRoleView, setActiveRoleView] = useState<Role | 'tv' | 'autoatendimento'>(() => (ABRIR_NA_TV ? 'tv' : currentUser?.role ?? 'collaborator'));
+  const [isPublicTVMode, setIsPublicTVMode] = useState(ABRIR_NA_TV);
+  const [avisosAusencia, setAvisosAusencia] = useState<AvisoAusencia[]>([]);
   const [isPublicAutoatendimentoMode, setIsPublicAutoatendimentoMode] = useState(false);
   const shouldLoadSupervisorDatasets = Boolean(token) && (currentUser?.role === 'supervisor' || currentUser?.role === 'admin') && (activeRoleView === 'supervisor' || activeRoleView === 'admin');
 
   // 1. SUBSTITUIÇÃO DOS ESTADOS MANUAIS PELOS HOOKS DO REACT QUERY
   // Os dados, loading e erros agora são gerenciados automaticamente.
   const { data: employeesData, isLoading: loadingEmployees, isError: errorEmployees, error: employeesError } = useEmployees(token);
-  const { data: appointmentsData, isLoading: loadingAppointments, isError: errorAppointments, error: appointmentsError } = useAppointments(token);
+  const { data: appointmentsData, isLoading: loadingAppointments, isError: errorAppointments, error: appointmentsError, dataUpdatedAt: appointmentsAtualizadoEm } = useAppointments(token);
   const { data: services, isLoading: loadingServices, isError: errorServices, error: servicesError } = useServices(token);
   const { data: clients, isLoading: loadingClients, isError: errorClients, error: clientsError } = useClients(token);
   const { data: scaleOverridesData, isLoading: loadingScaleOverrides } = useScaleOverrides(token, undefined, { enabled: shouldLoadSupervisorDatasets });
@@ -188,7 +206,6 @@ export default function App() {
   }, [appointments]);
 
   const [showUpcomingAppointments, setShowUpcomingAppointments] = useState(false);
-  const [showAuditorModal, setShowAuditorModal] = useState(false);
 
   const hasUnauthorizedBootstrapError = useMemo(() => {
     const bootstrapErrors = [employeesError, appointmentsError, servicesError, clientsError];
@@ -196,7 +213,7 @@ export default function App() {
   }, [employeesError, appointmentsError, servicesError, clientsError]);
 
   // Atualiza a View de segurança baseada no cargo toda vez que o currentUser mudar
-  useEffect(() => { if (currentUser) setActiveRoleView(currentUser.role); }, [currentUser]);
+  useEffect(() => { if (currentUser) setActiveRoleView(ABRIR_NA_TV ? 'tv' : currentUser.role); }, [currentUser]);
 
   // Estado do Tema (Modo Escuro/Claro) com persistência no navegador
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -273,6 +290,8 @@ export default function App() {
   // Só ao sair (havia alguém e não há mais): limpar na entrada cancelaria as buscas iniciais e a tela não sairia do
   // "Carregando". Troca de conta em outra aba passa pelo Sair (encerrarPorTrocaDeConta)
   const usuarioDosDadosRef = useRef(currentUser?.id);
+  const papelAtual = useRef(currentUser?.role);
+  papelAtual.current = currentUser?.role;
   useEffect(() => {
     const anterior = usuarioDosDadosRef.current;
     usuarioDosDadosRef.current = currentUser?.id;
@@ -316,6 +335,12 @@ export default function App() {
       }, 250);
     });
 
+    // Admin não recebe aviso de ausência (o servidor já filtra; aqui é a segunda trava)
+    socket.on(EVENTO_CLIENTE_AUSENTE, (aviso: AvisoAusencia) => {
+      if (papelAtual.current === 'admin') return;
+      setAvisosAusencia((lista) => [aviso, ...lista.filter((a) => a.agendamentoId !== aviso.agendamentoId)].slice(0, 5));
+    });
+
     return () => {
       if (invalidateTimer) clearTimeout(invalidateTimer);
       socket.disconnect();
@@ -330,60 +355,11 @@ export default function App() {
         completedCounts.set(app.assignedEmployeeId, (completedCounts.get(app.assignedEmployeeId) || 0) + 1);
       }
     }
-    return employees.filter(e => isTeamMember(e)).map(emp => ({
+    return employees.filter(e => atendeNaAgenda(e)).map(emp => ({
       ...emp,
       completedServices: completedCounts.get(emp.id) || 0
     }));
   }, [employees, appointments]);
-
-  // Calcula alertas CLT globais para o sino no header
-  // Os alertas só dependem da equipe e da escala: não recalcula a cada agendamento novo (como "staff" faria)
-  const teamMembers = useMemo(() => employees.filter((e) => isTeamMember(e)), [employees]);
-  const cltRealtimeAlerts = useMemo(() => {
-    if (currentUser?.role !== 'supervisor' && currentUser?.role !== 'admin') return [];
-
-    const monthRef = getLocalTodayString().slice(0, 7);
-    const [yearRaw, monthRaw] = monthRef.split('-').map(Number);
-    const year = Number.isFinite(yearRaw) ? yearRaw : new Date().getFullYear();
-    const month = Number.isFinite(monthRaw) ? monthRaw : new Date().getMonth() + 1;
-    const firstDay = `${year}-${String(month).padStart(2, '0')}-01`;
-    const daysInMonth = new Date(year, month, 0).getDate();
-
-    const overridesMap = new Map<string, { tipo: DiaEscala['tipo']; turno?: string; descricao?: string }>();
-    scaleOverrides.forEach((override) => {
-      overridesMap.set(`${override.colaboradorId}:${override.data}`, {
-        tipo: override.tipo,
-        turno: override.turno,
-        descricao: override.descricao,
-      });
-    });
-
-    const applyOverrideToDia = (employeeId: string, dia: DiaEscala): DiaEscala =>
-      aplicarAjusteEscala(dia, overridesMap.get(`${employeeId}:${dia.data}`));
-
-    return teamMembers
-      .map((emp) => {
-        const diasComRegras = gerarEscalaComRegras(
-          {
-            tipo: emp.tipoEscala || '6x1',
-            dataInicio: firstDay,
-          },
-          daysInMonth,
-          { folgasDomingoNoMes: emp.folgasDomingoNoMes ?? 2 },
-        );
-
-        const malha = diasComRegras.map((dia) => applyOverrideToDia(emp.id, dia));
-        const analise = analisarConformidadeCLT(malha, { tipoEscala: emp.tipoEscala || '6x1' });
-
-        return {
-          id: emp.id,
-          nome: emp.name,
-          conforme: analise.statusGeral,
-          resumo: analise.resumo,
-        };
-      })
-      .filter((item) => !item.conforme);
-  }, [teamMembers, scaleOverrides, currentUser]);
 
   // 2. SUBSTITUIÇÃO DAS FUNÇÕES DE CALLBACK PELAS MUTAÇÕES DO REACT QUERY
   // A lógica de 'fetch', 'try/catch', e 'setEstado' é abstraída para dentro dos hooks.
@@ -502,7 +478,7 @@ export default function App() {
   if (!currentUser && isPublicTVMode) {
     return (
       <Suspense fallback={<ModuleLoading label="Carregando painel TV..." />}>
-        <TVPanelViewLazy appointments={appointments} employees={staff} onExit={() => setIsPublicTVMode(false)} />
+        <TVPanelViewLazy appointments={appointments} employees={staff} onExit={() => setIsPublicTVMode(false)} semSessao atualizadoEm={appointmentsAtualizadoEm} />
       </Suspense>
     );
   }
@@ -568,6 +544,16 @@ export default function App() {
     );
   }
 
+  // Modo TV em tela cheia (sem Layout). Antes do bloqueio de erro global: com a API fora a TV mostra o próprio
+  // aviso ("Sem conexão: chame a recepção" + hora da última atualização), não o cartão técnico com "Tentar novamente"
+  if (activeRoleView === 'tv') {
+    return (
+      <Suspense fallback={<ModuleLoading label="Carregando painel TV..." />}>
+        <TVPanelViewLazy appointments={appointments} employees={staff} onExit={() => setActiveRoleView(currentUser.role)} semConexao={errorAppointments || errorEmployees} atualizadoEm={appointmentsAtualizadoEm} />
+      </Suspense>
+    );
+  }
+
   if (shouldBlockAppOnError) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-surface p-4">
@@ -581,14 +567,6 @@ export default function App() {
     );
   }
 
-  // Se o Modo TV estiver ativo, renderiza ele em tela cheia (sem Layout de fundo)
-  if (activeRoleView === 'tv') {
-    return (
-      <Suspense fallback={<ModuleLoading label="Carregando painel TV..." />}>
-        <TVPanelViewLazy appointments={appointments} employees={staff} onExit={() => setActiveRoleView(currentUser.role)} />
-      </Suspense>
-    );
-  }
 
   // Se a aba de Autoatendimento estiver ativa pelo Supervisor/Recepção
   if (activeRoleView === 'autoatendimento') {
@@ -600,6 +578,10 @@ export default function App() {
   }
 
   return (
+    <>
+    {currentUser.role !== 'admin' && (
+      <AvisosAusencia avisos={avisosAusencia} onFechar={(id) => setAvisosAusencia((lista) => lista.filter((a) => a.agendamentoId !== id))} />
+    )}
     <Layout 
       userName={currentUser.name} 
       userRole={currentUser.role} 
@@ -614,8 +596,6 @@ export default function App() {
       toggleTheme={toggleTheme}
       onOpenUpcomingAppointments={(currentUser.role === 'supervisor' || currentUser.role === 'admin') && (activeRoleView === 'supervisor' || activeRoleView === 'admin') ? () => setShowUpcomingAppointments(true) : undefined}
       upcomingAppointmentsCount={(currentUser.role === 'supervisor' || currentUser.role === 'admin') && (activeRoleView === 'supervisor' || activeRoleView === 'admin') ? upcomingAppointmentsCount : 0}
-      cltAlertsCount={(currentUser.role === 'supervisor' || currentUser.role === 'admin') && (activeRoleView === 'supervisor' || activeRoleView === 'admin') ? cltRealtimeAlerts.length : 0}
-      onOpenCltAlerts={() => setShowAuditorModal(true)}
     >
       <Suspense fallback={<ModuleLoading />}>
         {activeRoleView === 'admin' && (currentUser.role === 'admin' || currentUser.role === 'supervisor') ? (
@@ -681,6 +661,8 @@ export default function App() {
             onEditClient={handleEditClient}
             onCompleteAppointment={handleComplete}
             onSubmitTurnoSwapRequest={handleAddTurnoSwapRequest}
+            onAlterarStatus={currentUser.role === 'receptionist' ? handleAlterarStatus : undefined}
+            onReassignAppointment={currentUser.role === 'receptionist' ? handleReassign : undefined}
           />
         )}
       </Suspense>
@@ -696,18 +678,7 @@ export default function App() {
           />
         </Suspense>
       )}
-
-      {showAuditorModal && (
-        <AuditorModal
-          open={showAuditorModal}
-          alerts={cltRealtimeAlerts}
-          onClose={() => setShowAuditorModal(false)}
-          onResolve={(employeeId) => {
-            setShowAuditorModal(false);
-            window.dispatchEvent(new CustomEvent('quick-resolve-clt', { detail: { employeeId } }));
-          }}
-        />
-      )}
     </Layout>
+    </>
   );
 }

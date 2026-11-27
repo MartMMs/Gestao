@@ -3,11 +3,13 @@ import { dadosDoToken, validarSessao } from '../auth';
 import { COOKIE_SESSAO, lerCookie } from './cookies';
 import { hostDaRequisicao } from './http';
 import { ESCOPOS_PUBLICOS, type EscopoMudanca } from '../../shared/escopos';
+import { EVENTO_CLIENTE_AUSENTE, type AvisoAusencia } from '../../shared/eventosSocket';
 
 // Sala dos dispositivos logados (equipe). Totens e TVs conectam sem token e só recebem avisos públicos.
 const SALA_EQUIPE = 'equipe';
 const salaUsuario = (usuarioId: string) => `usuario:${usuarioId}`;
 const salaSessao = (jti: string) => `sessao:${jti}`;
+const salaPapel = (papel: string) => `papel:${papel}`;
 
 /**
  * Autentica as conexões do socket. Token é opcional (o totem é público), mas se for enviado precisa ser válido.
@@ -31,7 +33,7 @@ export const configurarSocket = (io: Server, origemPermitida: (origem: string | 
       socket.data.usuario = usuario;
       // Salas por sessão e por usuário: logout, troca de senha e desativação derrubam o socket na hora
       const dados = dadosDoToken(token as string);
-      const salas = [SALA_EQUIPE, salaUsuario(usuario.id), ...(dados?.jti ? [salaSessao(dados.jti)] : [])];
+      const salas = [SALA_EQUIPE, salaUsuario(usuario.id), salaPapel(usuario.papel), ...(dados?.jti ? [salaSessao(dados.jti)] : [])];
       await socket.join(salas);
       // O socket não sobrevive ao token: cai quando ele expira
       if (dados?.exp) {
@@ -63,6 +65,12 @@ export const criarEventos = (io: Server) => ({
   emitirConfigEmpresa: (config: unknown) => io.emit('empresa:config_atualizada', config),
   emitirConfigAutoatendimento: (config: unknown) => io.emit('autoatendimento:config_atualizada', config),
   avisarEquipe: (evento: string, dados: unknown) => io.to(SALA_EQUIPE).emit(evento, dados),
+  // Cliente avisou pelo WhatsApp que não vem: recepção, supervisão e o profissional do atendimento. Admin nunca
+  // (regra do produto: o aviso é operacional e não deve poluir a tela da administração)
+  avisarAusencia: (aviso: AvisoAusencia) => io
+    .to([salaPapel('receptionist'), salaPapel('supervisor'), salaUsuario(aviso.colaboradorId)])
+    .except(salaPapel('admin'))
+    .emit(EVENTO_CLIENTE_AUSENTE, aviso),
   // Logout: derruba os sockets daquela sessão
   encerrarSessao: (jti: string) => io.in(salaSessao(jti)).disconnectSockets(true),
   // Troca de senha/e-mail ou desativação: derruba todos os sockets do usuário

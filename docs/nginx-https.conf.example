@@ -1,0 +1,163 @@
+# Produção: HTTPS na frente de dois sites isolados que usam o MESMO build do frontend (dist/):
+#   agendar.suaempresa.com  -> público (clientes): só o totem/autoatendimento e a API pública dele
+#   painel.suaempresa.com   -> interno (login, recepção, supervisão, RH, admin) e a API inteira
+#   tv.suaempresa.com       -> painel da TV da recepção (interno: precisa de login e da agenda; restrinja por IP)
+# Cada site fala com a API no próprio endereço (/api), então o proxy decide o que o público alcança.
+# Troque "suaempresa.com" e os caminhos. Requer nginx 1.25.1+ ("http2 on"; "ssl_reject_handshake" exige 1.19.4+).
+#
+# Arquivos: este vai em /etc/nginx/sites-available/gestao; os trechos comuns em /etc/nginx/snippets/:
+#   sudo cp docs/nginx/gestao-seguranca.conf docs/nginx/gestao-proxy.conf /etc/nginx/snippets/
+# Certificado gratuito:
+#   sudo certbot certonly --nginx -d agendar.suaempresa.com -d painel.suaempresa.com -d tv.suaempresa.com
+# Backend (.env): NODE_ENV=production, TRUST_PROXY=1 (cookie "secure" e IP real no rate limit),
+#   CORS_ORIGINS=https://agendar.suaempresa.com,https://painel.suaempresa.com,https://tv.suaempresa.com
+# Build do frontend (.env da raiz):
+#   VITE_API_URL=/api  VITE_SOCKET_URL=/
+#   VITE_AUTOATENDIMENTO_HOST=agendar.suaempresa.com  VITE_TV_HOST=tv.suaempresa.com
+#   VITE_AUTOATENDIMENTO_URL=https://agendar.suaempresa.com
+# Teste depois de mudar: sudo nginx -t && sudo systemctl reload nginx
+#
+# CSP (fonte única: só aqui; o build não leva <meta> de CSP). Começa em Report-Only: o navegador só avisa no console.
+# A CSP abaixo ja bloqueia (nao e Report-Only): se precisar so medir antes, troque por "Content-Security-Policy-Report-Only" nos dois
+# sites. img-src aceita https: porque as fotos de serviços e avatares podem vir de qualquer endereço configurado.
+
+server_tokens off;   # não anuncia a versão do nginx
+
+# WebSocket (Socket.IO): "upgrade" só quando o navegador pede; no resto, Connection vazio mantém o keepalive com a API
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  ''      '';
+}
+
+upstream gestao_api {
+  server 127.0.0.1:3333;
+  keepalive 16;
+}
+
+# Todo acesso por HTTP vira HTTPS
+server {
+  listen 80;
+  listen [::]:80;
+  server_name agendar.suaempresa.com painel.suaempresa.com tv.suaempresa.com;
+  location /.well-known/acme-challenge/ { root /var/www/certbot; }
+  location / { return 301 https://$host$request_uri; }
+}
+
+# Host desconhecido (IP direto, domínio parecido apontado para cá): fecha a conexão sem responder
+server {
+  listen 80 default_server;
+  listen [::]:80 default_server;
+  return 444;
+}
+server {
+  listen 443 ssl default_server;
+  listen [::]:443 ssl default_server;
+  ssl_reject_handshake on;
+}
+
+# Parâmetros TLS comuns (só TLS 1.2/1.3, cifras modernas). Sem ssl_stapling: o Let's Encrypt não tem mais OCSP
+ssl_certificate     /etc/letsencrypt/live/agendar.suaempresa.com/fullchain.pem;
+ssl_certificate_key /etc/letsencrypt/live/agendar.suaempresa.com/privkey.pem;
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+ssl_prefer_server_ciphers off;
+ssl_session_timeout 1d;
+ssl_session_cache shared:TLS:10m;
+ssl_session_tickets off;
+
+# Limite de requisições por IP na borda (o backend tem os próprios limites; este segura rajadas antes do Node)
+limit_req_zone $binary_remote_addr zone=publico:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
+
+# ---------------------------------------------------------------------------------------------------------------
+# PÚBLICO: agendar.suaempresa.com (clientes)
+# Só o totem. Rotas internas respondem 404 (nunca 403 nem redirecionamento para /login: não revelam que existem).
+# ---------------------------------------------------------------------------------------------------------------
+server {
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  http2 on;
+  server_name agendar.suaempresa.com;
+  root /var/www/gestao/frontend/dist;
+
+  include snippets/gestao-seguranca.conf;
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://api.dicebear.com; media-src 'self'; connect-src 'self' wss://$host; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+
+  # Caminhos do portal interno: 404 seco. A mesma lista está em scripts/apresentacao.sh: mude nos dois
+  location ~* ^/(login|logout|rh|admin|painel|supervisor|recepcao|equipe|relatorios|tv|totem)(/|$) { return 404; }
+
+  # API pública do totem (catálogo, horários, reserva, sessão, webhook do pagamento)
+  location ^~ /api/autoatendimento/ {
+    limit_req zone=publico burst=30 nodelay;
+    include snippets/gestao-proxy.conf;
+    proxy_read_timeout 30s;
+  }
+  # Tempo real do totem (sem login: o servidor só manda avisos vazios de "horários mudaram")
+  location ^~ /socket.io/ {
+    include snippets/gestao-proxy.conf;
+    proxy_read_timeout 70s;
+  }
+  # Todo o resto da API (login, colaboradores, clientes, escala, relatórios, health...): 404
+  location ^~ /api/ { return 404; }
+  location = /health { return 404; }
+
+  # Arquivos do build com hash: cache longo (o include repete os cabeçalhos de segurança, ver gestao-seguranca.conf).
+  # Qualquer outra rota abre o totem (index.html), nunca o login
+  location ^~ /assets/ {
+    include snippets/gestao-seguranca.conf;
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
+    try_files $uri =404;
+  }
+  location / { try_files $uri /index.html; }
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+# INTERNO: painel.suaempresa.com e tv.suaempresa.com (equipe)
+# A TV precisa de login e da agenda (API interna), por isso fica aqui e não no bloco público. Proteja por rede:
+# ---------------------------------------------------------------------------------------------------------------
+server {
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  http2 on;
+  server_name painel.suaempresa.com tv.suaempresa.com;
+  root /var/www/gestao/frontend/dist;
+
+  # Restrição opcional por rede (recomendado para o painel e a TV). Descomente e troque pelos IPs da empresa:
+  # allow 203.0.113.10;        # internet da recepção
+  # allow 198.51.100.0/24;     # rede do escritório
+  # deny all;
+  #
+  # Alternativa com Cloudflare Access (Zero Trust): ponha o painel atrás do Access e aceite só o túnel/IPs da Cloudflare.
+  # O Access exige login da equipe (Google, e-mail com código) ANTES de chegar ao sistema. Com o Cloudflare Tunnel
+  # (cloudflared) o Node nem precisa de porta aberta. Para validar o token do Access no nginx, use o cabeçalho
+  # Cf-Access-Jwt-Assertion num serviço de validação (auth_request) ou confie só na origem do túnel:
+  # include /etc/nginx/cloudflare-ips.conf;   # set_real_ip_from ... (lista oficial da Cloudflare)
+  # real_ip_header CF-Connecting-IP;
+
+  include snippets/gestao-seguranca.conf;
+  # Além do totem: previsão do tempo do painel (open-meteo) e som de chamada (mixkit)
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://api.dicebear.com; media-src 'self' https://assets.mixkit.co; connect-src 'self' wss://$host https://api.open-meteo.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+
+  # Login: limite mais rígido na borda (o backend ainda conta tentativas por conta e por IP)
+  location = /api/login {
+    limit_req zone=login burst=5 nodelay;
+    include snippets/gestao-proxy.conf;
+  }
+  location /api/ {
+    include snippets/gestao-proxy.conf;
+    proxy_read_timeout 70s;
+    client_max_body_size 1m;   # importação de planilha vai até ~400 kB
+  }
+  location ^~ /socket.io/ {
+    include snippets/gestao-proxy.conf;
+    proxy_read_timeout 70s;
+  }
+  location = /health { include snippets/gestao-proxy.conf; }
+
+  location ^~ /assets/ {
+    include snippets/gestao-seguranca.conf;
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
+    try_files $uri =404;
+  }
+  location / { try_files $uri /index.html; }
+}

@@ -8,9 +8,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.test.{ts,tsx}'],
+    // Os adapters puros do backend (sem banco) também rodam aqui
+    include: ['src/**/*.test.{ts,tsx}', '../backend/services/**/*.test.ts', '../backend/lib/**/*.test.ts'],
     clearMocks: true,
   },
+  // Os testes do backend ficam fora de frontend/: o Vite 6.4.6+ só lê arquivos permitidos (correção de segurança)
+  server: { fs: { allow: [path.resolve(__dirname, '..')] } },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

@@ -1,7 +1,8 @@
+import { dataHumana } from './StepIdentification';
 import React from 'react';
 import { motion } from 'motion/react';
 import { Voucher, ConfiguracaoEmpresa } from '../../../types';
-import { formatarReais } from '../utils/moeda';
+import { formatPhone, formatarReais } from '../../../utils/formatters';
 
 interface StepSuccessVoucherProps {
   voucher: Voucher;
@@ -9,7 +10,25 @@ interface StepSuccessVoucherProps {
   empresa?: ConfiguracaoEmpresa | null;
 }
 
+// Extrai a antecedência das orientações de check-in para manter coerência entre o card e a lista (padrão 15 min)
+export const antecedenciaCheckinMin = (orientacoes?: string[]): number => {
+  for (const item of orientacoes ?? []) {
+    const match = item.match(/(\d+)\s*(?:min|minutos)/i);
+    if (match) return Number(match[1]);
+  }
+  return 15;
+};
+
+// Só promete o WhatsApp quando a API tem provedor configurado (senão a mensagem nunca chegaria)
+export const mensagemDoVoucher = (empresa: Pick<ConfiguracaoEmpresa, 'whatsappAtivo'> | null | undefined, telefone: string) =>
+  empresa?.whatsappAtivo
+    ? `Enviamos uma cópia do seu voucher e orientações de check-in para o seu WhatsApp (${formatPhone(telefone)}).`
+    : 'Apresente este voucher na recepção.';
+
 export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVoucherProps) {
+  const telefoneFormatado = formatPhone(voucher.clienteTelefone);
+  const antecedenciaMin = antecedenciaCheckinMin(voucher.orientacoesCheckIn);
+
   const handlePrint = () => {
     window.print();
   };
@@ -20,10 +39,10 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
       `*Meu Comprovante - ${nomeNegocio}*\n\n` +
       `Código: ${voucher.codigoConfirmacao}\n` +
       `Serviço: ${voucher.terapiaNome} (${voucher.duracaoMin} min)\n` +
-      `Data: ${voucher.data} às ${voucher.horario}\n` +
+      `Data: ${dataHumana(voucher.data)} às ${voucher.horario}\n` +
       `Espaço: ${voucher.salaNome}\n` +
       `Profissional: ${voucher.terapeutaNome}\n\n` +
-      `Recomendação: Chegar com 10 minutos de antecedência na recepção.`
+      `Recomendação: Chegar com ${antecedenciaMin} minutos de antecedência na recepção.`
     );
     window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
   };
@@ -39,14 +58,14 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
         <div className="w-16 h-16 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-600 mb-2">
           <span className="material-symbols-outlined text-4xl">check_circle</span>
         </div>
-        <span className="text-[11px] font-bold tracking-[0.2em] uppercase text-emerald-600 bg-emerald-500/10 px-3 py-1 rounded-full">
+        <span className="text-xs font-bold tracking-[0.2em] uppercase text-emerald-600 bg-emerald-500/10 px-3 py-1 rounded-full">
           {voucher.statusPagamento === 'aguardando_pagamento' ? 'Reserva Registrada!' : 'Reserva Confirmada com Sucesso!'}
         </span>
         <h2 className="text-2xl sm:text-3xl font-headline text-primary">
           Seu Horário Está Garantido
         </h2>
         <p className="text-xs sm:text-sm text-on-surface-variant font-body">
-          Enviamos uma cópia do seu voucher e orientações de check-in para o seu WhatsApp ({voucher.clienteTelefone}).
+          {mensagemDoVoucher(empresa, voucher.clienteTelefone)}
         </p>
       </motion.div>
 
@@ -63,14 +82,14 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
             </div>
             <div>
               <h3 className="text-lg font-serif italic text-primary">{empresa?.nomeEmpresa || 'Comprovante Oficial'}</h3>
-              <p className="text-[11px] uppercase font-bold tracking-widest text-on-surface-variant">
+              <p className="text-xs uppercase font-bold tracking-widest text-on-surface-variant">
                 Voucher Oficial de Atendimento
               </p>
             </div>
           </div>
 
           <div className="text-left sm:text-right">
-            <span className="text-[11px] uppercase font-bold tracking-widest text-on-surface-variant block">
+            <span className="text-xs uppercase font-bold tracking-widest text-on-surface-variant block">
               Código da Reserva
             </span>
             <span className="text-lg sm:text-xl font-mono font-bold text-primary tracking-wider">
@@ -82,44 +101,44 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
         {/* Detalhes do Cliente e do Atendimento */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
           <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/15">
-            <span className="text-[11px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
+            <span className="text-xs uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
               Hóspede / Cliente
             </span>
             <p className="font-bold text-sm text-on-surface">{voucher.clienteNome}</p>
-            <p className="text-[11px] text-on-surface-variant">{voucher.clienteTelefone}</p>
+            <p className="text-xs text-on-surface-variant">{telefoneFormatado}</p>
           </div>
 
           <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/15">
-            <span className="text-[11px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
+            <span className="text-xs uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
               Produtos / Serviços & Duração
             </span>
             <p className="font-bold text-sm text-primary">{voucher.terapiaNome}</p>
-            <p className="text-[11px] text-on-surface-variant">{voucher.duracaoMin} minutos de atendimento</p>
+            <p className="text-xs text-on-surface-variant">{voucher.duracaoMin} minutos de atendimento</p>
           </div>
 
           <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/15">
-            <span className="text-[11px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
+            <span className="text-xs uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
               Data & Horário
             </span>
             <p className="font-bold text-sm text-on-surface">
-              {voucher.data} às <strong className="text-primary">{voucher.horario}</strong>
+              {dataHumana(voucher.data)} às <strong className="text-primary">{voucher.horario}</strong>
             </p>
-            <p className="text-[11px] text-emerald-600 font-medium">Chegada recomendada: 10 min antes</p>
+            <p className="text-xs text-emerald-600 font-medium">Chegada recomendada: {antecedenciaMin} min antes</p>
           </div>
 
           <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/15">
-            <span className="text-[11px] uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
+            <span className="text-xs uppercase font-bold tracking-wider text-on-surface-variant block mb-1">
               Espaço & Profissional
             </span>
             <p className="font-bold text-sm text-on-surface">{voucher.salaNome}</p>
-            <p className="text-[11px] text-on-surface-variant">Profissional: {voucher.terapeutaNome}</p>
+            <p className="text-xs text-on-surface-variant">Profissional: {voucher.terapeutaNome}</p>
           </div>
         </div>
 
         {/* Status de Pagamento */}
         <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between">
           <div>
-            <span className="text-[11px] uppercase font-bold tracking-widest text-emerald-700 block">
+            <span className="text-xs uppercase font-bold tracking-widest text-emerald-700 block">
               Status do Pagamento
             </span>
             <span className="text-sm font-bold text-emerald-800">
@@ -146,7 +165,7 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
             <span className="material-symbols-outlined text-[16px] text-primary">info</span>
             Orientações de Check-In
           </h4>
-          <ul className="space-y-1.5 text-[11px] text-on-surface-variant">
+          <ul className="space-y-1.5 text-xs text-on-surface-variant">
             {voucher.orientacoesCheckIn.map((item, idx) => (
               <li key={idx} className="flex items-start gap-2">
                 <span className="text-primary font-bold">·</span>
@@ -157,7 +176,7 @@ export function StepSuccessVoucher({ voucher, onReset, empresa }: StepSuccessVou
         </div>
 
         {/* Política de Cancelamento */}
-        <div className="text-[11px] text-outline-variant border-t border-outline-variant/15 pt-3">
+        <div className="text-xs text-on-surface-variant border-t border-outline-variant/15 pt-3">
           <strong>Política de Cancelamento:</strong> {voucher.politicaCancelamento}
         </div>
       </div>
