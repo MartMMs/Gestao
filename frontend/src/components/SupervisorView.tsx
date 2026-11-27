@@ -1,5 +1,6 @@
 import { formatarDataBR } from '@shared/datasBR';
 import { HorarioFuncionamentoCard } from '../features/company/components/HorarioFuncionamentoCard';
+import { FormularioAnamneseCard } from '../features/company/components/FormularioAnamneseCard';
 import { valorDoAtendimento } from '../utils/valorAtendimento';
 import React, { useEffect, useMemo, useState } from 'react';
 import { NO_SCALE_OVERRIDES } from '../features/scale/components/SupervisorEscalaTab';
@@ -330,6 +331,7 @@ export function SupervisorView({ employees, todasAsContas, appointments, service
       {activeTab === 'autoatendimento' && (
         <div className="space-y-8">
           <HorarioFuncionamentoCard />
+          <FormularioAnamneseCard />
           <AutoatendimentoAdminTab />
         </div>
       )}

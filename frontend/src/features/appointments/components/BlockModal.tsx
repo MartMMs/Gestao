@@ -35,7 +35,7 @@ export function BlockModal({ receptionDate, initialTime, initialEmpId, employees
   const [blockPreset, setBlockPreset] = useState<'custom' | 'folga' | 'ferias15' | 'ferias30'>('custom');
   const alterado = useAlterado(true, [blockDate, bookTime, blockEndTime, bookEmp, blockReason, isFolga, reassignToId, blockPreset]);
   // X, clique fora e Esc: não fecham durante o envio e perguntam se algo foi preenchido
-  const fechar = () => { if (!isSaving && confirmarSaida(alterado)) onClose(); };
+  const fechar = () => { if (!isSaving) confirmarSaida(alterado, () => onClose()); };
   useModal(true, fechar);
 
   const dayOfWeek = useMemo(() => new Date(`${blockDate}T12:00:00`).getDay(), [blockDate]);

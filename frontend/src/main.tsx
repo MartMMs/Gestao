@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import * as Sentry from '@sentry/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './AuthContext';
+import { ConfirmacaoSaidaHost } from './components/ConfirmacaoSaida';
 import { isAutoatendimentoHost, noCaminho } from './config/hosts';
 // Ícones do próprio build (sem depender do Google Fonts: sem internet viravam texto cru)
 import 'material-symbols/outlined.css';
@@ -122,6 +123,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
+      <ConfirmacaoSaidaHost />
       <QueryClientProvider client={queryClient}>
         {isAutoatendimentoHost() || noCaminho('/totem') ? (
           <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm opacity-70">Carregando Totem de Autoatendimento...</div>}>

@@ -55,6 +55,14 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
   horario o servidor avisa (409) e so grava com confirmacao. A grade cresce para mostrar esses atendimentos.
   Folga de dia inteiro passa a ser gravada como 00:00-23:59 (a migration converte as que cobriam 09:00-21:00), para
   continuar valendo quando o horario muda.
+- **Formulario de anamnese configuravel:** botao "Personalizar formulario" ao lado de "Exigir ficha de anamnese" no
+  Empresa & Segmento (admin e supervisao): perguntas Sim/Nao, escolha unica, multipla escolha ou texto livre, visiveis
+  em ambos, so no totem ou so para o profissional, com obrigatorio, dado sensivel (LGPD) e alerta visual por resposta;
+  previa do totem e da equipe, arquivar (nunca apaga) e "Carregar modelo do segmento". Cada ficha preenchida guarda uma
+  copia das perguntas e respostas (renomear ou arquivar depois nao muda a ficha antiga). O totem recebe so a lista
+  branca dos campos dele (`GET /api/autoatendimento/formulario`); o selo de alerta aparece no Perfil Clinico e no
+  atendimento. A ficha antiga continua lida e os campos com correspondencia (gestante, alergia, pressao...) seguem
+  preenchidos.
 - **Modulo RH:** abas "Escalas & Alocacao" (Grade de Escalas), "Espelho de Ponto & Banco de Horas" (horas previstas
   pela escala, normais ate 44h por semana e extras acima disso) e "Ferias & Afastamentos" (registra o periodo como
   folga com o motivo; protegido contra clique duplo e avisa se o periodo ficar gravado pela metade). Painel
@@ -75,7 +83,7 @@ Aplicacao full-stack para gestao de agendamentos, bloqueios, equipe, clientes e 
 
 > **Antes de subir esta versao:** faca backup do banco e rode `cd backend && npx prisma migrate deploy`
 > (migrations de auditoria, comissao proporcional, troca de senha obrigatoria, consentimento do totem, usuario de acesso,
-> horario padrao do colaborador `turnoPadrao` referencia de pagamento `referenciaPagamento`, horario de funcionamento da empresa, folga de dia inteiro 00:00-23:59, mensagens de lembrete do WhatsApp `mensagensLembrete` e confirmação/opt-out do WhatsApp `lembretePedeConfirmacao`, `naoReceberWhatsapp`, `clienteAvisouAusenciaEm`; habilidades cadastradas `20261121120000_habilidades`: tabela `Habilidade`, vinculos com colaboradores e servicos copiados das listas de texto antigas, que ficam intactas no banco, e `exigenciaHabilidades`, padrao `sempre`, igual ao comportamento anterior; dias especiais do horario de funcionamento `20261124170000_dias_especiais`: coluna `diasEspeciais`, lista vazia por padrao, sem mudar o horario atual).
+> horario padrao do colaborador `turnoPadrao` referencia de pagamento `referenciaPagamento`, horario de funcionamento da empresa, folga de dia inteiro 00:00-23:59, mensagens de lembrete do WhatsApp `mensagensLembrete` e confirmação/opt-out do WhatsApp `lembretePedeConfirmacao`, `naoReceberWhatsapp`, `clienteAvisouAusenciaEm`; habilidades cadastradas `20261121120000_habilidades`: tabela `Habilidade`, vinculos com colaboradores e servicos copiados das listas de texto antigas, que ficam intactas no banco, e `exigenciaHabilidades`, padrao `sempre`, igual ao comportamento anterior; dias especiais do horario de funcionamento `20261124170000_dias_especiais`: coluna `diasEspeciais`, lista vazia por padrao, sem mudar o horario atual; formulario de anamnese configuravel `20261126120000_formulario_anamnese`: tabelas `CampoFormulario` e `FichaPreenchida` e coluna `formularioVersao`, so acrescenta, as fichas antigas ficam como estao e no primeiro uso as perguntas nascem do modelo do segmento da empresa, as mesmas que o totem ja fazia).
 > Veja os detalhes completos em [docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md](docs/ATUALIZACAO_ANAMNESE_ACESSO_SEGURANCA.md).
 
 ## Guias detalhados

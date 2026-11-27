@@ -1,3 +1,4 @@
+import type { CampoFormulario, CampoPublico, SnapshotFicha, ValorResposta } from '@shared/formularioAnamnese';
 import { CODIGO_VERSAO_DESATUALIZADA } from '@shared/statusAgendamento';
 import { keepPreviousData, useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { Appointment, Bloqueio, Client, Employee, EmployeeUpdate, Service, ServiceEligibilityMode, TurnoSwapRequest, TurnoSwapStatus, ConfiguracaoEmpresa, Habilidade } from './types';
@@ -985,6 +986,75 @@ export const useDeleteClient = (token: string | null) => {
   return useMutation({
     mutationFn: (id: string) => fetchApi(`/clientes/${id}`, token, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['clients'] })
+  });
+};
+
+// =======================
+// FORMULÁRIO DE ANAMNESE (configurável) E FICHAS PREENCHIDAS
+// =======================
+export type FormularioAnamnese = { campos: CampoFormulario[]; versao: number; segmento?: string };
+export type FichaDoCliente = { id: string; canal: 'totem' | 'profissional' | 'recepcao'; preenchidoEm: string; alertas: string[]; snapshot: SnapshotFicha | null };
+
+// Gestão (admin e supervisão): ativos e arquivados
+export const useFormularioAnamnese = (token: string | null, ativo = true) => useQuery<FormularioAnamnese>({
+  queryKey: ['formulario-anamnese', 'gestao'],
+  queryFn: () => fetchApi('/formulario-anamnese', token),
+  enabled: !!token && ativo,
+});
+
+// Ficha da equipe: campos "ambos" e "apenas_profissional"
+export const useFormularioEquipe = (token: string | null, ativo = true) => useQuery<FormularioAnamnese>({
+  queryKey: ['formulario-anamnese', 'equipe'],
+  queryFn: () => fetchApi('/formulario-anamnese/equipe', token),
+  enabled: !!token && ativo,
+});
+
+export const useSalvarFormulario = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dados: { campos: Array<Omit<CampoFormulario, 'id' | 'versao'> & { id: string | null }>; versao: number }) =>
+      fetchApi('/formulario-anamnese', token, { method: 'PUT', body: JSON.stringify(dados) }) as Promise<FormularioAnamnese>,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['formulario-anamnese'] }),
+  });
+};
+
+export const useAplicarPreset = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => fetchApi('/formulario-anamnese/preset', token, { method: 'POST', body: JSON.stringify({ aplicar: true }) }) as Promise<FormularioAnamnese>,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['formulario-anamnese'] }),
+  });
+};
+
+// Debaixo de ['clients']: o aviso em tempo real de clientes também recarrega as fichas
+// Recepção: perguntas do totem/ambos (sem regras de alerta) e gravação às cegas, sem ler a ficha de volta
+export const useFormularioRecepcao = (token: string | null) => useQuery<{ campos: CampoPublico[] }>({
+  queryKey: ['formulario-anamnese', 'recepcao'],
+  queryFn: () => fetchApi('/formulario-anamnese/recepcao', token),
+  enabled: !!token,
+});
+
+export const useSalvarFichaRecepcao = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clienteId, respostas }: { clienteId: string; respostas: Record<string, ValorResposta> }) =>
+      fetchApi(`/clientes/${clienteId}/fichas/recepcao`, token, { method: 'POST', body: JSON.stringify({ respostas }) }) as Promise<{ id: string; preenchidoEm: string }>,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['clients'] }),
+  });
+};
+
+export const useFichasCliente = (token: string | null, clienteId: string | null) => useQuery<FichaDoCliente[]>({
+  queryKey: ['clients', 'fichas', clienteId],
+  queryFn: () => fetchApi(`/clientes/${clienteId}/fichas`, token),
+  enabled: !!token && !!clienteId,
+});
+
+export const useSalvarFichaCliente = (token: string | null) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clienteId, respostas }: { clienteId: string; respostas: Record<string, ValorResposta> }) =>
+      fetchApi(`/clientes/${clienteId}/fichas`, token, { method: 'POST', body: JSON.stringify({ respostas }) }) as Promise<FichaDoCliente>,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['clients'] }),
   });
 };
 

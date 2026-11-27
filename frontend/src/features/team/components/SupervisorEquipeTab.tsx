@@ -267,10 +267,10 @@ export function SupervisorEquipeTab({ employees, onAddEmployee, onDeleteEmployee
   // Uma função de fechar por modal (X, clique fora e Esc): não fecha durante o envio e pergunta se algo mudou.
   // "Cancelar edição" descarta de propósito, sem perguntar
   const formAlterado = useAlterado(showEmployeeForm, [newEmpName, newEmpEmail, newEmpUsuario, newEmpCargo, newEmpTipoEscala, newEmpFolgasDomingoNoMes, newEmpCargaHoraria, newEmpHabilidades, newEmpRole, newEmpDiasTrabalho]);
-  const fecharForm = () => { if (!isSubmitting && confirmarSaida(formAlterado)) cancelEdit(); };
+  const fecharForm = () => { if (!isSubmitting) confirmarSaida(formAlterado, () => cancelEdit()); };
   const escalaAberta = showScheduleModal && !!selectedEmpForSchedule;
   const escalaAlterada = useAlterado(escalaAberta, [scheduleDays]);
-  const fecharEscala = () => { if (!isSavingSchedule && confirmarSaida(escalaAlterada)) closeScheduleModal(); };
+  const fecharEscala = () => { if (!isSavingSchedule) confirmarSaida(escalaAlterada, () => closeScheduleModal()); };
   useModal(showEmployeeForm, fecharForm);
   useModal(!!createdCredentials, () => setCreatedCredentials(null));
   useModal(escalaAberta, fecharEscala);

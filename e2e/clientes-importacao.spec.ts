@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { apagarClienteDeTeste, apiBase, authHeaders, CONTAS, diaFuturo, gerarCpfValido, loginPelaTela, nomeClienteTeste } from './credenciais';
+import { apagarClienteDeTeste, descartarAlteracoes, janelaDescartar, apiBase, authHeaders, CONTAS, diaFuturo, gerarCpfValido, loginPelaTela, nomeClienteTeste } from './credenciais';
 
 /**
  * Cadastro manual de cliente e importação por planilha: só a supervisão, validação linha a linha, prévia dos erros
@@ -167,7 +167,7 @@ test.describe('Clientes — cadastro e importação', () => {
     }
   });
 
-  test('tela: Esc na ficha de um cliente salvo descarta (pergunta antes) e só "Concluir" grava', async ({ page, request }) => {
+  test('tela: Esc na ficha da recepção (formulário dinâmico) descarta (pergunta antes) e não grava', async ({ page, request }) => {
     const nome = nomeClienteTeste('Ficha Esc');
     const sup = await authHeaders(request, CONTAS.supervisor);
     const criado = await request.post(`${apiBase()}/clientes`, { headers: sup, data: { nome, observacao: '__ANAMNESE_JSON__:{"alergia":"Lavanda"}' } });
@@ -175,22 +175,23 @@ test.describe('Clientes — cadastro e importação', () => {
     const { id } = await criado.json();
     try {
       await page.goto('/');
-      await loginPelaTela(page, CONTAS.supervisor);
+      // Recepção grava ficha nova às cegas: não vê a anterior nem alertas
+      await loginPelaTela(page, CONTAS.recepcao);
       await page.getByRole('button', { name: 'Clientes', exact: true }).click();
       await page.getByLabel('Buscar cliente').fill(nome);
       await page.getByRole('row', { name: new RegExp(nome) }).getByTitle('Ver ficha de anamnese').click();
-      await page.getByRole('button', { name: 'Alterar Ficha' }).click();
-      const ficha = page.getByRole('dialog', { name: 'Ficha de anamnese' });
-      const alergia = ficha.locator('label:has-text("Tem alguma alergia?") + input');
-      await expect(alergia).toHaveValue('Lavanda');
-      await alergia.fill('Mudou sem querer');
+      await page.getByRole('button', { name: 'Atualizar ficha' }).click();
+      const ficha = page.getByRole('dialog', { name: 'Nova ficha de anamnese' });
+      await expect(ficha).not.toContainText('Lavanda');
+      await ficha.locator('button[aria-pressed]').first().click();
 
-      page.once('dialog', (d) => { expect(d.message()).toMatch(/quer mesmo sair/); void d.accept(); });
       await page.keyboard.press('Escape');
+      await expect(janelaDescartar(page)).toContainText('não foram salvas');
+      await descartarAlteracoes(page);
       await expect(ficha).toBeHidden();
+      expect(await (await request.get(`${apiBase()}/clientes/${id}/fichas`, { headers: sup })).json()).toEqual([]);
       const lista = (await (await request.get(`${apiBase()}/clientes`, { headers: sup })).json()) as Array<{ id: string; observacao: string | null }>;
       expect(lista.find((c) => c.id === id)?.observacao).toContain('Lavanda');
-      expect(lista.find((c) => c.id === id)?.observacao).not.toContain('Mudou sem querer');
     } finally {
       await apagarClienteDeTeste(request, nome);
     }

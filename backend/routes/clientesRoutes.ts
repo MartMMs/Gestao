@@ -62,10 +62,18 @@ export function createClientesRouter(notificar: Notificar) {
 
       // temAnamnese: só se há ficha, sem o conteúdo (quem não vê saúde, como a recepção, também precisa do aviso).
       // acessoSaude: quem pede vê e grava a ficha deste cliente (a tela não oferece edição que a API recusaria)
-      const comAviso = <T extends { observacao: string | null }>(c: T, original: { observacao: string | null }, acessoSaude: boolean) =>
-        ({ ...c, temAnamnese: temFichaAnamnese(original.observacao), acessoSaude });
-      if (supervisor) return res.json(filtrados.map((c) => comAviso(c, c, true)));
-      const meus = await clientesComAcessoSaude(req);
+      // alertasClinicos: rótulos marcados como alerta na última ficha do formulário (só para quem vê a saúde do cliente;
+      // a existência da ficha conta no temAnamnese para todos, como a ficha antiga)
+      const meus = supervisor ? null : await clientesComAcessoSaude(req);
+      const comSaude = filtrados.map((c) => c.id);
+      const ultimas = comSaude.length ? await prisma.fichaPreenchida.findMany({
+        where: { clienteId: { in: comSaude }, vinculadaAoCliente: true },
+        orderBy: { preenchidoEm: 'desc' }, distinct: ['clienteId'], select: { clienteId: true, alertas: true },
+      }) : [];
+      const alertas = new Map(ultimas.map((f) => [f.clienteId, f.alertas]));
+      const comAviso = <T extends { id: string; observacao: string | null }>(c: T, original: { observacao: string | null }, acessoSaude: boolean) =>
+        ({ ...c, temAnamnese: temFichaAnamnese(original.observacao) || alertas.has(c.id), acessoSaude, alertasClinicos: acessoSaude ? alertas.get(c.id) ?? [] : [] });
+      if (!meus) return res.json(filtrados.map((c) => comAviso(c, c, true)));
       res.json(filtrados.map((c) => comAviso(prepararCliente(c, req, meus.has(c.id)), c, meus.has(c.id))));
     } catch (error) {
       responderErro(res, error, 'Erro ao buscar clientes');
@@ -278,6 +286,8 @@ export function createClientesRouter(notificar: Notificar) {
           return { tipo: 'excluido' as const };
         }
         await tx.agendamento.updateMany({ where: { clienteId: id }, data: { observacoesSaude: null } });
+        // Fichas do formulário são dado de saúde: saem junto com a observação
+        await tx.fichaPreenchida.deleteMany({ where: { clienteId: id } });
         await tx.cliente.update({
           where: { id },
           data: { nome: NOME_CLIENTE_REMOVIDO, telefone: null, cpf: null, email: null, observacao: null, removidoEm: new Date() },

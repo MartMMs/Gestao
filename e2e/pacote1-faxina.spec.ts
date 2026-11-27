@@ -8,6 +8,7 @@ import {
   loginPelaTela,
   nomeClienteTeste,
   reservarHorarioNoTotem,
+  descartarAlteracoes,
 } from './credenciais';
 
 const sufixo = () => Array.from({ length: 6 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join('');
@@ -289,8 +290,8 @@ test.describe('Pacote 1 — Faxina Visual, Permissões e Correções', () => {
     await expect(modalCriar.getByLabel('Domingos de folga / mês')).toHaveCount(0);
     await expect(modalCriar.getByLabel('Carga horária semanal (h)')).toHaveCount(0);
     await expect(modalCriar.getByText('Habilidades')).toHaveCount(0);
-    page.once('dialog', (d) => d.accept());
     await page.keyboard.press('Escape');
+    await descartarAlteracoes(page);
     await expect(modalCriar).toBeHidden();
 
     // Aba Empresa & Segmento: presets colapsados por padrão

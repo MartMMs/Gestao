@@ -14,6 +14,7 @@ const empresa = {
   horaLimiteAgendamento: null,
   diasFuncionamento: [1, 2, 3],
   diasEspeciais: [],
+  formularioVersao: 1,
   mensagensLembrete: ['Oi {nome}'],
   lembretePedeConfirmacao: true,
   atualizadoEm: new Date('2026-11-21T12:00:00Z'),

@@ -327,6 +327,8 @@ const garantirFichaAnamnese = async (
   acessoSaude?: Set<string>,
 ) => {
   if (temFichaAnamnese(cliente.observacao)) return cliente;
+  // Ficha do formulário configurável (FichaPreenchida) também conta como ficha preenchida
+  if (await tx.fichaPreenchida.findFirst({ where: { clienteId: cliente.id, vinculadaAoCliente: true }, select: { id: true } })) return cliente;
   // Tamanho antes de ler: o corpo pode ter até 100 kB e a leitura tenta cada marcador do texto
   if (typeof fichaEnviada === 'string' && fichaEnviada.length > LIMITE_OBSERVACAO) {
     throw new HttpError(400, 'A ficha de anamnese ficou grande demais. Resuma as observações.');

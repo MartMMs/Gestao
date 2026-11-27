@@ -13,6 +13,8 @@ import {
 import { DURACAO_PADRAO_MIN, duracaoTotal, instanteNoFuso } from '../../shared/agenda';
 import { versaoConsentimentoValida } from '../../shared/consentimento';
 import { PREFIXO_TOTEM } from '../../shared/anamnese';
+import { alertasDe, lerRespostas, montarSnapshot, resumoTexto, type ItemFicha } from '../../shared/formularioAnamnese';
+import { listarCampos } from './formularioService';
 import {
   LIMITE_OBSERVACAO,
   MENSAGEM_CPF_INVALIDO,
@@ -65,6 +67,8 @@ export const resumoServicos = (servicos: ServicoResumo[]) => {
 export type ClienteTotem = {
   nome: string; telefone: string; cpf: string | null; observacoesSaude: string;
   consentimentoEm: Date; consentimentoVersao: string;
+  // Respostas do formulário configurável, já validadas (ficha do totem); sem ela, só a linha de texto antiga
+  ficha?: { itens: ItemFicha[]; versao: number };
 };
 
 // A tela atual não deixa enviar sem a caixa marcada: quem chega aqui é um totem aberto desde antes da caixa existir
@@ -304,12 +308,25 @@ export const criarAgendamentoTotem = async (
       }
     }
     const dbCliente = existente
-      ?? await tx.cliente.create({ data: { nome: nomeCadastro, telefone: cliente.telefone, cpf: cliente.cpf, observacao } });
+      // Com o formulário novo, a ficha do cadastro novo é a FichaPreenchida: a linha de texto fica só no agendamento
+      // (repetida na observação do cliente, apareceria duas vezes na ficha da equipe)
+      ?? await tx.cliente.create({ data: { nome: nomeCadastro, telefone: cliente.telefone, cpf: cliente.cpf, observacao: cliente.ficha?.itens.length ? null : observacao } });
+    const gravarFicha = async (agendamentoId: string) => {
+      if (!cliente.ficha || cliente.ficha.itens.length === 0) return;
+      await tx.fichaPreenchida.create({
+        data: {
+          clienteId: dbCliente.id, agendamentoId, canal: 'totem', versaoFormulario: cliente.ficha.versao,
+          // Cadastro existente: fica só no agendamento (mesma regra da linha de texto acima)
+          vinculadaAoCliente: !existente,
+          snapshot: montarSnapshot(cliente.ficha.itens, cliente.ficha.versao, 'totem'), alertas: alertasDe(cliente.ficha.itens),
+        },
+      });
+    };
     // De propósito, o totem NÃO recusa horário sobreposto de cliente que já existe (a agenda interna recusa): qualquer
     // recusa, mesmo com a mensagem de horário ocupado, diria a quem sabe nome e telefone de alguém que essa pessoa
     // tem atendimento naquela hora. A sobreposição aparece na agenda e a recepção resolve no check-in.
 
-    return tx.agendamento.create({
+    const agendamento = await tx.agendamento.create({
       data: {
         data: inicio,
         status: 'scheduled',
@@ -333,5 +350,22 @@ export const criarAgendamentoTotem = async (
         servicos: { connect: servicos.map((s) => ({ id: s.id })) },
       } satisfies Prisma.AgendamentoUncheckedCreateInput,
     });
+    await gravarFicha(agendamento.id);
+    return agendamento;
   });
 };
+
+/**
+ * Valida as respostas do formulário enviadas pelo totem (só campos visíveis no totem) e monta a linha de texto
+ * antiga a partir delas, para quem ainda lê Agendamento.observacoesSaude. Sem "respostas" (totem aberto antes
+ * desta versão), o texto digitado segue como antes.
+ */
+export const aplicarFichaDoTotem = async (cliente: ClienteTotem, respostas: unknown): Promise<ClienteTotem> => {
+  if (respostas === undefined) return cliente;
+  const { campos, versao } = await listarCampos();
+  const { itens, erro } = lerRespostas(campos, respostas, 'totem');
+  if (erro) throw new HttpError(400, erro);
+  const observacoesSaude = resumoTexto(itens).slice(0, LIMITE_OBSERVACAO);
+  return { ...cliente, observacoesSaude, ficha: { itens, versao } };
+};
+

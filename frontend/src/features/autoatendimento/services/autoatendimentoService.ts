@@ -1,3 +1,4 @@
+import type { CampoPublico, ValorResposta } from '@shared/formularioAnamnese';
 import { getApiUrl } from '../../../config/api';
 import { cabecalhoCsrf, carregarTokenCsrf } from '../../../api';
 import {
@@ -21,6 +22,12 @@ const fetchTotem = async (url: string, init?: RequestInit, mensagemSemConexao = 
     throw new Error(mensagemSemConexao);
   }
 };
+
+export async function fetchFormularioTotem(): Promise<{ campos: CampoPublico[]; exigeConsentimentoLgpd: boolean }> {
+  const res = await fetchTotem(`${getBaseUrl()}/formulario`);
+  if (!res.ok) throw new Error('Falha ao carregar as perguntas do atendimento.');
+  return res.json();
+}
 
 export async function fetchAutoatendimentoEmpresa(): Promise<ConfiguracaoEmpresa> {
   const res = await fetchTotem(`${getBaseUrl()}/empresa`);
@@ -144,6 +151,8 @@ export type DadosClienteTotem = {
   consentimento: true;
   // Versão do texto aceito (shared/consentimento.ts), gravada como prova
   consentimentoVersao: string;
+  // Respostas do formulário configurável ({ campoId: valor }); a API valida e grava a ficha
+  respostas?: Record<string, ValorResposta>;
 };
 
 export async function confirmarPagamentoAutoatendimento(params: {

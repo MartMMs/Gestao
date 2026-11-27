@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CONTAS, apagarColaboradorDeTeste, apiBase, authHeaders, loginPelaTela, postLogin } from './credenciais';
+import { CONTAS, descartarAlteracoes, janelaDescartar, apagarColaboradorDeTeste, apiBase, authHeaders, loginPelaTela, postLogin } from './credenciais';
 
 /**
  * Modal aberto bloqueia a página de fundo (clique no cabeçalho e rolagem) e fecha com Esc; e o cadastro de
@@ -28,44 +28,40 @@ test.describe('Modais e cadastro de profissional', () => {
     expect(await page.evaluate(() => getComputedStyle(document.body).overflow)).toBe('hidden');
 
     // Sem nada alterado, Esc fecha sem perguntar
-    const perguntas: string[] = [];
-    const registrar = (d: import('@playwright/test').Dialog) => { perguntas.push(d.message()); void d.dismiss(); };
-    page.on('dialog', registrar);
     await dialogo.getByPlaceholder('Cargo (ex.: Massagista)').click();
     await page.keyboard.press('Escape');
     await expect(dialogo).toBeHidden();
-    expect(perguntas).toHaveLength(0);
+    await expect(janelaDescartar(page)).toHaveCount(0);
 
-    // Com um campo preenchido (ou um dia da semana alternado), Esc e clique fora perguntam: "Cancelar" mantém aberto
+    // Com um campo preenchido (ou um dia da semana alternado), Esc e clique fora perguntam: "Continuar editando" mantém aberto
     await page.getByRole('button', { name: /Criar Usuário/i }).click();
     await dialogo.getByRole('button', { name: 'DOM', exact: true }).click();
     await page.keyboard.press('Escape');
+    await expect(janelaDescartar(page)).toBeVisible();
+    await janelaDescartar(page).getByRole('button', { name: 'Continuar editando' }).click();
+    await expect(janelaDescartar(page)).toHaveCount(0);
     await expect(dialogo).toBeVisible();
-    expect(perguntas).toEqual([expect.stringMatching(/quer mesmo sair/)]);
-    page.off('dialog', registrar);
-    page.once('dialog', (d) => void d.accept());
     await page.mouse.click(5, 5);
+    await descartarAlteracoes(page);
     await expect(dialogo).toBeHidden();
     expect(await page.evaluate(() => getComputedStyle(document.body).overflow)).not.toBe('hidden');
   });
 
   test('X, Esc e clique fora fazem o mesmo: perguntam só com algo preenchido (digitar e apagar não conta)', async ({ page }) => {
     const dialogo = page.getByRole('dialog', { name: /Criar Usuário/i });
-    const perguntas: string[] = [];
-    page.on('dialog', (d) => { perguntas.push(d.message()); void d.dismiss(); });
-
     // Preenchido pelo fill (sem tecla nem clique): a comparação vem do estado, não de uma foto da tela
     await page.getByRole('button', { name: /Criar Usuário/i }).click();
     await dialogo.getByPlaceholder('Cargo (ex.: Massagista)').fill('Massagem');
     await dialogo.getByRole('button', { name: 'Fechar' }).click();
+    await expect(janelaDescartar(page)).toBeVisible();
+    await janelaDescartar(page).getByRole('button', { name: 'Continuar editando' }).click();
     await expect(dialogo).toBeVisible();
-    expect(perguntas).toHaveLength(1);
 
     // Desfeito: volta a "não mudou" e o X fecha sem perguntar
     await dialogo.getByPlaceholder('Cargo (ex.: Massagista)').fill('');
     await dialogo.getByRole('button', { name: 'Fechar' }).click();
     await expect(dialogo).toBeHidden();
-    expect(perguntas).toHaveLength(1);
+    await expect(janelaDescartar(page)).toHaveCount(0);
   });
 
   test('cadastra sem e-mail e a pessoa entra com o usuário de acesso', async ({ page, request }) => {
@@ -141,8 +137,8 @@ test.describe('Novo Agendamento: Esc da busca de cliente e da ficha', () => {
     await expect(modal).toBeVisible();
 
     // Lista fechada: o Esc chega ao modal (que pergunta, porque há dados preenchidos)
-    page.once('dialog', (d) => void d.accept());
     await page.keyboard.press('Escape');
+    await descartarAlteracoes(page);
     await expect(modal).toBeHidden();
   });
 });

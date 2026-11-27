@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { apiBase, authHeaders, CONTAS, loginPelaTela } from './credenciais';
+import { apiBase, authHeaders, CONTAS, descartarAlteracoes, loginPelaTela } from './credenciais';
 
 /**
  * Grade de Escalas: editar um dia, editar vários (arrastando), lote com falha no meio e os modelos (12x36),
@@ -131,8 +131,8 @@ test.describe('Grade de Escalas', () => {
       await expect(dialogo.getByText(/Salvos 2 de 3 dias/)).toBeVisible();
       const salvos = await ajustesSalvos(request, id);
       expect([15, 16, 17].map((n) => salvos.find((s) => s.data === data(n))?.tipo)).toEqual(['folga', 'folga', 'trabalho']);
-      page.once('dialog', (d) => d.accept()); // "sair sem salvar" do modal
       await dialogo.getByRole('button', { name: 'Fechar' }).click();
+      await descartarAlteracoes(page); // "sair sem salvar" do modal
       await expect(dia(page, 15)).toHaveAccessibleName(/Folga/);
       await expect(dia(page, 17)).not.toHaveAccessibleName(/Folga/);
     } finally {

@@ -47,6 +47,8 @@ const ACAO_ROTULO: Record<string, string> = {
   'habilidade.arquivada': 'Habilidade arquivada',
   'empresa.horario': 'Horário de funcionamento',
   'cliente.anamnese': 'Ficha de anamnese',
+  'formulario.anamnese': 'Formulário de anamnese alterado',
+  'formulario.preset': 'Modelo de formulário do segmento carregado',
   'agendamento.reaberto': 'Atendimento reaberto',
   'agendamento.realocado': 'Atendimento realocado',
   'agendamento.valores': 'Valor do atendimento alterado',
@@ -90,6 +92,10 @@ const CAMPO_ROTULO: Record<string, string> = {
   inicio: 'início',
   fim: 'fim',
   dias: 'dias',
+  versao: 'versão do formulário',
+  ativos: 'perguntas ativas',
+  arquivados: 'perguntas arquivadas',
+  fichaFormulario: 'ficha do formulário',
 };
 
 const valorLegivel = (campo: string, v: unknown) => {

@@ -110,6 +110,8 @@ test.describe('Ficha: U+2028 numa ficha real', () => {
       await page.getByLabel('Buscar cliente').fill(nome);
       await page.getByRole('row', { name: new RegExp(nome) }).getByRole('button', { name: nome, exact: true }).click();
       const resumo = page.getByRole('dialog', { name: /Resumo da ficha de anamnese/i });
+      // Supervisão vê a ficha antiga recolhida em "Ficha anterior (legado)" (a edição é pelo formulário)
+      await resumo.getByText('Ficha anterior (legado)').click();
       await expect(resumo.getByText('Queixa: lombar')).toBeVisible();
     } finally {
       await apagarClienteDeTeste(request, nome);

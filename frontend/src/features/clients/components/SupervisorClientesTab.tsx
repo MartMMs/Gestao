@@ -18,6 +18,8 @@ import { valorDoAtendimento } from '../../../utils/valorAtendimento';
 import { NovoClienteModal } from './NovoClienteModal';
 import { AvisoCliente } from '../../../components/AvisoCliente';
 import { FichaAnamneseModal } from '../../../components/FichaAnamneseModal';
+import { FichaRecepcaoModal } from '../../../components/FichaRecepcaoModal';
+import { SeloAlertaClinico } from '../../../components/FichaFormulario';
 import { ImportarClientesModal } from './ImportarClientesModal';
 
 interface SupervisorClientesTabProps {
@@ -45,6 +47,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
   const [clientToDelete, setClientToDelete] = useState<string | null>(null);
   // Só o id: a ficha aberta acompanha a lista quando ela recarrega (alteração feita em outro aparelho)
   const [fichaClientId, setFichaClientId] = useState<string | null>(null);
+  const [fichaRecepcao, setFichaRecepcao] = useState<{ id: string; nome: string } | null>(null);
   const [editingAnamneseClient, setEditingAnamneseClient] = useState<{ id: string; name: string; note: string; data: AnamneseData; restrita?: boolean } | null>(null);
   const [historyClient, setHistoryClient] = useState<Client | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | '7days' | 'month'>('all');
@@ -227,7 +230,7 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
 
   // Uma função de fechar (X, clique fora e Esc): não fecha durante o envio e pergunta se algo mudou
   const edicaoAlterada = useAlterado(!!editingClient, [editingClient, editingClientNote, editingClientAlergias, editingClientPreferencias]);
-  const fecharEdicao = () => { if (!isSaving && confirmarSaida(edicaoAlterada)) setEditingClient(null); };
+  const fecharEdicao = () => { if (!isSaving) confirmarSaida(edicaoAlterada, () => setEditingClient(null)); };
   useModal(!!editingClient, fecharEdicao);
   useModal(!!historyClient, () => setHistoryClient(null));
 
@@ -298,7 +301,8 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
                     <div className="flex flex-wrap gap-1">
                       {alergiasCliente.length > 0 && <span className="bg-error/10 text-error px-2 py-0.5 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1"><span className="material-symbols-outlined text-[11px]">medical_information</span> Alergias</span>}
                       {preferenciasCliente.length > 0 && <span className="bg-tertiary/10 text-tertiary px-2 py-0.5 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1"><span className="material-symbols-outlined text-[11px]">favorite</span> Preferências</span>}
-                      {!alergiasCliente.length && !preferenciasCliente.length && <span className="text-on-surface-variant opacity-50">-</span>}
+                      <SeloAlertaClinico alertas={client.alertasClinicos} />
+                      {!alergiasCliente.length && !preferenciasCliente.length && !client.alertasClinicos?.length && <span className="text-on-surface-variant opacity-50">-</span>}
                     </div>
                   </td>
                   <td className="py-4 px-4 text-xs text-on-surface-variant max-w-xs truncate hidden md:table-cell" title={parsedObs.note}>
@@ -503,14 +507,22 @@ export function SupervisorClientesTab({ appointments, services, onEditClient, on
           observacao={fichaClient.observacao}
           restrita={fichaOculta(fichaClient)}
           exigirAnamnese={exigirAnamnese}
+          clienteId={fichaClient.acessoSaude ? fichaClient.id : null}
+          podeEditarFormulario={fichaClient.acessoSaude === true}
           // Supervisão/profissional autorizado ou recepção (atualização cega no balcão)
-          onEditar={onEditClient && (fichaClient.acessoSaude || ehRecepcao) ? () => {
+          onEditar={ehRecepcao && !fichaClient.acessoSaude ? () => { setFichaRecepcao({ id: fichaClient.id, nome: fichaClient.nome }); setFichaClientId(null); }
+            : onEditClient && fichaClient.acessoSaude ? () => {
             const parsed = parseClientObservation(fichaClient.observacao);
             setEditingAnamneseClient({ id: fichaClient.id, name: fichaClient.nome, note: parsed.note, data: parsed.anamData, restrita: fichaOculta(fichaClient) });
             setFichaClientId(null);
           } : undefined}
           onClose={() => setFichaClientId(null)}
         />
+      )}
+
+      {fichaRecepcao && (
+        <FichaRecepcaoModal clienteId={fichaRecepcao.id} nome={fichaRecepcao.nome} onClose={() => setFichaRecepcao(null)}
+          onSalvo={() => mostrarMensagem('Ficha registrada.')} />
       )}
 
       {editingAnamneseClient && (

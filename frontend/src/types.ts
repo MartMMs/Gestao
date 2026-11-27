@@ -136,6 +136,8 @@ export interface Client {
   temAnamnese?: boolean;
   // Calculado pela API: quem está logado vê e grava a ficha de saúde deste cliente
   acessoSaude?: boolean;
+  // Rótulos marcados como alerta na última ficha do formulário (vazio para quem não vê a saúde do cliente)
+  alertasClinicos?: string[];
   observacao?: string;
   // LGPD: pediu para não receber lembretes no WhatsApp
   naoReceberWhatsapp?: boolean;

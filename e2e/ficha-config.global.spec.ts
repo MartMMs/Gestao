@@ -34,9 +34,10 @@ test.describe('ficha obrigatória pela tela', () => {
       const resumo = page.getByRole('dialog', { name: /Resumo da ficha de anamnese/i });
       await expect(resumo.getByText(/exige a ficha para agendar/)).toBeVisible();
       await resumo.getByRole('button', { name: 'Preencher ficha', exact: true }).click();
-      const ficha = page.getByRole('dialog', { name: 'Ficha de anamnese', exact: true });
-      await ficha.locator('label:has-text("Tem alguma alergia?") + input').fill('Pólen');
-      await ficha.getByRole('button', { name: /Concluir ficha/ }).click();
+      // Recepção grava ficha nova às cegas no formulário configurável
+      const ficha = page.getByRole('dialog', { name: 'Nova ficha de anamnese' });
+      await ficha.locator('button[aria-pressed]').first().click();
+      await ficha.getByRole('button', { name: 'Salvar ficha' }).click();
       await expect(ficha).toBeHidden();
 
       let salvo = false;
@@ -61,7 +62,8 @@ test.describe('ficha obrigatória pela tela', () => {
       const gravado = ((await (await request.get(`${apiBase()}/clientes`, { headers: sup })).json()) as ClienteApi[]).find((x) => x.id === c.id)!;
       expect(gravado.temAnamnese).toBe(true);
       expect(gravado.observacao).toContain('Prefere a sala 2');
-      expect(gravado.observacao).toContain('Pólen');
+      const fichas = (await (await request.get(`${apiBase()}/clientes/${c.id}/fichas`, { headers: sup })).json()) as Array<{ canal: string }>;
+      expect(fichas[0]?.canal).toBe('recepcao');
     } finally {
       await apagarClienteDeTeste(request, nome);
     }

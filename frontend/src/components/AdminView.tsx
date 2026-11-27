@@ -8,6 +8,7 @@ import { SupervisorClientesTab } from '../features/clients/components';
 import { SupervisorEquipeTab } from '../features/team/components';
 import { ServicosTab, type ServicePayload } from '../features/services/components';
 import { AutoatendimentoAdminTab } from '../features/autoatendimento/components';
+import { FormularioAnamneseCard } from '../features/company/components/FormularioAnamneseCard';
 import { WhatsappLembretesTab } from '../features/appointments/components';
 import { CompanySettingsTab } from '../features/company/components/CompanySettingsTab';
 import { RelatorioFinanceiroTab } from '../features/reports/components';
@@ -229,6 +230,7 @@ export function AdminView({
 
       {activeTab === 'totem' && (
         <div className="space-y-8">
+          <FormularioAnamneseCard />
           <AutoatendimentoAdminTab />
           <WhatsappLembretesTab token={token || null} />
         </div>

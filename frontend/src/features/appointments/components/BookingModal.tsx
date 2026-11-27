@@ -9,7 +9,9 @@ import { AppointmentScheduleFields } from '../../../components/AppointmentSchedu
 import { ModalFormulario } from '../../../components/ModalFormulario';
 import { fichaOculta, formatAnamneseStorage, hasAnamnese, parseClientObservation } from '../../../utils/anamneseUtils';
 import { FichaAnamneseModal } from '../../../components/FichaAnamneseModal';
+import { FichaRecepcaoModal } from '../../../components/FichaRecepcaoModal';
 import { AvisoCliente } from '../../../components/AvisoCliente';
+import { SeloAlertaClinico } from '../../../components/FichaFormulario';
 import { MENSAGEM_ANAMNESE_OBRIGATORIA, linhasDoTotem } from '@shared/anamnese';
 import { useAuth } from '../../../AuthContext';
 import { formatPhone, formatCpf, atendeNaAgenda } from '../../../utils/formatters';
@@ -331,6 +333,9 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
   // Quem grava a ficha: cliente novo, quem tem acesso à saúde, ou a recepção no balcão (sem ver o histórico anterior)
   const podeEditarFicha = !clienteEscolhido || clienteEscolhido.acessoSaude === true || gerenciaAgenda || (exigirAnamnese && !clienteEscolhido.temAnamnese);
   // Uma regra para o botão dos detalhes: com ficha (ou sem poder preencher) mostra a ficha; senão abre o formulário
+  // Recepção com cliente cadastrado: ficha nova às cegas no formulário configurável (não lê a anterior)
+  const fichaAsCegas = Boolean(clienteEscolhido) && currentUser?.role === 'receptionist' && !clienteEscolhido?.acessoSaude;
+  const [fichaRecepcao, setFichaRecepcao] = useState(false);
   const mostraFicha = Boolean(clienteEscolhido) && (clienteTemFicha || !podeEditarFicha);
   const rotuloFicha = mostraFicha ? 'Ver Ficha do Cliente' : exigirAnamnese && !clienteTemFicha ? '+ Ficha do Cliente (obrigatória)' : '+ Ficha do Cliente';
 
@@ -662,7 +667,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
             <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Cliente Selecionado</p>
-                <p className="text-sm font-bold text-on-surface break-words">{bookName || 'Nenhum cliente selecionado'}{selectedClientId && <AvisoCliente semFicha={!clienteTemFicha} />}</p>
+                <p className="text-sm font-bold text-on-surface break-words">{bookName || 'Nenhum cliente selecionado'}{selectedClientId && <AvisoCliente semFicha={!clienteTemFicha} />} <SeloAlertaClinico alertas={clienteEscolhido?.alertasClinicos} /></p>
               </div>
               {clienteEscolhido && (
                 <button type="button" onClick={() => setVerFicha(true)} className="text-[11px] text-primary font-bold uppercase tracking-widest hover:underline whitespace-nowrap">
@@ -722,7 +727,7 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
             detailsLabel="Observações"
             detailsPlaceholder="Ex: Preferências do cliente..."
             detailsAction={(
-              <button type="button" onClick={() => (mostraFicha ? setVerFicha(true) : setShowAnamnese(true))} className={`text-[11px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors ${exigirAnamnese && !clienteTemFicha ? 'bg-error/10 text-error hover:bg-error/20' : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'}`}>
+              <button type="button" onClick={() => (mostraFicha || clienteEscolhido?.acessoSaude ? setVerFicha(true) : fichaAsCegas ? setFichaRecepcao(true) : setShowAnamnese(true))} className={`text-[11px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors ${exigirAnamnese && !clienteTemFicha ? 'bg-error/10 text-error hover:bg-error/20' : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'}`}>
                 {rotuloFicha}
               </button>
             )}
@@ -741,9 +746,14 @@ export function BookingModal({ receptionDate, initialTime, initialEmpId, clients
           observacao={formatAnamneseStorage(bookClientObservation, anamneseData)}
           restrita={fichaOculta(clienteEscolhido) && !hasAnamnese(anamneseData)}
           exigirAnamnese={exigirAnamnese}
-          onEditar={podeEditarFicha ? () => { setVerFicha(false); setShowAnamnese(true); } : undefined}
+          clienteId={clienteEscolhido.acessoSaude ? clienteEscolhido.id : null}
+          podeEditarFormulario={clienteEscolhido.acessoSaude === true}
+          onEditar={podeEditarFicha ? () => { setVerFicha(false); if (fichaAsCegas) setFichaRecepcao(true); else setShowAnamnese(true); } : undefined}
           onClose={() => setVerFicha(false)}
         />
+      )}
+      {fichaRecepcao && clienteEscolhido && (
+        <FichaRecepcaoModal clienteId={clienteEscolhido.id} nome={clienteEscolhido.nome} onClose={() => setFichaRecepcao(false)} />
       )}
       {showAnamnese && (
         <AnamneseForm

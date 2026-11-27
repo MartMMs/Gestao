@@ -29,6 +29,7 @@ import {
   duracaoProduto,
   escolherProfissionalESala,
   lerClienteTotem,
+  aplicarFichaDoTotem,
   lerIdsServicos,
   liberarReserva,
   resumoServicos,
@@ -57,6 +58,8 @@ import {
 } from '../../shared/agenda';
 import { normalizarTelefone, semSufixoDoTotem } from '../../shared/validadores';
 import { ESCOPOS } from '../../shared/escopos';
+import { formularioPublico } from '../../shared/formularioAnamnese';
+import { listarCampos } from '../services/formularioService';
 
 const TTL_RESULTADO_SEGUNDOS = 15 * 60;
 const TTL_CONFIRMACAO_SEGUNDOS = 120;
@@ -131,6 +134,15 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
       res.json(empresaPublica(await getEmpresaConfig()));
     } catch (error) {
       responderErro(res, error, 'Falha ao buscar dados da empresa.');
+    }
+  });
+
+  // Formulário de anamnese do totem: lista branca dos campos ativos de "ambos" e "apenas_totem" (shared/formularioAnamnese)
+  router.get('/formulario', async (_req, res) => {
+    try {
+      res.json(formularioPublico((await listarCampos()).campos));
+    } catch (error) {
+      responderErro(res, error, 'Falha ao buscar o formulário do totem.');
     }
   });
 
@@ -463,7 +475,7 @@ export function createAutoatendimentoRouter(eventos: Eventos) {
         return res.status(201).json(anterior);
       }
 
-      const cliente = lerClienteTotem(req.body.cliente);
+      const cliente = await aplicarFichaDoTotem(lerClienteTotem(req.body.cliente), req.body.cliente?.respostas);
       const tipoPagamento = req.body.tipoPagamento === 'integral' ? 'integral' : 'sinal';
       const metodoPagamento = req.body.metodoPagamento === 'cartao' ? 'cartao' : 'pix';
 

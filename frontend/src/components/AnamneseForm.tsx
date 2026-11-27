@@ -111,7 +111,7 @@ export function AnamneseForm({ data, onChange, onClose, onCancel, salvando = fal
   const fechar = () => {
     if (salvando) return;
     if (!onCancel) onClose();
-    else if (confirmarSaida(alterado)) onCancel();
+    else confirmarSaida(alterado, onCancel);
   };
   useModal(true, fechar);
   // As perguntas acompanham o segmento da empresa: as gerais valem para qualquer negócio; as de saúde detalhadas,

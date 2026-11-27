@@ -104,7 +104,17 @@ export function useAlterado(aberto: boolean, valores: unknown) {
   return aberto && inicial.current !== atual;
 }
 
-export const MENSAGEM_SAIDA = 'Você quer mesmo sair? O que foi preenchido não será salvo.';
+export const MENSAGEM_SAIDA = 'Há mudanças que ainda não foram salvas. Fechar agora descarta essas mudanças.';
 
-// Só pergunta quando há algo a perder
-export const confirmarSaida = (alterado: boolean) => !alterado || window.confirm(MENSAGEM_SAIDA);
+// Pedido de confirmação de saída: quem desenha a janela é o ConfirmacaoSaidaHost (montado uma vez em main.tsx)
+type PedidoSaida = (seguir: () => void) => void;
+let mostrarConfirmacao: PedidoSaida | null = null;
+export const registrarConfirmacaoSaida = (mostrar: PedidoSaida | null) => { mostrarConfirmacao = mostrar; };
+
+/** Fecha na hora se não há nada a perder; senão pergunta ("Descartar alterações?") e só fecha se confirmar. */
+export const confirmarSaida = (alterado: boolean, seguir: () => void) => {
+  if (!alterado) seguir();
+  // Sem a janela montada (ex.: teste isolado), cai no aviso do navegador
+  else if (mostrarConfirmacao) mostrarConfirmacao(seguir);
+  else if (window.confirm(MENSAGEM_SAIDA)) seguir();
+};

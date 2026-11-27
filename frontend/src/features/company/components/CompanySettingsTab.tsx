@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { ConfiguracaoEmpresa } from '../../../types';
 import { useCompanyConfig, useUpdateCompanyConfig } from '../../../api';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
+import { PersonalizarFormularioModal } from './PersonalizarFormularioModal';
 
 /** Cor do banco quando ninguém escolheu (mantém o tema original do sistema) */
 export const COR_PADRAO = '#0f766e';
@@ -131,6 +132,8 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [presetsAberto, setPresetsAberto] = useState(false);
+  const [personalizando, setPersonalizando] = useState(false);
+  const podePersonalizar = currentUser?.role === 'admin' || currentUser?.role === 'supervisor';
   const [presetPendente, setPresetPendente] = useState<PresetConfig | null>(null);
 
   // Config que o formulário mostrou por último e config nova vinda de outro aparelho enquanto havia edição aqui:
@@ -520,8 +523,16 @@ export function CompanySettingsTab({ token }: CompanySettingsTabProps) {
                 Ligado, não dá para cadastrar um cliente nem agendar para ele sem a ficha preenchida. O totem continua
                 agendando sem ficha; esses clientes aparecem com o aviso "Sem ficha" na lista e na agenda.
               </span>
+              {podePersonalizar && (
+                <button type="button" onClick={(e) => { e.preventDefault(); setPersonalizando(true); }}
+                  className="mt-2 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-primary text-primary text-xs font-bold">
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">edit_note</span>
+                  Personalizar formulário
+                </button>
+              )}
             </span>
           </label>
+          {personalizando && <PersonalizarFormularioModal onClose={() => setPersonalizando(false)} />}
 
           <fieldset className="bg-surface-container-low border border-outline-variant/30 rounded-2xl p-4">
             <legend className="sr-only">Exigir habilidades nos agendamentos</legend>

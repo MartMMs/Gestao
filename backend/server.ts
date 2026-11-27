@@ -4,7 +4,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors, { type CorsOptions } from 'cors';
 import http from 'http';
 import { execFileSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { Server } from 'socket.io';
 import { createRouter } from './routes';
 import { createAutoatendimentoRouter } from './routes/autoatendimentoRoutes';
@@ -172,6 +172,9 @@ process.on('unhandledRejection', (motivo) => {
   console.error('[API] Promessa rejeitada sem tratamento:', redactSensitiveData(motivo));
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor escutando em todas as interfaces na porta ${PORT}`);
+// Só a própria máquina (o nginx ou o túnel ficam na frente). Em Docker precisa de 0.0.0.0 para o mapeamento de
+// porta funcionar; HOST no .env vence os dois
+const HOST = process.env.HOST || (existsSync('/.dockerenv') ? '0.0.0.0' : '127.0.0.1');
+server.listen(PORT, HOST, () => {
+  console.log(`🚀 Servidor escutando em ${HOST}:${PORT}`);
 });

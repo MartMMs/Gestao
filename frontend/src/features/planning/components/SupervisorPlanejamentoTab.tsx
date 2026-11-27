@@ -460,9 +460,9 @@ export function SupervisorPlanejamentoTab(props: SupervisorPlanejamentoTabProps)
   const { data: turnosCadastrados = [] } = useTurnos(token);
   const colaboradorDoGerador = filteredScaleGeneratorEmployees.find((e) => e.id === scaleGeneratorEmployeeId)
     ?? props.activeNonAdminEmployees.find((e) => e.id === scaleGeneratorEmployeeId);
-  const fecharGerador = () => { if (!isSavingPlanning && confirmarSaida(geradorAlterado)) setIsScaleGeneratorOpen(false); };
+  const fecharGerador = () => { if (!isSavingPlanning) confirmarSaida(geradorAlterado, () => setIsScaleGeneratorOpen(false)); };
   const loteAlterado = useAlterado(isBatchEditOpen, [batchSelectedIds, batchTargetDate, batchShiftType, batchShiftTurno, batchShiftDescricao]);
-  const fecharLote = () => { if (!isApplyingBatch && confirmarSaida(loteAlterado)) setIsBatchEditOpen(false); };
+  const fecharLote = () => { if (!isApplyingBatch) confirmarSaida(loteAlterado, () => setIsBatchEditOpen(false)); };
   useModal(isScaleGeneratorOpen, fecharGerador);
   useModal(isBatchEditOpen, fecharLote);
 

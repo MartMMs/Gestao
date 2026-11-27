@@ -66,6 +66,7 @@ model Cliente {
   // LGPD: cliente pediu para não receber lembretes no WhatsApp
   naoReceberWhatsapp Boolean @default(false)
   agendamentos Agendamento[]
+  fichas       FichaPreenchida[]
 }
 
 model Servico {
@@ -236,6 +237,8 @@ model ConfiguracaoEmpresa {
   mensagensLembrete     String[] @default([])
   // Lembrete pergunta "1 = Sim, confirmo / 2 = Não poderei ir" (respostas lidas pelo WhatsApp por QR code)
   lembretePedeConfirmacao Boolean @default(false)
+  // Versão do formulário de anamnese (CampoFormulario). 0 = ainda não inicializado: o primeiro uso cria os campos do segmento
+  formularioVersao     Int      @default(0)
   atualizadoEm         DateTime @updatedAt
 }
 // Trilha de auditoria: cada abertura do histórico (com dados de saúde) de um cliente.
@@ -263,4 +266,47 @@ model RegistroAuditoria {
   criadoEm  DateTime @default(now())
 
   @@index([criadoEm])
+}
+
+// Pergunta do formulário de anamnese configurável (shared/formularioAnamnese.ts). Nunca é apagada: arquivar = ativa false
+model CampoFormulario {
+  id              String   @id @default(uuid())
+  // Slug estável: liga a pergunta aos campos legados da ficha (ex.: "gestante")
+  chave           String   @unique
+  rotulo          String
+  ajuda           String?
+  tipo            String   // 'sim_nao' | 'escolha_unica' | 'multipla_escolha' | 'texto_livre'
+  opcoes          String[] @default([])
+  canal           String   @default("ambos") // 'ambos' | 'apenas_totem' | 'apenas_profissional'
+  obrigatorio     Boolean  @default(false)
+  dadoSensivel    Boolean  @default(true)
+  respostasAlerta String[] @default([])
+  ordem           Int      @default(0)
+  ativa           Boolean  @default(true)
+  // Versão do formulário em que este campo mudou por último
+  versao          Int      @default(1)
+  criadoEm        DateTime @default(now())
+  atualizadoEm    DateTime @updatedAt
+}
+
+// Ficha preenchida: cópia imutável das perguntas e respostas de quando foi salva (renomear ou arquivar um campo
+// depois não muda a ficha antiga). vinculadaAoCliente false = respondida no totem por um cadastro já existente:
+// fica só no agendamento (quem está no totem não provou ser o dono do cadastro)
+model FichaPreenchida {
+  id                String   @id @default(uuid())
+  clienteId         String
+  agendamentoId     String?
+  canal             String   // 'totem' | 'profissional'
+  vinculadaAoCliente Boolean @default(true)
+  versaoFormulario  Int
+  // { versaoFormulario, preenchidoEm, preenchidoPorCanal, itens: [{ campoId, chave, rotulo, tipo, valor, alerta, dadoSensivel }] }
+  snapshot          Json
+  alertas           String[] @default([])
+  preenchidoPorId   String?
+  preenchidoEm      DateTime @default(now())
+
+  cliente Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  @@index([clienteId, preenchidoEm])
+  @@index([agendamentoId])
 }

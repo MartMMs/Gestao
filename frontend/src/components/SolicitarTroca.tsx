@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Appointment } from '../types';
 import { getLocalTodayString } from '../features/appointments/utils/appointmentCore';
-import { MENSAGEM_SAIDA, useModal } from '../hooks/useModal';
+import { confirmarSaida, useModal } from '../hooks/useModal';
 
 // Mesmo limite do servidor (escalaRoutes)
 const LIMITE_MOTIVO = 500;
@@ -106,8 +106,7 @@ export function SolicitarTroca({
   const fecharComConfirmacao = () => {
     if (isSubmitting) return;
     const temConteudo = Boolean(dataOriginal || dataSolicitada || motivo.trim());
-    if (temConteudo && !window.confirm(MENSAGEM_SAIDA)) return;
-    resetAndClose();
+    confirmarSaida(temConteudo, resetAndClose);
   };
 
   return (
